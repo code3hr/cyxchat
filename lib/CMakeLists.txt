@@ -16,12 +16,18 @@ find_package(PkgConfig QUIET)
 
 # Find libcyxwiz (parent project)
 if(NOT TARGET cyxwiz)
+    # Check for CYXWIZ_ROOT (from CI or command line)
+    if(DEFINED CYXWIZ_ROOT AND EXISTS "${CYXWIZ_ROOT}/include/cyxwiz")
+        set(CYXWIZ_INCLUDE_DIR "${CYXWIZ_ROOT}/include")
+        set(CYXWIZ_LIBRARY_DIR "${CYXWIZ_ROOT}/build")
     # Try to find in parent directory
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../include/cyxwiz")
+    elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../include/cyxwiz")
         set(CYXWIZ_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../include")
         set(CYXWIZ_LIBRARY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../build")
+    endif()
 
-        # Find the static library on Windows/Debug
+    if(CYXWIZ_LIBRARY_DIR)
+        # Find the library
         if(WIN32)
             find_library(CYXWIZ_LIBRARY
                 NAMES cyxwiz_static cyxwiz
@@ -32,7 +38,7 @@ if(NOT TARGET cyxwiz)
             )
         else()
             find_library(CYXWIZ_LIBRARY
-                NAMES cyxwiz_static cyxwiz
+                NAMES cyxwiz libcyxwiz cyxwiz_static
                 PATHS "${CYXWIZ_LIBRARY_DIR}"
             )
         endif()

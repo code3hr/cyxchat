@@ -36,6 +36,24 @@ jobs:
       - name: Clone cyxwiz
         run: |
           git clone https://github.com/code3hr/conspiracy.git ../cyxwiz
+
+      - name: Build cyxwiz (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          cd ../cyxwiz
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --config Release
+
+      - name: Build cyxwiz (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          cd ../cyxwiz
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCYXWIZ_TRANSPORT_BLUETOOTH=OFF
+          cmake --build build --config Release
+
+      - name: Build cyxwiz (Windows)
+        if: runner.os == 'Windows'
+        run: |
           cd ../cyxwiz
           cmake -B build -DCMAKE_BUILD_TYPE=Release
           cmake --build build --config Release
@@ -43,7 +61,7 @@ jobs:
       - name: Configure CMake
         run: |
           cd lib
-          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCYXWIZ_ROOT="${{ github.workspace }}/../cyxwiz"
 
       - name: Build
         run: |
@@ -195,9 +213,12 @@ jobs:
           sdkmanager --install "ndk;25.2.9519653"
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/25.2.9519653" >> $GITHUB_ENV
 
-      - name: Clone cyxwiz
+      - name: Clone and build cyxwiz
         run: |
           git clone https://github.com/code3hr/conspiracy.git ../cyxwiz
+          cd ../cyxwiz
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCYXWIZ_TRANSPORT_BLUETOOTH=OFF -DCYXWIZ_TRANSPORT_WIFI=OFF
+          cmake --build build --config Release
 
       - name: Build native libraries for Android
         run: |
@@ -277,11 +298,11 @@ jobs:
       - name: Install libsodium
         run: brew install libsodium
 
-      - name: Clone cyxwiz
+      - name: Clone and build cyxwiz
         run: |
           git clone https://github.com/code3hr/conspiracy.git ../cyxwiz
           cd ../cyxwiz
-          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCYXWIZ_TRANSPORT_BLUETOOTH=OFF
           cmake --build build --config Release
 
       - name: Build native library for iOS
