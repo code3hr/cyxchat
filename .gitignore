@@ -1,0 +1,49 @@
+# Build directories
+build/
+lib/build/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Flutter/Dart
+app/.dart_tool/
+app/.packages
+app/.pub-cache/
+app/.pub/
+app/build/
+app/.flutter-plugins
+app/.flutter-plugins-dependencies
+
+# macOS
+.DS_Store
+*.dSYM/
+
+# Windows
+Thumbs.db
+*.exe
+*.dll
+*.lib
+*.pdb
+*.exp
+*.ilk
+*.obj
+
+# Compiled libraries
+*.so
+*.dylib
+*.a
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+compile_commands.json
+
+# Test output
+Testing/
+CTestTestfile.cmake
