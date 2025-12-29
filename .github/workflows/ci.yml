@@ -179,6 +179,11 @@ jobs:
       - name: Install libsodium
         run: sudo apt-get update && sudo apt-get install -y libsodium-dev
 
+      - name: Add Android platform support
+        run: |
+          cd app
+          flutter create --platforms=android .
+
       - name: Clone and build cyxwiz
         run: |
           git clone https://github.com/code3hr/conspiracy.git ../cyxwiz
@@ -265,6 +270,11 @@ jobs:
 
       - name: Install libsodium
         run: brew install libsodium
+
+      - name: Add iOS platform support
+        run: |
+          cd app
+          flutter create --platforms=ios .
 
       - name: Clone and build cyxwiz
         run: |

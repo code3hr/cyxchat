@@ -198,6 +198,11 @@ jobs:
           sdkmanager --install "ndk;25.2.9519653"
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/25.2.9519653" >> $GITHUB_ENV
 
+      - name: Add Android platform support
+        run: |
+          cd app
+          flutter create --platforms=android .
+
       - name: Clone and build cyxwiz
         run: |
           git clone https://github.com/code3hr/conspiracy.git ../cyxwiz
@@ -285,6 +290,11 @@ jobs:
 
       - name: Install libsodium
         run: brew install libsodium
+
+      - name: Add iOS platform support
+        run: |
+          cd app
+          flutter create --platforms=ios .
 
       - name: Clone and build cyxwiz
         run: |
