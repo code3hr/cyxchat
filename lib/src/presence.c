@@ -61,6 +61,7 @@ static cyxchat_presence_info_t* find_presence(
     return NULL;
 }
 
+CYXWIZ_MAYBE_UNUSED
 static cyxchat_presence_info_t* add_presence(
     cyxchat_presence_ctx_t *ctx,
     const cyxwiz_node_id_t *node_id

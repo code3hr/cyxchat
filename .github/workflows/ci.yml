@@ -313,10 +313,10 @@ jobs:
           cd app
           flutter pub get
 
-      - name: Build iOS (no codesign)
+      - name: Build iOS (simulator only - no codesign for device)
         run: |
           cd app
-          flutter build ios --release --no-codesign
+          flutter build ios --release --simulator
 
       - name: Upload iOS build
         uses: actions/upload-artifact@v4
