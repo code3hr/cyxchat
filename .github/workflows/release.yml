@@ -40,7 +40,7 @@ jobs:
       - name: Build cyxwiz
         run: |
           cd ../cyxwiz
-          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCYXWIZ_TRANSPORT_BLUETOOTH=OFF -DCYXWIZ_TRANSPORT_WIFI=OFF -DCYXWIZ_TRANSPORT_LORA=OFF
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCYXWIZ_TRANSPORT_BLUETOOTH=OFF -DCYXWIZ_TRANSPORT_WIFI=OFF -DCYXWIZ_TRANSPORT_LORA=OFF
           cmake --build build --config Release
 
       - name: Configure CMake
