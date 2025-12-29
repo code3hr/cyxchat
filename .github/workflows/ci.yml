@@ -198,7 +198,8 @@ jobs:
             -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM=android-21 \
-            -DCMAKE_BUILD_TYPE=Release
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCYXWIZ_ROOT="${{ github.workspace }}/../cyxwiz"
           cmake --build build-android-arm64
           cp build-android-arm64/*.so ../app/android/app/src/main/jniLibs/arm64-v8a/ || true
 
@@ -207,7 +208,8 @@ jobs:
             -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=armeabi-v7a \
             -DANDROID_PLATFORM=android-21 \
-            -DCMAKE_BUILD_TYPE=Release
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCYXWIZ_ROOT="${{ github.workspace }}/../cyxwiz"
           cmake --build build-android-arm
           cp build-android-arm/*.so ../app/android/app/src/main/jniLibs/armeabi-v7a/ || true
 
@@ -216,7 +218,8 @@ jobs:
             -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=x86_64 \
             -DANDROID_PLATFORM=android-21 \
-            -DCMAKE_BUILD_TYPE=Release
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCYXWIZ_ROOT="${{ github.workspace }}/../cyxwiz"
           cmake --build build-android-x86_64
           cp build-android-x86_64/*.so ../app/android/app/src/main/jniLibs/x86_64/ || true
 
@@ -281,7 +284,8 @@ jobs:
             -DCMAKE_SYSTEM_NAME=iOS \
             -DCMAKE_OSX_SYSROOT=iphonesimulator \
             -DCMAKE_OSX_ARCHITECTURES=x86_64 \
-            -DCMAKE_BUILD_TYPE=Release
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCYXWIZ_ROOT="${{ github.workspace }}/../cyxwiz"
           cmake --build build-ios-sim --config Release || true
 
           # Build for iOS device (arm64)
@@ -290,7 +294,8 @@ jobs:
             -DCMAKE_SYSTEM_NAME=iOS \
             -DCMAKE_OSX_SYSROOT=iphoneos \
             -DCMAKE_OSX_ARCHITECTURES=arm64 \
-            -DCMAKE_BUILD_TYPE=Release
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCYXWIZ_ROOT="${{ github.workspace }}/../cyxwiz"
           cmake --build build-ios-device --config Release || true
 
       - name: Get Flutter dependencies
