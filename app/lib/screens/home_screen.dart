@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:provider/provider.dart' as provider;
 import '../providers/conversation_provider.dart';
 import '../providers/identity_provider.dart';
+import '../providers/connection_provider.dart';
+import '../ffi/bindings.dart';
 import '../models/models.dart';
 import 'chat_screen.dart';
 import 'contacts_screen.dart';
@@ -68,6 +71,8 @@ class _ChatsTab extends ConsumerWidget {
       appBar: AppBar(
         title: const Text('CyxChat'),
         actions: [
+          // Network status indicator
+          const _NetworkStatusIndicator(),
           IconButton(
             icon: const Icon(Icons.search),
             onPressed: () {
@@ -267,6 +272,128 @@ class _ConversationTile extends ConsumerWidget {
           ),
         );
       },
+    );
+  }
+}
+
+/// Network status indicator widget
+class _NetworkStatusIndicator extends StatelessWidget {
+  const _NetworkStatusIndicator();
+
+  @override
+  Widget build(BuildContext context) {
+    return provider.Consumer<ConnectionProvider>(
+      builder: (context, connection, child) {
+        if (!connection.initialized) {
+          return const SizedBox.shrink();
+        }
+
+        final status = connection.networkStatus;
+        final Color color;
+        final IconData icon;
+        final String tooltip;
+
+        if (!status.stunComplete) {
+          color = Colors.orange;
+          icon = Icons.wifi_find;
+          tooltip = 'Discovering network...';
+        } else if (status.activeConnections == 0) {
+          color = Colors.grey;
+          icon = Icons.wifi_off;
+          tooltip = 'No active connections';
+        } else if (status.relayConnections > 0 &&
+            status.relayConnections == status.activeConnections) {
+          color = Colors.amber;
+          icon = Icons.swap_horiz;
+          tooltip = '${status.activeConnections} connections (all relayed)';
+        } else if (status.relayConnections > 0) {
+          color = Colors.lightGreen;
+          icon = Icons.wifi;
+          tooltip =
+              '${status.activeConnections} connections (${status.relayConnections} relayed)';
+        } else {
+          color = Colors.green;
+          icon = Icons.wifi;
+          tooltip = '${status.activeConnections} direct connections';
+        }
+
+        return Tooltip(
+          message: tooltip,
+          child: IconButton(
+            icon: Icon(icon, color: color),
+            onPressed: () => _showNetworkDetails(context, status),
+          ),
+        );
+      },
+    );
+  }
+
+  void _showNetworkDetails(BuildContext context, NetworkStatus status) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Network Status'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _StatusRow(
+              label: 'Public Address',
+              value: status.publicAddress ?? 'Discovering...',
+            ),
+            _StatusRow(
+              label: 'NAT Type',
+              value: status.natTypeName,
+            ),
+            _StatusRow(
+              label: 'Active Connections',
+              value: status.activeConnections.toString(),
+            ),
+            _StatusRow(
+              label: 'Direct',
+              value: status.directConnections.toString(),
+            ),
+            _StatusRow(
+              label: 'Relayed',
+              value: status.relayConnections.toString(),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StatusRow extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _StatusRow({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: const TextStyle(fontWeight: FontWeight.w500)),
+          const SizedBox(width: 16),
+          Flexible(
+            child: Text(
+              value,
+              style: TextStyle(color: Colors.grey[600]),
+              textAlign: TextAlign.end,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

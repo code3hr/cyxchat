@@ -1,0 +1,301 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-lib:
+    name: Build Library (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install libsodium (Ubuntu)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libsodium-dev
+
+      - name: Install libsodium (macOS)
+        if: runner.os == 'macOS'
+        run: brew install libsodium
+
+      - name: Install libsodium (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          vcpkg install libsodium:x64-windows
+          echo "SODIUM_ROOT=$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows" >> $env:GITHUB_ENV
+
+      - name: Clone cyxwiz
+        run: |
+          git clone https://github.com/code3hr/conspiracy.git ../cyxwiz
+          cd ../cyxwiz
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --config Release
+
+      - name: Configure CMake
+        run: |
+          cd lib
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: |
+          cd lib
+          cmake --build build --config Release
+
+      - name: Run Tests
+        run: |
+          cd lib/build
+          ctest -C Release --output-on-failure
+
+      - name: Upload artifacts (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: cyxchat-windows
+          path: |
+            lib/build/Release/*.dll
+            lib/build/Release/*.lib
+
+      - name: Upload artifacts (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: cyxchat-linux
+          path: lib/build/*.so*
+
+      - name: Upload artifacts (macOS)
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: cyxchat-macos
+          path: lib/build/*.dylib
+
+  build-app-desktop:
+    name: Build App (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    needs: build-lib
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux
+          - os: macos-latest
+            target: macos
+          - os: windows-latest
+            target: windows
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.0'
+          channel: 'stable'
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libgtk-3-dev
+
+      - name: Download library artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: cyxchat-${{ matrix.target }}
+          path: app/native/
+
+      - name: Get dependencies
+        run: |
+          cd app
+          flutter pub get
+
+      - name: Build
+        run: |
+          cd app
+          flutter build ${{ matrix.target }} --release
+
+      - name: Upload app artifact (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: cyxchat-app-windows
+          path: app/build/windows/x64/runner/Release/
+
+      - name: Upload app artifact (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: cyxchat-app-linux
+          path: app/build/linux/x64/release/bundle/
+
+      - name: Upload app artifact (macOS)
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: cyxchat-app-macos
+          path: app/build/macos/Build/Products/Release/
+
+  build-app-android:
+    name: Build App (Android)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.0'
+          channel: 'stable'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK
+        run: |
+          sdkmanager --install "ndk;25.2.9519653"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/25.2.9519653" >> $GITHUB_ENV
+
+      - name: Clone cyxwiz
+        run: |
+          git clone https://github.com/code3hr/conspiracy.git ../cyxwiz
+
+      - name: Build native libraries for Android
+        run: |
+          cd lib
+          mkdir -p ../app/android/app/src/main/jniLibs/arm64-v8a
+          mkdir -p ../app/android/app/src/main/jniLibs/armeabi-v7a
+          mkdir -p ../app/android/app/src/main/jniLibs/x86_64
+
+          # Build for arm64-v8a
+          cmake -B build-android-arm64 \
+            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-21 \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-android-arm64
+          cp build-android-arm64/*.so ../app/android/app/src/main/jniLibs/arm64-v8a/ || true
+
+          # Build for armeabi-v7a
+          cmake -B build-android-arm \
+            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=armeabi-v7a \
+            -DANDROID_PLATFORM=android-21 \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-android-arm
+          cp build-android-arm/*.so ../app/android/app/src/main/jniLibs/armeabi-v7a/ || true
+
+          # Build for x86_64 (emulator)
+          cmake -B build-android-x86_64 \
+            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=x86_64 \
+            -DANDROID_PLATFORM=android-21 \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-android-x86_64
+          cp build-android-x86_64/*.so ../app/android/app/src/main/jniLibs/x86_64/ || true
+
+      - name: Get Flutter dependencies
+        run: |
+          cd app
+          flutter pub get
+
+      - name: Build APK
+        run: |
+          cd app
+          flutter build apk --release
+
+      - name: Build App Bundle
+        run: |
+          cd app
+          flutter build appbundle --release
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: cyxchat-app-android-apk
+          path: app/build/app/outputs/flutter-apk/app-release.apk
+
+      - name: Upload App Bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: cyxchat-app-android-aab
+          path: app/build/app/outputs/bundle/release/app-release.aab
+
+  build-app-ios:
+    name: Build App (iOS)
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.0'
+          channel: 'stable'
+
+      - name: Install libsodium
+        run: brew install libsodium
+
+      - name: Clone cyxwiz
+        run: |
+          git clone https://github.com/code3hr/conspiracy.git ../cyxwiz
+          cd ../cyxwiz
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --config Release
+
+      - name: Build native library for iOS
+        run: |
+          cd lib
+          mkdir -p ../app/ios/Frameworks
+
+          # Build for iOS simulator (x86_64)
+          cmake -B build-ios-sim \
+            -G Xcode \
+            -DCMAKE_SYSTEM_NAME=iOS \
+            -DCMAKE_OSX_SYSROOT=iphonesimulator \
+            -DCMAKE_OSX_ARCHITECTURES=x86_64 \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-ios-sim --config Release || true
+
+          # Build for iOS device (arm64)
+          cmake -B build-ios-device \
+            -G Xcode \
+            -DCMAKE_SYSTEM_NAME=iOS \
+            -DCMAKE_OSX_SYSROOT=iphoneos \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-ios-device --config Release || true
+
+      - name: Get Flutter dependencies
+        run: |
+          cd app
+          flutter pub get
+
+      - name: Build iOS (no codesign)
+        run: |
+          cd app
+          flutter build ios --release --no-codesign
+
+      - name: Upload iOS build
+        uses: actions/upload-artifact@v4
+        with:
+          name: cyxchat-app-ios
+          path: app/build/ios/iphoneos/Runner.app

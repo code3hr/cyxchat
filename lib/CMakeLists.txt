@@ -112,6 +112,8 @@ set(CYXCHAT_SOURCES
     src/group.c
     src/file.c
     src/presence.c
+    src/connection.c
+    src/relay.c
 )
 
 # Header files
@@ -123,6 +125,8 @@ set(CYXCHAT_HEADERS
     include/cyxchat/group.h
     include/cyxchat/file.h
     include/cyxchat/presence.h
+    include/cyxchat/connection.h
+    include/cyxchat/relay.h
 )
 
 # Shared library

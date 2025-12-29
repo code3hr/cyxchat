@@ -1,0 +1,350 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-lib:
+    name: Build Library (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install libsodium (Ubuntu)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libsodium-dev
+
+      - name: Install libsodium (macOS)
+        if: runner.os == 'macOS'
+        run: brew install libsodium
+
+      - name: Install libsodium (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          vcpkg install libsodium:x64-windows
+          echo "SODIUM_ROOT=$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows" >> $env:GITHUB_ENV
+
+      - name: Clone cyxwiz
+        run: |
+          git clone https://github.com/code3hr/conspiracy.git ../cyxwiz
+          cd ../cyxwiz
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --config Release
+
+      - name: Configure CMake
+        run: |
+          cd lib
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: |
+          cd lib
+          cmake --build build --config Release
+
+      - name: Run Tests
+        run: |
+          cd lib/build
+          ctest -C Release --output-on-failure
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          mkdir dist
+          cp lib/build/Release/*.dll dist/
+          cp lib/build/Release/*.lib dist/
+          cp -r lib/include dist/
+          Compress-Archive -Path dist/* -DestinationPath cyxchat-lib-windows-x64.zip
+
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir dist
+          cp lib/build/*.so* dist/
+          cp -r lib/include dist/
+          tar -czvf cyxchat-lib-linux-x64.tar.gz -C dist .
+
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          mkdir dist
+          cp lib/build/*.dylib dist/
+          cp -r lib/include dist/
+          tar -czvf cyxchat-lib-macos-x64.tar.gz -C dist .
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: lib-${{ matrix.os }}
+          path: cyxchat-lib-*.*
+
+  build-app-desktop:
+    name: Build App (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    needs: build-lib
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux
+            artifact: lib-ubuntu-latest
+          - os: macos-latest
+            target: macos
+            artifact: lib-macos-latest
+          - os: windows-latest
+            target: windows
+            artifact: lib-windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.0'
+          channel: 'stable'
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libgtk-3-dev
+
+      - name: Download library
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: .
+
+      - name: Extract library (Linux/macOS)
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p app/native
+          tar -xzf cyxchat-lib-*.tar.gz -C app/native/
+
+      - name: Extract library (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          mkdir -p app/native
+          Expand-Archive -Path cyxchat-lib-*.zip -DestinationPath app/native/
+
+      - name: Get dependencies
+        run: |
+          cd app
+          flutter pub get
+
+      - name: Build
+        run: |
+          cd app
+          flutter build ${{ matrix.target }} --release
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          Compress-Archive -Path app/build/windows/x64/runner/Release/* -DestinationPath cyxchat-windows-x64.zip
+
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          tar -czvf cyxchat-linux-x64.tar.gz -C app/build/linux/x64/release/bundle .
+
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          tar -czvf cyxchat-macos-x64.tar.gz -C app/build/macos/Build/Products/Release .
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-${{ matrix.os }}
+          path: cyxchat-*.*
+
+  build-app-android:
+    name: Build App (Android)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.0'
+          channel: 'stable'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK
+        run: |
+          sdkmanager --install "ndk;25.2.9519653"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/25.2.9519653" >> $GITHUB_ENV
+
+      - name: Clone cyxwiz
+        run: |
+          git clone https://github.com/code3hr/conspiracy.git ../cyxwiz
+
+      - name: Build native libraries for Android
+        run: |
+          cd lib
+          mkdir -p ../app/android/app/src/main/jniLibs/arm64-v8a
+          mkdir -p ../app/android/app/src/main/jniLibs/armeabi-v7a
+          mkdir -p ../app/android/app/src/main/jniLibs/x86_64
+
+          # Build for arm64-v8a
+          cmake -B build-android-arm64 \
+            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-21 \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-android-arm64
+          cp build-android-arm64/*.so ../app/android/app/src/main/jniLibs/arm64-v8a/ || true
+
+          # Build for armeabi-v7a
+          cmake -B build-android-arm \
+            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=armeabi-v7a \
+            -DANDROID_PLATFORM=android-21 \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-android-arm
+          cp build-android-arm/*.so ../app/android/app/src/main/jniLibs/armeabi-v7a/ || true
+
+          # Build for x86_64 (emulator)
+          cmake -B build-android-x86_64 \
+            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=x86_64 \
+            -DANDROID_PLATFORM=android-21 \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-android-x86_64
+          cp build-android-x86_64/*.so ../app/android/app/src/main/jniLibs/x86_64/ || true
+
+      - name: Get Flutter dependencies
+        run: |
+          cd app
+          flutter pub get
+
+      - name: Build APK
+        run: |
+          cd app
+          flutter build apk --release
+
+      - name: Build App Bundle
+        run: |
+          cd app
+          flutter build appbundle --release
+
+      - name: Rename artifacts
+        run: |
+          mv app/build/app/outputs/flutter-apk/app-release.apk cyxchat-android.apk
+          mv app/build/app/outputs/bundle/release/app-release.aab cyxchat-android.aab
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-android
+          path: |
+            cyxchat-android.apk
+            cyxchat-android.aab
+
+  build-app-ios:
+    name: Build App (iOS)
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.0'
+          channel: 'stable'
+
+      - name: Install libsodium
+        run: brew install libsodium
+
+      - name: Clone cyxwiz
+        run: |
+          git clone https://github.com/code3hr/conspiracy.git ../cyxwiz
+          cd ../cyxwiz
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --config Release
+
+      - name: Build native library for iOS
+        run: |
+          cd lib
+          mkdir -p ../app/ios/Frameworks
+
+          # Build for iOS device (arm64)
+          cmake -B build-ios-device \
+            -G Xcode \
+            -DCMAKE_SYSTEM_NAME=iOS \
+            -DCMAKE_OSX_SYSROOT=iphoneos \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-ios-device --config Release || true
+
+      - name: Get Flutter dependencies
+        run: |
+          cd app
+          flutter pub get
+
+      - name: Build iOS (no codesign)
+        run: |
+          cd app
+          flutter build ios --release --no-codesign
+
+      - name: Package iOS
+        run: |
+          cd app/build/ios/iphoneos
+          zip -r ../../../../cyxchat-ios.zip Runner.app
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-ios
+          path: cyxchat-ios.zip
+
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: [build-lib, build-app-desktop, build-app-android, build-app-ios]
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: List artifacts
+        run: find artifacts -type f
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            artifacts/**/*.zip
+            artifacts/**/*.tar.gz
+            artifacts/**/*.apk
+            artifacts/**/*.aab
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
