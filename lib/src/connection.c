@@ -190,6 +190,7 @@ static void on_transport_recv(cyxwiz_transport_t *transport,
                               const uint8_t *data, size_t len,
                               void *user_data)
 {
+    (void)transport;  /* Unused - we use the transport from context */
     cyxchat_conn_ctx_t *ctx = (cyxchat_conn_ctx_t*)user_data;
 
     /* Update peer connection state */
@@ -225,6 +226,7 @@ static void on_peer_discovered(cyxwiz_transport_t *transport,
                                const cyxwiz_peer_info_t *peer,
                                void *user_data)
 {
+    (void)transport;  /* Unused - we use the transport from context */
     cyxchat_conn_ctx_t *ctx = (cyxchat_conn_ctx_t*)user_data;
 
     /* Check if we have a pending connection request for this peer */
