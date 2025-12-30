@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../main.dart';
 import '../providers/identity_provider.dart';
+import '../providers/dns_provider.dart';
+import '../services/identity_service.dart';
 import 'onboarding_screen.dart';
 
 class SettingsScreen extends ConsumerWidget {
@@ -775,16 +777,17 @@ class _StatusChip extends StatelessWidget {
 }
 
 /// Username registration section
-class _UsernameSection extends StatefulWidget {
+class _UsernameSection extends ConsumerStatefulWidget {
   const _UsernameSection();
 
   @override
-  State<_UsernameSection> createState() => _UsernameSectionState();
+  ConsumerState<_UsernameSection> createState() => _UsernameSectionState();
 }
 
-class _UsernameSectionState extends State<_UsernameSection> {
+class _UsernameSectionState extends ConsumerState<_UsernameSection> {
   final _usernameController = TextEditingController();
   bool _isRegistering = false;
+  bool _isCheckingName = false;
   String? _error;
   String? _registeredName;
 
@@ -982,8 +985,9 @@ class _UsernameSectionState extends State<_UsernameSection> {
     );
   }
 
+
   Future<void> _registerUsername() async {
-    final username = _usernameController.text.trim();
+    final username = _usernameController.text.trim().toLowerCase();
 
     if (username.isEmpty) {
       setState(() => _error = 'Please enter a username');
@@ -997,29 +1001,75 @@ class _UsernameSectionState extends State<_UsernameSection> {
     }
 
     setState(() {
+      _isCheckingName = true;
       _isRegistering = true;
       _error = null;
     });
 
-    // Placeholder - will connect to DNS when FFI is ready
-    await Future.delayed(const Duration(seconds: 1));
+    try {
+      // Get current identity to compare node IDs
+      final identity = IdentityService.instance.currentIdentity;
+      if (identity == null) {
+        setState(() {
+          _isCheckingName = false;
+          _isRegistering = false;
+          _error = 'Identity not available';
+        });
+        return;
+      }
 
-    if (!mounted) return;
+      // Check if username is already taken via DNS lookup
+      final dnsProvider = ref.read(dnsNotifierProvider);
+      final existingRecord = await dnsProvider.lookup(username);
 
-    setState(() {
-      _isRegistering = false;
-      _registeredName = username;
-    });
+      if (!mounted) return;
 
-    _usernameController.clear();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Registered as $username.cyx (local only)'),
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
-      ),
-    );
+      // If name exists and belongs to someone else, reject
+      if (existingRecord != null && existingRecord.nodeId != identity.nodeId) {
+        setState(() {
+          _isCheckingName = false;
+          _isRegistering = false;
+          _error = 'Username "$username" is already taken';
+        });
+        return;
+      }
+
+      setState(() => _isCheckingName = false);
+
+      // Proceed with registration
+      final success = await dnsProvider.register(username);
+
+      if (!mounted) return;
+
+      if (success) {
+        setState(() {
+          _isRegistering = false;
+          _registeredName = username;
+        });
+
+        _usernameController.clear();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Registered as $username.cyx'),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+        );
+      } else {
+        setState(() {
+          _isRegistering = false;
+          _error = 'Failed to register username';
+        });
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isCheckingName = false;
+        _isRegistering = false;
+        _error = 'Error: ${e.toString()}';
+      });
+    }
   }
 }

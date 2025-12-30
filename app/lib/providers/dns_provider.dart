@@ -1,8 +1,14 @@
 import 'dart:async';
 import 'dart:ffi';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:ffi/ffi.dart';
 import '../ffi/bindings.dart';
+
+/// Riverpod provider for DNS functionality
+final dnsNotifierProvider = ChangeNotifierProvider<DnsProvider>((ref) {
+  return DnsProvider();
+});
 
 /// DNS record resolved from the network
 class DnsRecord {
@@ -37,8 +43,6 @@ class PendingLookup {
     required this.completer,
   });
 }
-
-/// DNS provider for name registration and lookup
 class DnsProvider extends ChangeNotifier {
   final CyxChatBindings _bindings = CyxChatBindings.instance;
 
