@@ -128,7 +128,7 @@ class CyxChatApp extends ConsumerWidget {
         ),
         iconTheme: IconThemeData(color: AppColors.textDark),
       ),
-      cardTheme: CardTheme(
+      cardTheme: CardThemeData(
         elevation: 0,
         color: AppColors.bgDarkSecondary,
         shape: RoundedRectangleBorder(
@@ -240,7 +240,7 @@ class CyxChatApp extends ConsumerWidget {
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       ),
-      dialogTheme: DialogTheme(
+      dialogTheme: DialogThemeData(
         backgroundColor: AppColors.bgDarkSecondary,
         elevation: 8,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
@@ -361,7 +361,7 @@ class CyxChatApp extends ConsumerWidget {
           letterSpacing: -0.5,
         ),
       ),
-      cardTheme: CardTheme(
+      cardTheme: CardThemeData(
         elevation: 0,
         color: AppColors.bgLightSecondary,
         shape: RoundedRectangleBorder(
