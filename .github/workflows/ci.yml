@@ -26,7 +26,11 @@ jobs:
 
       - name: Install libsodium (macOS)
         if: runner.os == 'macOS'
-        run: brew install libsodium
+        run: |
+          brew install libsodium
+          echo "PKG_CONFIG_PATH=$(brew --prefix libsodium)/lib/pkgconfig:$PKG_CONFIG_PATH" >> $GITHUB_ENV
+          echo "LDFLAGS=-L$(brew --prefix libsodium)/lib" >> $GITHUB_ENV
+          echo "CPPFLAGS=-I$(brew --prefix libsodium)/include" >> $GITHUB_ENV
 
       - name: Install libsodium (Windows)
         if: runner.os == 'Windows'
