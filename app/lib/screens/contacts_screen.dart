@@ -4,6 +4,7 @@ import '../models/contact.dart';
 import '../providers/conversation_provider.dart';
 import 'chat_screen.dart';
 import 'add_contact_screen.dart';
+import 'mail_compose_screen.dart';
 
 class ContactsScreen extends ConsumerWidget {
   final bool selectMode;
@@ -186,6 +187,22 @@ class _ContactTile extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              ListTile(
+                leading: const Icon(Icons.mail_outline),
+                title: const Text('Send Email'),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => MailComposeScreen(
+                        toNodeId: contact.nodeId,
+                        toName: contact.displayText,
+                      ),
+                    ),
+                  );
+                },
+              ),
               ListTile(
                 leading: const Icon(Icons.verified_outlined),
                 title: Text(contact.verified ? 'Unverify' : 'Verify'),

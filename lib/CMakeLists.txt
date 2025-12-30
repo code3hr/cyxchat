@@ -120,6 +120,8 @@ set(CYXCHAT_SOURCES
     src/presence.c
     src/connection.c
     src/relay.c
+    src/dns.c
+    src/mail.c
 )
 
 # Header files
@@ -133,6 +135,8 @@ set(CYXCHAT_HEADERS
     include/cyxchat/presence.h
     include/cyxchat/connection.h
     include/cyxchat/relay.h
+    include/cyxchat/dns.h
+    include/cyxchat/mail.h
 )
 
 # Shared library
@@ -149,7 +153,7 @@ if(CYXCHAT_BUILD_SHARED)
     target_compile_definitions(cyxchat PRIVATE CYXCHAT_EXPORTS CYXWIZ_HAS_CRYPTO)
 
     if(WIN32)
-        target_compile_definitions(cyxchat PRIVATE _CRT_SECURE_NO_WARNINGS)
+        target_compile_definitions(cyxchat PRIVATE _CRT_SECURE_NO_WARNINGS SODIUM_STATIC)
     else()
         target_compile_options(cyxchat PRIVATE -Wall -Wextra -Werror)
     endif()

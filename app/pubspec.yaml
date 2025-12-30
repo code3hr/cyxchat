@@ -18,6 +18,7 @@ dependencies:
 
   # Database
   sqflite: ^2.3.0
+  sqflite_common_ffi: ^2.3.0
   path: ^1.8.3
   path_provider: ^2.1.0
 
@@ -36,6 +37,9 @@ dependencies:
   # Secure storage
   flutter_secure_storage: ^9.0.0
 
+  # File picker (for attachments)
+  file_picker: ^6.1.1
+
   # UI components
   cupertino_icons: ^1.0.6
 
@@ -50,6 +54,7 @@ flutter:
   uses-material-design: true
 
   assets:
+    - assets/
     - assets/icons/
     - assets/images/
     - assets/fonts/

@@ -19,7 +19,7 @@ class DatabaseService {
 
     return await openDatabase(
       path,
-      version: 1,
+      version: 2,
       onCreate: _createDatabase,
       onUpgrade: _upgradeDatabase,
     );
@@ -144,10 +144,114 @@ class DatabaseService {
         FOREIGN KEY (message_id) REFERENCES messages(id)
       )
     ''');
+
+    // Create email tables
+    await _createEmailTables(db);
+  }
+
+  /// Create email/mail tables
+  Future<void> _createEmailTables(Database db) async {
+    // Email folders (Inbox, Sent, Drafts, Archive, Trash, Spam, Custom)
+    await db.execute('''
+      CREATE TABLE email_folders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        folder_type INTEGER NOT NULL,
+        parent_id INTEGER,
+        unread_count INTEGER DEFAULT 0,
+        total_count INTEGER DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        FOREIGN KEY (parent_id) REFERENCES email_folders(id)
+      )
+    ''');
+
+    // Email messages
+    await db.execute('''
+      CREATE TABLE email_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        mail_id TEXT UNIQUE NOT NULL,
+        folder_id INTEGER NOT NULL,
+        from_node_id TEXT NOT NULL,
+        from_name TEXT,
+        to_addrs TEXT NOT NULL,
+        cc_addrs TEXT,
+        subject TEXT,
+        body TEXT,
+        timestamp INTEGER NOT NULL,
+        in_reply_to TEXT,
+        thread_id TEXT,
+        flags INTEGER DEFAULT 0,
+        status INTEGER DEFAULT 0,
+        signature_valid INTEGER DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        FOREIGN KEY (folder_id) REFERENCES email_folders(id)
+      )
+    ''');
+
+    // Email attachments
+    await db.execute('''
+      CREATE TABLE email_attachments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        mail_id TEXT NOT NULL,
+        file_id TEXT NOT NULL,
+        filename TEXT NOT NULL,
+        mime_type TEXT,
+        file_size INTEGER NOT NULL,
+        file_hash TEXT,
+        disposition INTEGER DEFAULT 0,
+        storage_type INTEGER DEFAULT 0,
+        content_id TEXT,
+        inline_data BLOB,
+        download_state INTEGER DEFAULT 0,
+        local_path TEXT,
+        FOREIGN KEY (mail_id) REFERENCES email_messages(mail_id)
+      )
+    ''');
+
+    // Indexes for email
+    await db.execute(
+      'CREATE INDEX idx_email_folder ON email_messages(folder_id, timestamp DESC)',
+    );
+    await db.execute(
+      'CREATE INDEX idx_email_thread ON email_messages(thread_id)',
+    );
+    await db.execute(
+      'CREATE INDEX idx_email_from ON email_messages(from_node_id)',
+    );
+    await db.execute(
+      'CREATE INDEX idx_email_attachments ON email_attachments(mail_id)',
+    );
+
+    // Insert default folders
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final defaultFolders = [
+      {'name': 'Inbox', 'type': 0},
+      {'name': 'Sent', 'type': 1},
+      {'name': 'Drafts', 'type': 2},
+      {'name': 'Archive', 'type': 3},
+      {'name': 'Trash', 'type': 4},
+      {'name': 'Spam', 'type': 5},
+    ];
+
+    for (final folder in defaultFolders) {
+      await db.insert('email_folders', {
+        'name': folder['name'],
+        'folder_type': folder['type'],
+        'unread_count': 0,
+        'total_count': 0,
+        'created_at': now,
+        'updated_at': now,
+      });
+    }
   }
 
   Future<void> _upgradeDatabase(Database db, int oldVersion, int newVersion) async {
-    // Handle future migrations
+    // Handle migrations
+    if (oldVersion < 2) {
+      // Add email tables in version 2
+      await _createEmailTables(db);
+    }
   }
 
   Future<void> close() async {
@@ -159,6 +263,9 @@ class DatabaseService {
   /// Clear all data (for logout)
   Future<void> clearAllData() async {
     final db = await database;
+    await db.delete('email_attachments');
+    await db.delete('email_messages');
+    await db.delete('email_folders');
     await db.delete('offline_queue');
     await db.delete('group_members');
     await db.delete('groups');
@@ -167,5 +274,32 @@ class DatabaseService {
     await db.delete('contacts');
     await db.delete('identity');
     await db.delete('settings');
+
+    // Re-create default email folders
+    await _insertDefaultEmailFolders(db);
+  }
+
+  /// Insert default email folders
+  Future<void> _insertDefaultEmailFolders(Database db) async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final defaultFolders = [
+      {'name': 'Inbox', 'type': 0},
+      {'name': 'Sent', 'type': 1},
+      {'name': 'Drafts', 'type': 2},
+      {'name': 'Archive', 'type': 3},
+      {'name': 'Trash', 'type': 4},
+      {'name': 'Spam', 'type': 5},
+    ];
+
+    for (final folder in defaultFolders) {
+      await db.insert('email_folders', {
+        'name': folder['name'],
+        'folder_type': folder['type'],
+        'unread_count': 0,
+        'total_count': 0,
+        'created_at': now,
+        'updated_at': now,
+      });
+    }
   }
 }

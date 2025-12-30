@@ -76,6 +76,69 @@ extern "C" {
 #define CYXCHAT_MSG_PRESENCE        0x30    /* Presence update */
 #define CYXCHAT_MSG_PRESENCE_REQ    0x31    /* Request presence */
 
+/* DNS Messages (0xD0-0xD9) - CyxChat internal DNS */
+#define CYXCHAT_MSG_DNS_REGISTER      0xD0  /* Register name with signature */
+#define CYXCHAT_MSG_DNS_REGISTER_ACK  0xD1  /* Registration confirmed */
+#define CYXCHAT_MSG_DNS_LOOKUP        0xD2  /* Query name */
+#define CYXCHAT_MSG_DNS_RESPONSE      0xD3  /* Query response */
+#define CYXCHAT_MSG_DNS_UPDATE        0xD4  /* Update record (refresh TTL) */
+#define CYXCHAT_MSG_DNS_UPDATE_ACK    0xD5  /* Update confirmed */
+#define CYXCHAT_MSG_DNS_ANNOUNCE      0xD6  /* Gossip announcement */
+
+/* CyxMail Messages (0xE0-0xEF) - Email protocol */
+#define CYXCHAT_MSG_MAIL_SEND         0xE0  /* Send email to mailbox */
+#define CYXCHAT_MSG_MAIL_ACK          0xE1  /* Delivery ACK */
+#define CYXCHAT_MSG_MAIL_LIST         0xE2  /* List mailbox contents */
+#define CYXCHAT_MSG_MAIL_LIST_RESP    0xE3  /* Mailbox listing */
+#define CYXCHAT_MSG_MAIL_FETCH        0xE4  /* Fetch message */
+#define CYXCHAT_MSG_MAIL_FETCH_RESP   0xE5  /* Message content */
+#define CYXCHAT_MSG_MAIL_DELETE       0xE6  /* Delete from mailbox */
+#define CYXCHAT_MSG_MAIL_DELETE_ACK   0xE7  /* Deletion confirmed */
+#define CYXCHAT_MSG_MAIL_NOTIFY       0xE8  /* New mail notification */
+#define CYXCHAT_MSG_MAIL_READ_RECEIPT 0xE9  /* Read receipt */
+#define CYXCHAT_MSG_MAIL_BOUNCE       0xEA  /* Delivery failed */
+
+/* ============================================================
+ * Mail Constants
+ * ============================================================ */
+
+#define CYXCHAT_MAIL_ID_SIZE          8       /* Mail ID size (bytes) */
+#define CYXCHAT_MAX_SUBJECT_LEN       256     /* Max subject length */
+#define CYXCHAT_MAX_MAIL_BODY_LEN     4096    /* Max body length */
+#define CYXCHAT_MAX_RECIPIENTS        10      /* Max To/Cc recipients */
+#define CYXCHAT_MAX_ATTACHMENTS       10      /* Max attachments per email */
+#define CYXCHAT_ATTACHMENT_INLINE_MAX 65536   /* 64KB inline limit */
+
+/* Mail flags (bitfield) */
+#define CYXCHAT_MAIL_FLAG_SEEN        (1 << 0)  /* Message read */
+#define CYXCHAT_MAIL_FLAG_FLAGGED     (1 << 1)  /* Starred/important */
+#define CYXCHAT_MAIL_FLAG_ANSWERED    (1 << 2)  /* Reply sent */
+#define CYXCHAT_MAIL_FLAG_DRAFT       (1 << 3)  /* Draft message */
+#define CYXCHAT_MAIL_FLAG_DELETED     (1 << 4)  /* Marked for deletion */
+#define CYXCHAT_MAIL_FLAG_ATTACHMENT  (1 << 5)  /* Has attachments */
+
+/* Mail status */
+typedef enum {
+    CYXCHAT_MAIL_STATUS_DRAFT     = 0,   /* Not sent yet */
+    CYXCHAT_MAIL_STATUS_QUEUED    = 1,   /* Queued for sending */
+    CYXCHAT_MAIL_STATUS_SENT      = 2,   /* Sent to network */
+    CYXCHAT_MAIL_STATUS_DELIVERED = 3,   /* Delivery confirmed */
+    CYXCHAT_MAIL_STATUS_FAILED    = 4    /* Send failed */
+} cyxchat_mail_status_t;
+
+/* Attachment disposition */
+typedef enum {
+    CYXCHAT_ATTACH_DISPOSITION_ATTACHMENT = 0,  /* Regular attachment */
+    CYXCHAT_ATTACH_DISPOSITION_INLINE     = 1   /* Inline (e.g., images) */
+} cyxchat_attach_disposition_t;
+
+/* Attachment storage type */
+typedef enum {
+    CYXCHAT_ATTACH_STORAGE_INLINE   = 0,  /* Stored in message (<64KB) */
+    CYXCHAT_ATTACH_STORAGE_CHUNKED  = 1,  /* Chunked P2P transfer */
+    CYXCHAT_ATTACH_STORAGE_CYXCLOUD = 2   /* Stored in CyxCloud */
+} cyxchat_attach_storage_t;
+
 /* ============================================================
  * ID Types
  * ============================================================ */

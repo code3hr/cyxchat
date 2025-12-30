@@ -187,6 +187,342 @@ class CyxChatBindings {
     if (_connCtx == null) return CyxChatError.errNull;
     return _native.cyxchat_conn_force_relay(_connCtx!, peerId);
   }
+
+  // ============================================================
+  // DNS Module
+  // ============================================================
+
+  /// DNS context pointer (opaque)
+  Pointer<Void>? _dnsCtx;
+
+  /// Create DNS context
+  int dnsCreate(Pointer<Uint8> localId, Pointer<Uint8>? signingKey) {
+    final ctxPtr = calloc<Pointer<Void>>();
+    try {
+      final result = _native.cyxchat_dns_create(
+        ctxPtr,
+        nullptr, // router - will be set up separately
+        localId,
+        signingKey ?? nullptr,
+      );
+      if (result == 0) {
+        _dnsCtx = ctxPtr.value;
+      }
+      return result;
+    } finally {
+      calloc.free(ctxPtr);
+    }
+  }
+
+  /// Destroy DNS context
+  void dnsDestroy() {
+    if (_dnsCtx != null) {
+      _native.cyxchat_dns_destroy(_dnsCtx!);
+      _dnsCtx = null;
+    }
+  }
+
+  /// Poll DNS (call regularly from main loop)
+  int dnsPoll(int nowMs) {
+    if (_dnsCtx == null) return CyxChatError.errNull;
+    return _native.cyxchat_dns_poll(_dnsCtx!, nowMs);
+  }
+
+  /// Register a name
+  int dnsRegister(String name) {
+    if (_dnsCtx == null) return CyxChatError.errNull;
+    final namePtr = name.toNativeUtf8();
+    try {
+      return _native.cyxchat_dns_register(_dnsCtx!, namePtr.cast(), nullptr, nullptr);
+    } finally {
+      calloc.free(namePtr);
+    }
+  }
+
+  /// Refresh registration
+  int dnsRefresh() {
+    if (_dnsCtx == null) return CyxChatError.errNull;
+    return _native.cyxchat_dns_refresh(_dnsCtx!);
+  }
+
+  /// Unregister name
+  int dnsUnregister() {
+    if (_dnsCtx == null) return CyxChatError.errNull;
+    return _native.cyxchat_dns_unregister(_dnsCtx!);
+  }
+
+  /// Get registered name
+  String? dnsGetRegisteredName() {
+    if (_dnsCtx == null) return null;
+    final ptr = _native.cyxchat_dns_get_registered_name(_dnsCtx!);
+    if (ptr == nullptr) return null;
+    return ptr.cast<Utf8>().toDartString();
+  }
+
+  /// Lookup a name (async - checks cache, sends query)
+  int dnsLookup(String name) {
+    if (_dnsCtx == null) return CyxChatError.errNull;
+    final namePtr = name.toNativeUtf8();
+    try {
+      return _native.cyxchat_dns_lookup(_dnsCtx!, namePtr.cast(), nullptr, nullptr);
+    } finally {
+      calloc.free(namePtr);
+    }
+  }
+
+  /// Resolve name from cache (sync)
+  /// Returns node ID bytes or null if not found
+  Pointer<Uint8>? dnsResolve(String name) {
+    if (_dnsCtx == null) return null;
+    final namePtr = name.toNativeUtf8();
+    final recordPtr = calloc<Uint8>(256); // DNS record is ~180 bytes
+    try {
+      final result = _native.cyxchat_dns_resolve(_dnsCtx!, namePtr.cast(), recordPtr);
+      if (result == 0) {
+        // Record starts with name (64 bytes), then node_id (32 bytes)
+        // Skip name to get node_id
+        final nodeIdPtr = calloc<Uint8>(32);
+        for (int i = 0; i < 32; i++) {
+          nodeIdPtr[i] = recordPtr[64 + i];
+        }
+        calloc.free(recordPtr);
+        return nodeIdPtr;
+      }
+      return null;
+    } finally {
+      calloc.free(namePtr);
+    }
+  }
+
+  /// Check if name is cached
+  bool dnsIsCached(String name) {
+    if (_dnsCtx == null) return false;
+    final namePtr = name.toNativeUtf8();
+    try {
+      return _native.cyxchat_dns_is_cached(_dnsCtx!, namePtr.cast()) != 0;
+    } finally {
+      calloc.free(namePtr);
+    }
+  }
+
+  /// Invalidate cached name
+  void dnsInvalidate(String name) {
+    if (_dnsCtx == null) return;
+    final namePtr = name.toNativeUtf8();
+    try {
+      _native.cyxchat_dns_invalidate(_dnsCtx!, namePtr.cast());
+    } finally {
+      calloc.free(namePtr);
+    }
+  }
+
+  /// Set petname for a node
+  int dnsSetPetname(Pointer<Uint8> nodeId, String petname) {
+    if (_dnsCtx == null) return CyxChatError.errNull;
+    final petnamePtr = petname.toNativeUtf8();
+    try {
+      return _native.cyxchat_dns_set_petname(_dnsCtx!, nodeId, petnamePtr.cast());
+    } finally {
+      calloc.free(petnamePtr);
+    }
+  }
+
+  /// Get petname for a node
+  String? dnsGetPetname(Pointer<Uint8> nodeId) {
+    if (_dnsCtx == null) return null;
+    final ptr = _native.cyxchat_dns_get_petname(_dnsCtx!, nodeId);
+    if (ptr == nullptr) return null;
+    return ptr.cast<Utf8>().toDartString();
+  }
+
+  /// Generate crypto-name from pubkey
+  String dnsCryptoName(Pointer<Uint8> pubkey) {
+    final nameOut = calloc<Int8>(20);
+    try {
+      _native.cyxchat_dns_crypto_name(pubkey, nameOut);
+      return nameOut.cast<Utf8>().toDartString();
+    } finally {
+      calloc.free(nameOut);
+    }
+  }
+
+  /// Check if name is a crypto-name
+  bool dnsIsCryptoName(String name) {
+    final namePtr = name.toNativeUtf8();
+    try {
+      return _native.cyxchat_dns_is_crypto_name(namePtr.cast()) != 0;
+    } finally {
+      calloc.free(namePtr);
+    }
+  }
+
+  /// Validate name format
+  bool dnsValidateName(String name) {
+    final namePtr = name.toNativeUtf8();
+    try {
+      return _native.cyxchat_dns_validate_name(namePtr.cast()) != 0;
+    } finally {
+      calloc.free(namePtr);
+    }
+  }
+
+  // ============================================================
+  // Mail Module (CyxMail)
+  // ============================================================
+
+  /// Mail context pointer (opaque)
+  Pointer<Void>? _mailCtx;
+
+  /// Create mail context
+  int mailCreate(Pointer<Void> chatCtx) {
+    final ctxPtr = calloc<Pointer<Void>>();
+    try {
+      final result = _native.cyxchat_mail_ctx_create(ctxPtr, chatCtx);
+      if (result == 0) {
+        _mailCtx = ctxPtr.value;
+      }
+      return result;
+    } finally {
+      calloc.free(ctxPtr);
+    }
+  }
+
+  /// Destroy mail context
+  void mailDestroy() {
+    if (_mailCtx != null) {
+      _native.cyxchat_mail_ctx_destroy(_mailCtx!);
+      _mailCtx = null;
+    }
+  }
+
+  /// Poll mail events
+  int mailPoll(int nowMs) {
+    if (_mailCtx == null) return 0;
+    return _native.cyxchat_mail_poll(_mailCtx!, nowMs);
+  }
+
+  /// Generate mail ID
+  void mailGenerateId(Pointer<Uint8> idOut) {
+    _native.cyxchat_mail_generate_id(idOut);
+  }
+
+  /// Mail ID to hex string
+  String mailIdToHex(Pointer<Uint8> id) {
+    final hexOut = calloc<Int8>(17); // 16 hex chars + null
+    try {
+      _native.cyxchat_mail_id_to_hex(id, hexOut);
+      return hexOut.cast<Utf8>().toDartString();
+    } finally {
+      calloc.free(hexOut);
+    }
+  }
+
+  /// Parse mail ID from hex
+  int mailIdFromHex(String hex, Pointer<Uint8> idOut) {
+    final hexPtr = hex.toNativeUtf8();
+    try {
+      return _native.cyxchat_mail_id_from_hex(hexPtr.cast(), idOut);
+    } finally {
+      calloc.free(hexPtr);
+    }
+  }
+
+  /// Check if mail ID is null
+  bool mailIdIsNull(Pointer<Uint8> id) {
+    return _native.cyxchat_mail_id_is_null(id) != 0;
+  }
+
+  /// Get folder name
+  String mailFolderName(int folder) {
+    final ptr = _native.cyxchat_mail_folder_name(folder);
+    return ptr.cast<Utf8>().toDartString();
+  }
+
+  /// Get status name
+  String mailStatusName(int status) {
+    final ptr = _native.cyxchat_mail_status_name(status);
+    return ptr.cast<Utf8>().toDartString();
+  }
+
+  /// Get mail count in folder
+  int mailCount(int folder) {
+    if (_mailCtx == null) return 0;
+    return _native.cyxchat_mail_count(_mailCtx!, folder);
+  }
+
+  /// Get unread mail count in folder
+  int mailUnreadCount(int folder) {
+    if (_mailCtx == null) return 0;
+    return _native.cyxchat_mail_unread_count(_mailCtx!, folder);
+  }
+
+  /// Send simple mail
+  int mailSendSimple(
+    Pointer<Uint8> to,
+    String subject,
+    String body,
+    Pointer<Uint8>? inReplyTo,
+    Pointer<Uint8> mailIdOut,
+  ) {
+    if (_mailCtx == null) return CyxChatError.errNull;
+    final subjectPtr = subject.toNativeUtf8();
+    final bodyPtr = body.toNativeUtf8();
+    try {
+      return _native.cyxchat_mail_send_simple(
+        _mailCtx!,
+        to,
+        subjectPtr.cast(),
+        bodyPtr.cast(),
+        inReplyTo ?? nullptr,
+        mailIdOut,
+      );
+    } finally {
+      calloc.free(subjectPtr);
+      calloc.free(bodyPtr);
+    }
+  }
+
+  /// Mark mail as read
+  int mailMarkRead(Pointer<Uint8> mailId, bool sendReceipt) {
+    if (_mailCtx == null) return CyxChatError.errNull;
+    return _native.cyxchat_mail_mark_read(_mailCtx!, mailId, sendReceipt ? 1 : 0);
+  }
+
+  /// Mark mail as unread
+  int mailMarkUnread(Pointer<Uint8> mailId) {
+    if (_mailCtx == null) return CyxChatError.errNull;
+    return _native.cyxchat_mail_mark_unread(_mailCtx!, mailId);
+  }
+
+  /// Set mail flagged status
+  int mailSetFlagged(Pointer<Uint8> mailId, bool flagged) {
+    if (_mailCtx == null) return CyxChatError.errNull;
+    return _native.cyxchat_mail_set_flagged(_mailCtx!, mailId, flagged ? 1 : 0);
+  }
+
+  /// Move mail to folder
+  int mailMove(Pointer<Uint8> mailId, int folder) {
+    if (_mailCtx == null) return CyxChatError.errNull;
+    return _native.cyxchat_mail_move(_mailCtx!, mailId, folder);
+  }
+
+  /// Delete mail (to trash)
+  int mailDelete(Pointer<Uint8> mailId) {
+    if (_mailCtx == null) return CyxChatError.errNull;
+    return _native.cyxchat_mail_delete(_mailCtx!, mailId);
+  }
+
+  /// Permanently delete mail
+  int mailDeletePermanent(Pointer<Uint8> mailId) {
+    if (_mailCtx == null) return CyxChatError.errNull;
+    return _native.cyxchat_mail_delete_permanent(_mailCtx!, mailId);
+  }
+
+  /// Empty trash folder
+  int mailEmptyTrash() {
+    if (_mailCtx == null) return CyxChatError.errNull;
+    return _native.cyxchat_mail_empty_trash(_mailCtx!);
+  }
 }
 
 /// Native function signatures
@@ -289,6 +625,161 @@ class CyxChatNative {
   late final cyxchat_conn_force_relay = _lib.lookupFunction<
       Int32 Function(Pointer<Void>, Pointer<Uint8>),
       int Function(Pointer<Void>, Pointer<Uint8>)>('cyxchat_conn_force_relay');
+
+  // DNS functions
+  late final cyxchat_dns_create = _lib.lookupFunction<
+      Int32 Function(Pointer<Pointer<Void>>, Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>),
+      int Function(Pointer<Pointer<Void>>, Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>)>(
+      'cyxchat_dns_create');
+
+  late final cyxchat_dns_destroy = _lib.lookupFunction<
+      Void Function(Pointer<Void>),
+      void Function(Pointer<Void>)>('cyxchat_dns_destroy');
+
+  late final cyxchat_dns_poll = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Uint64),
+      int Function(Pointer<Void>, int)>('cyxchat_dns_poll');
+
+  late final cyxchat_dns_register = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Int8>, Pointer<Void>, Pointer<Void>),
+      int Function(Pointer<Void>, Pointer<Int8>, Pointer<Void>, Pointer<Void>)>(
+      'cyxchat_dns_register');
+
+  late final cyxchat_dns_refresh = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>),
+      int Function(Pointer<Void>)>('cyxchat_dns_refresh');
+
+  late final cyxchat_dns_unregister = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>),
+      int Function(Pointer<Void>)>('cyxchat_dns_unregister');
+
+  late final cyxchat_dns_get_registered_name = _lib.lookupFunction<
+      Pointer<Int8> Function(Pointer<Void>),
+      Pointer<Int8> Function(Pointer<Void>)>('cyxchat_dns_get_registered_name');
+
+  late final cyxchat_dns_lookup = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Int8>, Pointer<Void>, Pointer<Void>),
+      int Function(Pointer<Void>, Pointer<Int8>, Pointer<Void>, Pointer<Void>)>(
+      'cyxchat_dns_lookup');
+
+  late final cyxchat_dns_resolve = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Int8>, Pointer<Uint8>),
+      int Function(Pointer<Void>, Pointer<Int8>, Pointer<Uint8>)>(
+      'cyxchat_dns_resolve');
+
+  late final cyxchat_dns_is_cached = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Int8>),
+      int Function(Pointer<Void>, Pointer<Int8>)>('cyxchat_dns_is_cached');
+
+  late final cyxchat_dns_invalidate = _lib.lookupFunction<
+      Void Function(Pointer<Void>, Pointer<Int8>),
+      void Function(Pointer<Void>, Pointer<Int8>)>('cyxchat_dns_invalidate');
+
+  late final cyxchat_dns_set_petname = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>, Pointer<Int8>),
+      int Function(Pointer<Void>, Pointer<Uint8>, Pointer<Int8>)>(
+      'cyxchat_dns_set_petname');
+
+  late final cyxchat_dns_get_petname = _lib.lookupFunction<
+      Pointer<Int8> Function(Pointer<Void>, Pointer<Uint8>),
+      Pointer<Int8> Function(Pointer<Void>, Pointer<Uint8>)>(
+      'cyxchat_dns_get_petname');
+
+  late final cyxchat_dns_crypto_name = _lib.lookupFunction<
+      Void Function(Pointer<Uint8>, Pointer<Int8>),
+      void Function(Pointer<Uint8>, Pointer<Int8>)>('cyxchat_dns_crypto_name');
+
+  late final cyxchat_dns_is_crypto_name = _lib.lookupFunction<
+      Int32 Function(Pointer<Int8>),
+      int Function(Pointer<Int8>)>('cyxchat_dns_is_crypto_name');
+
+  late final cyxchat_dns_validate_name = _lib.lookupFunction<
+      Int32 Function(Pointer<Int8>),
+      int Function(Pointer<Int8>)>('cyxchat_dns_validate_name');
+
+  // Mail functions
+  late final cyxchat_mail_ctx_create = _lib.lookupFunction<
+      Int32 Function(Pointer<Pointer<Void>>, Pointer<Void>),
+      int Function(Pointer<Pointer<Void>>, Pointer<Void>)>(
+      'cyxchat_mail_ctx_create');
+
+  late final cyxchat_mail_ctx_destroy = _lib.lookupFunction<
+      Void Function(Pointer<Void>),
+      void Function(Pointer<Void>)>('cyxchat_mail_ctx_destroy');
+
+  late final cyxchat_mail_poll = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Uint64),
+      int Function(Pointer<Void>, int)>('cyxchat_mail_poll');
+
+  late final cyxchat_mail_generate_id = _lib.lookupFunction<
+      Void Function(Pointer<Uint8>),
+      void Function(Pointer<Uint8>)>('cyxchat_mail_generate_id');
+
+  late final cyxchat_mail_id_to_hex = _lib.lookupFunction<
+      Void Function(Pointer<Uint8>, Pointer<Int8>),
+      void Function(Pointer<Uint8>, Pointer<Int8>)>('cyxchat_mail_id_to_hex');
+
+  late final cyxchat_mail_id_from_hex = _lib.lookupFunction<
+      Int32 Function(Pointer<Int8>, Pointer<Uint8>),
+      int Function(Pointer<Int8>, Pointer<Uint8>)>('cyxchat_mail_id_from_hex');
+
+  late final cyxchat_mail_id_is_null = _lib.lookupFunction<
+      Int32 Function(Pointer<Uint8>),
+      int Function(Pointer<Uint8>)>('cyxchat_mail_id_is_null');
+
+  late final cyxchat_mail_folder_name = _lib.lookupFunction<
+      Pointer<Int8> Function(Int32),
+      Pointer<Int8> Function(int)>('cyxchat_mail_folder_name');
+
+  late final cyxchat_mail_status_name = _lib.lookupFunction<
+      Pointer<Int8> Function(Int32),
+      Pointer<Int8> Function(int)>('cyxchat_mail_status_name');
+
+  late final cyxchat_mail_count = _lib.lookupFunction<
+      Size Function(Pointer<Void>, Int32),
+      int Function(Pointer<Void>, int)>('cyxchat_mail_count');
+
+  late final cyxchat_mail_unread_count = _lib.lookupFunction<
+      Size Function(Pointer<Void>, Int32),
+      int Function(Pointer<Void>, int)>('cyxchat_mail_unread_count');
+
+  late final cyxchat_mail_send_simple = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>, Pointer<Int8>,
+          Pointer<Int8>, Pointer<Uint8>, Pointer<Uint8>),
+      int Function(Pointer<Void>, Pointer<Uint8>, Pointer<Int8>,
+          Pointer<Int8>, Pointer<Uint8>, Pointer<Uint8>)>(
+      'cyxchat_mail_send_simple');
+
+  late final cyxchat_mail_mark_read = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>, Int32),
+      int Function(Pointer<Void>, Pointer<Uint8>, int)>(
+      'cyxchat_mail_mark_read');
+
+  late final cyxchat_mail_mark_unread = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>),
+      int Function(Pointer<Void>, Pointer<Uint8>)>('cyxchat_mail_mark_unread');
+
+  late final cyxchat_mail_set_flagged = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>, Int32),
+      int Function(Pointer<Void>, Pointer<Uint8>, int)>(
+      'cyxchat_mail_set_flagged');
+
+  late final cyxchat_mail_move = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>, Int32),
+      int Function(Pointer<Void>, Pointer<Uint8>, int)>('cyxchat_mail_move');
+
+  late final cyxchat_mail_delete = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>),
+      int Function(Pointer<Void>, Pointer<Uint8>)>('cyxchat_mail_delete');
+
+  late final cyxchat_mail_delete_permanent = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>),
+      int Function(Pointer<Void>, Pointer<Uint8>)>(
+      'cyxchat_mail_delete_permanent');
+
+  late final cyxchat_mail_empty_trash = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>),
+      int Function(Pointer<Void>)>('cyxchat_mail_empty_trash');
 }
 
 // Error codes
@@ -376,4 +867,95 @@ class CyxChatMsgType {
   static const groupAdmin = 0x27;
   static const presence = 0x30;
   static const presenceReq = 0x31;
+  // Mail message types
+  static const mailSend = 0xE0;
+  static const mailAck = 0xE1;
+  static const mailList = 0xE2;
+  static const mailListResp = 0xE3;
+  static const mailFetch = 0xE4;
+  static const mailFetchResp = 0xE5;
+  static const mailDelete = 0xE6;
+  static const mailDeleteAck = 0xE7;
+  static const mailNotify = 0xE8;
+  static const mailReadReceipt = 0xE9;
+  static const mailBounce = 0xEA;
+}
+
+// Mail folder types
+class CyxChatMailFolder {
+  static const inbox = 0;
+  static const sent = 1;
+  static const drafts = 2;
+  static const archive = 3;
+  static const trash = 4;
+  static const spam = 5;
+  static const custom = 6;
+
+  static String name(int folder) {
+    switch (folder) {
+      case inbox: return 'Inbox';
+      case sent: return 'Sent';
+      case drafts: return 'Drafts';
+      case archive: return 'Archive';
+      case trash: return 'Trash';
+      case spam: return 'Spam';
+      case custom: return 'Custom';
+      default: return 'Unknown';
+    }
+  }
+}
+
+// Mail flags (bitfield)
+class CyxChatMailFlag {
+  static const seen = 1 << 0;
+  static const flagged = 1 << 1;
+  static const answered = 1 << 2;
+  static const draft = 1 << 3;
+  static const deleted = 1 << 4;
+  static const attachment = 1 << 5;
+
+  static bool isSeen(int flags) => (flags & seen) != 0;
+  static bool isFlagged(int flags) => (flags & flagged) != 0;
+  static bool isAnswered(int flags) => (flags & answered) != 0;
+  static bool isDraft(int flags) => (flags & draft) != 0;
+  static bool isDeleted(int flags) => (flags & deleted) != 0;
+  static bool hasAttachment(int flags) => (flags & attachment) != 0;
+}
+
+// Mail status
+class CyxChatMailStatus {
+  static const draft = 0;
+  static const queued = 1;
+  static const sent = 2;
+  static const delivered = 3;
+  static const failed = 4;
+
+  static String name(int status) {
+    switch (status) {
+      case draft: return 'Draft';
+      case queued: return 'Queued';
+      case sent: return 'Sent';
+      case delivered: return 'Delivered';
+      case failed: return 'Failed';
+      default: return 'Unknown';
+    }
+  }
+}
+
+// Mail bounce reasons
+class CyxChatMailBounce {
+  static const noRoute = 0;
+  static const rejected = 1;
+  static const timeout = 2;
+  static const quota = 3;
+
+  static String reason(int bounce) {
+    switch (bounce) {
+      case noRoute: return 'Destination unreachable';
+      case rejected: return 'Recipient rejected';
+      case timeout: return 'Delivery timeout';
+      case quota: return 'Mailbox full';
+      default: return 'Unknown';
+    }
+  }
 }

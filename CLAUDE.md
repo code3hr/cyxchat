@@ -13,6 +13,26 @@ CyxChat is a decentralized, privacy-first messaging application built on the Cyx
 - Local storage (your data stays on your device)
 - Cross-platform (mobile + desktop)
 
+## CRITICAL: Do Not Modify Core CyxWiz
+
+**NEVER modify files in the core CyxWiz protocol directory (`../../include/cyxwiz/` or `../../src/`).**
+
+The CyxWiz protocol is used by multiple processes and applications. Any changes to core CyxWiz files will affect all dependent projects.
+
+When implementing CyxChat-specific features:
+- Add new message types to `cyxchat/lib/include/cyxchat/types.h` (not `cyxwiz/types.h`)
+- Clone/adapt CyxWiz patterns into CyxChat's own codebase
+- Use CyxWiz APIs as-is; don't extend them in the core library
+- Define CyxChat-specific constants with `CYXCHAT_` prefix
+
+Example - DNS message types are defined in CyxChat, not CyxWiz:
+```c
+/* In cyxchat/lib/include/cyxchat/types.h */
+#define CYXCHAT_MSG_DNS_REGISTER      0xD0
+#define CYXCHAT_MSG_DNS_LOOKUP        0xD2
+/* NOT in cyxwiz/types.h */
+```
+
 ## Architecture
 
 ```
@@ -51,7 +71,8 @@ cyxchat/
 │   │   ├── file.h          # File transfer
 │   │   ├── presence.h      # Online status
 │   │   ├── connection.h    # NAT traversal/connection mgmt
-│   │   └── relay.h         # Relay fallback
+│   │   ├── relay.h         # Relay fallback
+│   │   └── dns.h           # Internal DNS (usernames)
 │   ├── src/                # Implementation
 │   │   ├── cyxchat.c       # Library init/shutdown
 │   │   ├── chat.c          # Messaging implementation
@@ -60,7 +81,8 @@ cyxchat/
 │   │   ├── file.c          # File transfer implementation
 │   │   ├── presence.c      # Presence implementation
 │   │   ├── connection.c    # Connection management
-│   │   └── relay.c         # Relay implementation
+│   │   ├── relay.c         # Relay implementation
+│   │   └── dns.c           # DNS implementation (gossip-based)
 │   ├── tests/              # Unit tests
 │   └── CMakeLists.txt      # Build configuration
 │
@@ -80,7 +102,8 @@ cyxchat/
 │   │   │   └── chat_service.dart
 │   │   ├── providers/      # State management
 │   │   │   ├── identity_provider.dart
-│   │   │   └── conversation_provider.dart
+│   │   │   ├── conversation_provider.dart
+│   │   │   └── dns_provider.dart
 │   │   └── screens/        # UI screens
 │   │       ├── home_screen.dart
 │   │       ├── chat_screen.dart
@@ -198,6 +221,7 @@ CYXCHAT_ERR_BLOCKED     = -10  // User is blocked
 | 0x10-0x1F | Direct Messages | TEXT, ACK, READ, TYPING |
 | 0x20-0x2F | Group Messages | GROUP_TEXT, INVITE, JOIN, LEAVE |
 | 0x30-0x3F | Presence | PRESENCE, PRESENCE_REQ |
+| 0xD0-0xD9 | DNS (Internal) | DNS_REGISTER, DNS_LOOKUP, DNS_RESPONSE |
 
 ## FFI Patterns
 

@@ -5,3 +5,6 @@ export 'identity.dart';
 export 'contact.dart';
 export 'message.dart';
 export 'conversation.dart';
+export 'email_folder.dart';
+export 'email_message.dart';
+export 'email_attachment.dart';
