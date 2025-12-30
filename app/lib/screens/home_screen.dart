@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../main.dart';
 import '../providers/conversation_provider.dart';
 import '../providers/mail_provider.dart';
+import '../providers/network_provider.dart';
 import '../models/models.dart';
 import 'chat_screen.dart';
 import 'group_chat_screen.dart';
@@ -799,18 +800,18 @@ class _BottomSheetOption extends StatelessWidget {
 }
 
 /// Network status chip widget
-class _NetworkStatusChip extends StatelessWidget {
+class _NetworkStatusChip extends ConsumerWidget {
   const _NetworkStatusChip();
 
   @override
-  Widget build(BuildContext context) {
-    // Placeholder - will connect to actual network status
-    const isConnected = false;
-    const statusColor = AppColors.textDarkSecondary;
-    const statusText = 'Offline';
+  Widget build(BuildContext context, WidgetRef ref) {
+    final connectionState = ref.watch(connectionNotifierProvider);
+    final isConnected = connectionState.initialized;
+    final statusColor = isConnected ? AppColors.accentGreen : AppColors.textDarkSecondary;
+    final statusText = isConnected ? 'Online' : 'Offline';
 
     return GestureDetector(
-      onTap: () => _showNetworkDetails(context),
+      onTap: () => _showNetworkDetails(context, ref),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
@@ -856,22 +857,28 @@ class _NetworkStatusChip extends StatelessWidget {
     );
   }
 
-  void _showNetworkDetails(BuildContext context) {
+  void _showNetworkDetails(BuildContext context, WidgetRef ref) {
+    final connectionState = ref.read(connectionNotifierProvider);
+    final isConnected = connectionState.initialized;
+    final networkStatus = connectionState.networkStatus;
+
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: Row(
           children: [
             Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: AppColors.bgDarkTertiary,
+                color: isConnected
+                    ? AppColors.accentGreen.withOpacity(0.2)
+                    : AppColors.bgDarkTertiary,
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: const Icon(
-                Icons.wifi_off_rounded,
+              child: Icon(
+                isConnected ? Icons.wifi_rounded : Icons.wifi_off_rounded,
                 size: 24,
-                color: AppColors.textDarkSecondary,
+                color: isConnected ? AppColors.accentGreen : AppColors.textDarkSecondary,
               ),
             ),
             const SizedBox(width: 14),
@@ -886,56 +893,70 @@ class _NetworkStatusChip extends StatelessWidget {
           children: [
             _NetworkInfoRow(
               label: 'Status',
-              value: 'Disconnected',
-              valueColor: AppColors.textDarkSecondary,
+              value: isConnected ? 'Connected' : 'Disconnected',
+              valueColor: isConnected ? AppColors.accentGreen : AppColors.textDarkSecondary,
             ),
             const SizedBox(height: 12),
             _NetworkInfoRow(
               label: 'Peers',
-              value: '0 connected',
+              value: '${networkStatus.activeConnections} connected',
             ),
             const SizedBox(height: 12),
             _NetworkInfoRow(
-              label: 'Relay',
-              value: 'Not available',
+              label: 'Public IP',
+              value: networkStatus.publicAddress ?? 'Unknown',
             ),
-            const SizedBox(height: 20),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: AppColors.bgDarkTertiary.withOpacity(0.5),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.info_outline_rounded,
-                    size: 18,
-                    color: AppColors.accent.withOpacity(0.8),
-                  ),
-                  const SizedBox(width: 10),
-                  const Expanded(
-                    child: Text(
-                      'Connect to the mesh network to start chatting securely.',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: AppColors.textDarkSecondary,
+            if (!isConnected) ...[
+              const SizedBox(height: 20),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppColors.bgDarkTertiary.withOpacity(0.5),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.info_outline_rounded,
+                      size: 18,
+                      color: AppColors.accent.withOpacity(0.8),
+                    ),
+                    const SizedBox(width: 10),
+                    const Expanded(
+                      child: Text(
+                        'Connect to the mesh network to start chatting securely.',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: AppColors.textDarkSecondary,
+                        ),
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
+            ],
           ],
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: const Text('Close'),
           ),
           ElevatedButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Connect'),
+            onPressed: () async {
+              Navigator.pop(dialogContext);
+              if (isConnected) {
+                ref.read(connectionActionsProvider).disconnect();
+              } else {
+                final success = await ref.read(connectionActionsProvider).connect();
+                if (context.mounted && !success) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Failed to connect to network')),
+                  );
+                }
+              }
+            },
+            child: Text(isConnected ? 'Disconnect' : 'Connect'),
           ),
         ],
       ),
