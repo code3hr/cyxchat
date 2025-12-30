@@ -45,6 +45,14 @@ if(NOT TARGET cyxwiz)
                     "${CYXWIZ_LIBRARY_DIR}/Release"
                     "${CYXWIZ_LIBRARY_DIR}"
             )
+        elseif(CMAKE_CROSSCOMPILING)
+            # When cross-compiling (Android/iOS), find_library doesn't work correctly
+            # because NDK toolchain restricts search to sysroot. Set path directly.
+            if(EXISTS "${CYXWIZ_LIBRARY_DIR}/libcyxwiz.a")
+                set(CYXWIZ_LIBRARY "${CYXWIZ_LIBRARY_DIR}/libcyxwiz.a")
+            elseif(EXISTS "${CYXWIZ_LIBRARY_DIR}/libcyxwiz_static.a")
+                set(CYXWIZ_LIBRARY "${CYXWIZ_LIBRARY_DIR}/libcyxwiz_static.a")
+            endif()
         else()
             find_library(CYXWIZ_LIBRARY
                 NAMES cyxwiz libcyxwiz cyxwiz_static libcyxwiz_static
@@ -64,7 +72,9 @@ if(NOT TARGET cyxwiz)
 endif()
 
 message(STATUS "CYXWIZ_INCLUDE_DIR: ${CYXWIZ_INCLUDE_DIR}")
+message(STATUS "CYXWIZ_LIBRARY_DIR: ${CYXWIZ_LIBRARY_DIR}")
 message(STATUS "CYXWIZ_LIBRARY: ${CYXWIZ_LIBRARY}")
+message(STATUS "CMAKE_CROSSCOMPILING: ${CMAKE_CROSSCOMPILING}")
 
 # Find libsodium
 # Skip pkg-config when cross-compiling (it finds host libraries, not target)
