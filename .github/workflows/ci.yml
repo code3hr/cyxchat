@@ -237,6 +237,16 @@ jobs:
           cd app
           flutter create --platforms=android .
 
+      - name: Fix Android build configuration
+        run: |
+          cd app/android
+          # Update Kotlin version to 1.9.24 (required by Flutter dependencies)
+          sed -i 's/id "org.jetbrains.kotlin.android" version "[^"]*"/id "org.jetbrains.kotlin.android" version "1.9.24"/' settings.gradle
+          # Update compileSdk to 35 (required by flutter_plugin_android_lifecycle)
+          sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 35/' app/build.gradle
+          cat settings.gradle | head -20
+          cat app/build.gradle | head -30
+
       - name: Clone and build cyxwiz for Android
         run: |
           git clone https://github.com/code3hr/conspiracy.git ../cyxwiz
