@@ -245,39 +245,45 @@ jobs:
           cd ../cyxwiz
 
           # arm64-v8a
+          export SODIUM_ROOT=${{ github.workspace }}/libsodium-android/arm64-v8a
           cmake -B build-android-arm64 \
             -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM=android-21 \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH=${{ github.workspace }}/libsodium-android/arm64-v8a \
+            -DCMAKE_FIND_ROOT_PATH=${{ github.workspace }}/libsodium-android/arm64-v8a \
             -DCYXWIZ_TRANSPORT_BLUETOOTH=OFF \
             -DCYXWIZ_TRANSPORT_WIFI=OFF \
-            -DCYXWIZ_TRANSPORT_LORA=OFF \
-            -DSODIUM_ROOT=${{ github.workspace }}/libsodium-android/arm64-v8a
+            -DCYXWIZ_TRANSPORT_LORA=OFF
           cmake --build build-android-arm64 --config Release
 
           # armeabi-v7a
+          export SODIUM_ROOT=${{ github.workspace }}/libsodium-android/armeabi-v7a
           cmake -B build-android-arm \
             -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=armeabi-v7a \
             -DANDROID_PLATFORM=android-21 \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH=${{ github.workspace }}/libsodium-android/armeabi-v7a \
+            -DCMAKE_FIND_ROOT_PATH=${{ github.workspace }}/libsodium-android/armeabi-v7a \
             -DCYXWIZ_TRANSPORT_BLUETOOTH=OFF \
             -DCYXWIZ_TRANSPORT_WIFI=OFF \
-            -DCYXWIZ_TRANSPORT_LORA=OFF \
-            -DSODIUM_ROOT=${{ github.workspace }}/libsodium-android/armeabi-v7a
+            -DCYXWIZ_TRANSPORT_LORA=OFF
           cmake --build build-android-arm --config Release
 
           # x86_64
+          export SODIUM_ROOT=${{ github.workspace }}/libsodium-android/x86_64
           cmake -B build-android-x64 \
             -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=x86_64 \
             -DANDROID_PLATFORM=android-21 \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH=${{ github.workspace }}/libsodium-android/x86_64 \
+            -DCMAKE_FIND_ROOT_PATH=${{ github.workspace }}/libsodium-android/x86_64 \
             -DCYXWIZ_TRANSPORT_BLUETOOTH=OFF \
             -DCYXWIZ_TRANSPORT_WIFI=OFF \
-            -DCYXWIZ_TRANSPORT_LORA=OFF \
-            -DSODIUM_ROOT=${{ github.workspace }}/libsodium-android/x86_64
+            -DCYXWIZ_TRANSPORT_LORA=OFF
           cmake --build build-android-x64 --config Release
 
       - name: Build native libraries for Android
@@ -288,38 +294,44 @@ jobs:
           mkdir -p ../app/android/app/src/main/jniLibs/x86_64
 
           # Build for arm64-v8a
+          export SODIUM_ROOT=${{ github.workspace }}/libsodium-android/arm64-v8a
           cmake -B build-android-arm64 \
             -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM=android-21 \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH=${{ github.workspace }}/libsodium-android/arm64-v8a \
+            -DCMAKE_FIND_ROOT_PATH=${{ github.workspace }}/libsodium-android/arm64-v8a \
             -DCYXWIZ_ROOT="${{ github.workspace }}/../cyxwiz" \
-            -DCYXWIZ_BUILD_DIR="${{ github.workspace }}/../cyxwiz/build-android-arm64" \
-            -DSODIUM_ROOT=${{ github.workspace }}/libsodium-android/arm64-v8a
+            -DCYXWIZ_BUILD_DIR="${{ github.workspace }}/../cyxwiz/build-android-arm64"
           cmake --build build-android-arm64
           cp build-android-arm64/*.so ../app/android/app/src/main/jniLibs/arm64-v8a/
 
           # Build for armeabi-v7a
+          export SODIUM_ROOT=${{ github.workspace }}/libsodium-android/armeabi-v7a
           cmake -B build-android-arm \
             -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=armeabi-v7a \
             -DANDROID_PLATFORM=android-21 \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH=${{ github.workspace }}/libsodium-android/armeabi-v7a \
+            -DCMAKE_FIND_ROOT_PATH=${{ github.workspace }}/libsodium-android/armeabi-v7a \
             -DCYXWIZ_ROOT="${{ github.workspace }}/../cyxwiz" \
-            -DCYXWIZ_BUILD_DIR="${{ github.workspace }}/../cyxwiz/build-android-arm" \
-            -DSODIUM_ROOT=${{ github.workspace }}/libsodium-android/armeabi-v7a
+            -DCYXWIZ_BUILD_DIR="${{ github.workspace }}/../cyxwiz/build-android-arm"
           cmake --build build-android-arm
           cp build-android-arm/*.so ../app/android/app/src/main/jniLibs/armeabi-v7a/
 
           # Build for x86_64 (emulator)
+          export SODIUM_ROOT=${{ github.workspace }}/libsodium-android/x86_64
           cmake -B build-android-x86_64 \
             -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=x86_64 \
             -DANDROID_PLATFORM=android-21 \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH=${{ github.workspace }}/libsodium-android/x86_64 \
+            -DCMAKE_FIND_ROOT_PATH=${{ github.workspace }}/libsodium-android/x86_64 \
             -DCYXWIZ_ROOT="${{ github.workspace }}/../cyxwiz" \
-            -DCYXWIZ_BUILD_DIR="${{ github.workspace }}/../cyxwiz/build-android-x64" \
-            -DSODIUM_ROOT=${{ github.workspace }}/libsodium-android/x86_64
+            -DCYXWIZ_BUILD_DIR="${{ github.workspace }}/../cyxwiz/build-android-x64"
           cmake --build build-android-x86_64
           cp build-android-x86_64/*.so ../app/android/app/src/main/jniLibs/x86_64/
 
@@ -415,16 +427,17 @@ jobs:
           cd ../cyxwiz
 
           # Build for iOS simulator arm64
+          export SODIUM_ROOT=${{ github.workspace }}/libsodium-ios/simulator-arm64
           cmake -B build-ios-sim-arm64 \
             -DCMAKE_SYSTEM_NAME=iOS \
             -DCMAKE_OSX_SYSROOT=iphonesimulator \
             -DCMAKE_OSX_ARCHITECTURES=arm64 \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH=${{ github.workspace }}/libsodium-ios/simulator-arm64 \
             -DCYXWIZ_TRANSPORT_BLUETOOTH=OFF \
             -DCYXWIZ_TRANSPORT_WIFI=OFF \
-            -DCYXWIZ_TRANSPORT_LORA=OFF \
-            -DSODIUM_ROOT=${{ github.workspace }}/libsodium-ios/simulator-arm64
+            -DCYXWIZ_TRANSPORT_LORA=OFF
           cmake --build build-ios-sim-arm64 --config Release
 
       - name: Build native library for iOS
@@ -433,15 +446,16 @@ jobs:
           mkdir -p ../app/ios/Frameworks
 
           # Build for iOS simulator (arm64)
+          export SODIUM_ROOT=${{ github.workspace }}/libsodium-ios/simulator-arm64
           cmake -B build-ios-sim \
             -DCMAKE_SYSTEM_NAME=iOS \
             -DCMAKE_OSX_SYSROOT=iphonesimulator \
             -DCMAKE_OSX_ARCHITECTURES=arm64 \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH=${{ github.workspace }}/libsodium-ios/simulator-arm64 \
             -DCYXWIZ_ROOT="${{ github.workspace }}/../cyxwiz" \
-            -DCYXWIZ_BUILD_DIR="${{ github.workspace }}/../cyxwiz/build-ios-sim-arm64" \
-            -DSODIUM_ROOT=${{ github.workspace }}/libsodium-ios/simulator-arm64
+            -DCYXWIZ_BUILD_DIR="${{ github.workspace }}/../cyxwiz/build-ios-sim-arm64"
           cmake --build build-ios-sim --config Release
 
       - name: Get Flutter dependencies
