@@ -21,7 +21,7 @@ class ChatService {
     final db = await DatabaseService.instance.database;
 
     final rows = await db.rawQuery('''
-      SELECT c.*, m.* as last_message
+      SELECT c.*, m.content as last_message_content, m.timestamp as last_message_time, m.sender_id as last_message_sender
       FROM conversations c
       LEFT JOIN messages m ON m.id = (
         SELECT id FROM messages

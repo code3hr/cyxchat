@@ -43,6 +43,24 @@ class Conversation extends Equatable {
   });
 
   factory Conversation.fromMap(Map<String, dynamic> map) {
+    // Handle last message from join query (flat columns)
+    Message? lastMessage;
+    if (map['last_message_content'] != null) {
+      lastMessage = Message(
+        id: '',
+        conversationId: map['id'] as String,
+        senderId: map['last_message_sender'] as String? ?? '',
+        content: map['last_message_content'] as String,
+        timestamp: map['last_message_time'] != null
+            ? DateTime.fromMillisecondsSinceEpoch(map['last_message_time'] as int)
+            : DateTime.now(),
+        isOutgoing: false,
+      );
+    } else if (map['last_message'] != null) {
+      // Handle nested message map
+      lastMessage = Message.fromMap(map['last_message'] as Map<String, dynamic>);
+    }
+
     return Conversation(
       id: map['id'] as String,
       type: ConversationType.fromInt(map['type'] as int? ?? 0),
@@ -50,9 +68,7 @@ class Conversation extends Equatable {
       groupId: map['group_id'] as String?,
       displayName: map['display_name'] as String?,
       avatarUrl: map['avatar_url'] as String?,
-      lastMessage: map['last_message'] != null
-          ? Message.fromMap(map['last_message'] as Map<String, dynamic>)
-          : null,
+      lastMessage: lastMessage,
       unreadCount: map['unread_count'] as int? ?? 0,
       isPinned: (map['is_pinned'] as int?) == 1,
       isMuted: (map['is_muted'] as int?) == 1,
