@@ -5,6 +5,8 @@ import '../providers/conversation_provider.dart';
 import '../providers/mail_provider.dart';
 import '../models/models.dart';
 import 'chat_screen.dart';
+import 'group_chat_screen.dart';
+import 'create_group_screen.dart';
 import 'contacts_screen.dart';
 import 'settings_screen.dart';
 import 'mail_inbox_screen.dart';
@@ -216,16 +218,113 @@ class _ChatsTab extends ConsumerWidget {
       ),
       floatingActionButton: FloatingActionButton(
         heroTag: 'chats_fab',
-        onPressed: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => const ContactsScreen(selectMode: true),
-            ),
-          );
-        },
-        child: const Icon(Icons.edit_rounded),
+        onPressed: () => _showNewChatOptions(context),
+        child: const Icon(Icons.add_rounded),
       ),
+    );
+  }
+
+  void _showNewChatOptions(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return Container(
+          margin: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: AppColors.bgDarkSecondary,
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(top: 12),
+                decoration: BoxDecoration(
+                  color: AppColors.bgDarkTertiary,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 16),
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: AppColors.primary.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    Icons.person_add_rounded,
+                    color: AppColors.primary,
+                    size: 22,
+                  ),
+                ),
+                title: const Text(
+                  'New Chat',
+                  style: TextStyle(fontWeight: FontWeight.w500),
+                ),
+                subtitle: Text(
+                  'Start a direct conversation',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: AppColors.textDarkSecondary,
+                  ),
+                ),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const ContactsScreen(selectMode: true),
+                    ),
+                  );
+                },
+              ),
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16),
+                child: Divider(color: AppColors.bgDarkTertiary),
+              ),
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: AppColors.accent.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    Icons.group_add_rounded,
+                    color: AppColors.accent,
+                    size: 22,
+                  ),
+                ),
+                title: const Text(
+                  'New Group',
+                  style: TextStyle(fontWeight: FontWeight.w500),
+                ),
+                subtitle: Text(
+                  'Create a group chat',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: AppColors.textDarkSecondary,
+                  ),
+                ),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const CreateGroupScreen(),
+                    ),
+                  );
+                },
+              ),
+              const SizedBox(height: 16),
+            ],
+          ),
+        );
+      },
     );
   }
 }
@@ -378,6 +477,7 @@ class _ConversationCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final hasUnread = conversation.unreadCount > 0;
+    final isGroup = conversation.isGroup;
 
     return Material(
       color: AppColors.bgDarkSecondary,
@@ -385,12 +485,21 @@ class _ConversationCard extends ConsumerWidget {
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
         onTap: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (context) => ChatScreen(conversationId: conversation.id),
-            ),
-          );
+          if (isGroup) {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => GroupChatScreen(groupId: conversation.id),
+              ),
+            );
+          } else {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => ChatScreen(conversationId: conversation.id),
+              ),
+            );
+          }
         },
         onLongPress: () => _showConversationOptions(context, ref),
         child: Padding(
@@ -401,6 +510,7 @@ class _ConversationCard extends ConsumerWidget {
               _ConversationAvatar(
                 title: conversation.title,
                 hasUnread: hasUnread,
+                isGroup: isGroup,
               ),
               const SizedBox(width: 14),
               // Content
@@ -414,6 +524,14 @@ class _ConversationCard extends ConsumerWidget {
                         Expanded(
                           child: Row(
                             children: [
+                              if (isGroup) ...[
+                                Icon(
+                                  Icons.group_rounded,
+                                  size: 14,
+                                  color: AppColors.accent.withOpacity(0.8),
+                                ),
+                                const SizedBox(width: 6),
+                              ],
                               Flexible(
                                 child: Text(
                                   conversation.title,
@@ -582,10 +700,12 @@ class _ConversationCard extends ConsumerWidget {
 class _ConversationAvatar extends StatelessWidget {
   final String title;
   final bool hasUnread;
+  final bool isGroup;
 
   const _ConversationAvatar({
     required this.title,
     required this.hasUnread,
+    this.isGroup = false,
   });
 
   @override
@@ -598,7 +718,9 @@ class _ConversationAvatar extends StatelessWidget {
           decoration: BoxDecoration(
             gradient: LinearGradient(
               colors: hasUnread
-                  ? [AppColors.primary, AppColors.primaryLight]
+                  ? (isGroup
+                      ? [AppColors.accent, AppColors.accent.withOpacity(0.7)]
+                      : [AppColors.primary, AppColors.primaryLight])
                   : [AppColors.bgDarkTertiary, AppColors.bgDarkTertiary],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
@@ -606,33 +728,40 @@ class _ConversationAvatar extends StatelessWidget {
             borderRadius: BorderRadius.circular(16),
           ),
           child: Center(
-            child: Text(
-              title.isNotEmpty ? title[0].toUpperCase() : '?',
-              style: TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: hasUnread ? Colors.white : AppColors.textDarkSecondary,
+            child: isGroup
+                ? Icon(
+                    Icons.group_rounded,
+                    size: 24,
+                    color: hasUnread ? Colors.white : AppColors.textDarkSecondary,
+                  )
+                : Text(
+                    title.isNotEmpty ? title[0].toUpperCase() : '?',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: hasUnread ? Colors.white : AppColors.textDarkSecondary,
+                    ),
+                  ),
+          ),
+        ),
+        // Online/Group indicator
+        if (!isGroup)
+          Positioned(
+            right: 0,
+            bottom: 0,
+            child: Container(
+              width: 14,
+              height: 14,
+              decoration: BoxDecoration(
+                color: AppColors.accentGreen,
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: AppColors.bgDarkSecondary,
+                  width: 2,
+                ),
               ),
             ),
           ),
-        ),
-        // Online indicator
-        Positioned(
-          right: 0,
-          bottom: 0,
-          child: Container(
-            width: 14,
-            height: 14,
-            decoration: BoxDecoration(
-              color: AppColors.accentGreen,
-              shape: BoxShape.circle,
-              border: Border.all(
-                color: AppColors.bgDarkSecondary,
-                width: 2,
-              ),
-            ),
-          ),
-        ),
       ],
     );
   }
