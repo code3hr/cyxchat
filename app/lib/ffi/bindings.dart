@@ -201,17 +201,45 @@ class CyxChatBindings {
     try {
       final result = _native.cyxchat_dns_create(
         ctxPtr,
-        nullptr, // router - will be set up separately
+        nullptr, // router - transport will be set up after connection
         localId,
         signingKey ?? nullptr,
       );
       if (result == 0) {
         _dnsCtx = ctxPtr.value;
+        // Connect DNS to connection's transport for message broadcasting
+        _connectDnsToTransport();
       }
       return result;
     } finally {
       calloc.free(ctxPtr);
     }
+  }
+
+  /// Connect DNS to connection transport (internal)
+  void _connectDnsToTransport() {
+    if (_dnsCtx == null || _connCtx == null) return;
+
+    final transport = _native.cyxchat_conn_get_transport(_connCtx!);
+    final peerTable = _native.cyxchat_conn_get_peer_table(_connCtx!);
+
+    if (transport != nullptr && peerTable != nullptr) {
+      _native.cyxchat_dns_set_transport(_dnsCtx!, transport, peerTable);
+    }
+  }
+
+  /// Manually set DNS transport (call after connection is ready)
+  int dnsSetTransport() {
+    if (_dnsCtx == null || _connCtx == null) return CyxChatError.errNull;
+
+    final transport = _native.cyxchat_conn_get_transport(_connCtx!);
+    final peerTable = _native.cyxchat_conn_get_peer_table(_connCtx!);
+
+    if (transport == nullptr || peerTable == nullptr) {
+      return CyxChatError.errNull;
+    }
+
+    return _native.cyxchat_dns_set_transport(_dnsCtx!, transport, peerTable);
   }
 
   /// Destroy DNS context
@@ -997,6 +1025,19 @@ class CyxChatNative {
   late final cyxchat_dns_validate_name = _lib.lookupFunction<
       Int32 Function(Pointer<Int8>),
       int Function(Pointer<Int8>)>('cyxchat_dns_validate_name');
+
+  late final cyxchat_dns_set_transport = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Void>, Pointer<Void>),
+      int Function(Pointer<Void>, Pointer<Void>, Pointer<Void>)>(
+      'cyxchat_dns_set_transport');
+
+  late final cyxchat_conn_get_transport = _lib.lookupFunction<
+      Pointer<Void> Function(Pointer<Void>),
+      Pointer<Void> Function(Pointer<Void>)>('cyxchat_conn_get_transport');
+
+  late final cyxchat_conn_get_peer_table = _lib.lookupFunction<
+      Pointer<Void> Function(Pointer<Void>),
+      Pointer<Void> Function(Pointer<Void>)>('cyxchat_conn_get_peer_table');
 
   // Mail functions
   late final cyxchat_mail_ctx_create = _lib.lookupFunction<

@@ -502,3 +502,164 @@ void cyxchat_relay_set_on_state(cyxchat_relay_ctx_t *ctx,
     ctx->on_state = callback;
     ctx->state_user_data = user_data;
 }
+
+/* ============================================================
+ * Message Handling
+ * ============================================================ */
+
+int cyxchat_relay_is_relay_message(uint8_t msg_type)
+{
+    return msg_type >= CYXCHAT_RELAY_CONNECT && msg_type <= CYXCHAT_RELAY_ERROR;
+}
+
+cyxchat_error_t cyxchat_relay_handle_message(cyxchat_relay_ctx_t *ctx,
+                                              const uint8_t *data,
+                                              size_t len)
+{
+    if (!ctx || !data || len < 1) {
+        return CYXCHAT_ERR_NULL;
+    }
+
+    uint8_t msg_type = data[0];
+
+    /* Check if this is a relay message */
+    if (!cyxchat_relay_is_relay_message(msg_type)) {
+        return CYXCHAT_ERR_INVALID;
+    }
+
+    switch (msg_type) {
+        case CYXCHAT_RELAY_CONNECT_ACK: {
+            /* Connection acknowledged by relay server */
+            if (len < sizeof(cyxchat_relay_connect_ack_msg_t)) {
+                return CYXCHAT_ERR_INVALID;
+            }
+            const cyxchat_relay_connect_ack_msg_t *msg =
+                (const cyxchat_relay_connect_ack_msg_t*)data;
+
+            cyxchat_relay_conn_internal_t *conn = find_connection(ctx, &msg->peer);
+            if (conn) {
+                conn->last_activity = get_time_ms();
+                if (!msg->success) {
+                    /* Connection rejected */
+                    free_connection(ctx, conn);
+                }
+            }
+            break;
+        }
+
+        case CYXCHAT_RELAY_DATA: {
+            /* Data received via relay */
+            if (len < CYXCHAT_RELAY_DATA_HDR_SIZE) {
+                return CYXCHAT_ERR_INVALID;
+            }
+            const cyxchat_relay_data_msg_t *msg =
+                (const cyxchat_relay_data_msg_t*)data;
+
+            uint16_t data_len = ntohs(msg->data_len);
+            if (len < CYXCHAT_RELAY_DATA_HDR_SIZE + data_len) {
+                return CYXCHAT_ERR_INVALID;
+            }
+
+            /* Update connection state */
+            cyxchat_relay_conn_internal_t *conn = find_connection(ctx, &msg->from);
+            if (conn) {
+                conn->last_activity = get_time_ms();
+                conn->bytes_received += data_len;
+            } else {
+                /* Auto-create connection for incoming relay data */
+                conn = alloc_connection(ctx);
+                if (conn) {
+                    conn->peer_id = msg->from;
+                    conn->connected_at = get_time_ms();
+                    conn->last_activity = conn->connected_at;
+                    conn->last_keepalive = conn->connected_at;
+                    conn->server_index = 0;
+                    conn->bytes_received = data_len;
+
+                    if (ctx->on_state) {
+                        ctx->on_state(ctx, &msg->from, 1, ctx->state_user_data);
+                    }
+                }
+            }
+
+            /* Invoke data callback */
+            if (ctx->on_data) {
+                ctx->on_data(ctx, &msg->from, msg->data, data_len, ctx->data_user_data);
+            }
+            break;
+        }
+
+        case CYXCHAT_RELAY_DISCONNECT: {
+            /* Peer disconnected via relay */
+            if (len < sizeof(cyxchat_relay_connect_msg_t)) {
+                return CYXCHAT_ERR_INVALID;
+            }
+            const cyxchat_relay_connect_msg_t *msg =
+                (const cyxchat_relay_connect_msg_t*)data;
+
+            cyxchat_relay_conn_internal_t *conn = find_connection(ctx, &msg->from);
+            if (conn) {
+                free_connection(ctx, conn);
+            }
+            break;
+        }
+
+        case CYXCHAT_RELAY_KEEPALIVE: {
+            /* Keepalive from peer */
+            if (len < sizeof(cyxchat_relay_keepalive_msg_t)) {
+                return CYXCHAT_ERR_INVALID;
+            }
+            const cyxchat_relay_keepalive_msg_t *msg =
+                (const cyxchat_relay_keepalive_msg_t*)data;
+
+            cyxchat_relay_conn_internal_t *conn = find_connection(ctx, &msg->from);
+            if (conn) {
+                conn->last_activity = get_time_ms();
+            }
+            break;
+        }
+
+        case CYXCHAT_RELAY_ERROR: {
+            /* Error from relay server - could be peer offline, etc. */
+            /* For now, just log and ignore */
+            break;
+        }
+
+        case CYXCHAT_RELAY_CONNECT: {
+            /* Incoming connection request (we are the target) */
+            if (len < sizeof(cyxchat_relay_connect_msg_t)) {
+                return CYXCHAT_ERR_INVALID;
+            }
+            const cyxchat_relay_connect_msg_t *msg =
+                (const cyxchat_relay_connect_msg_t*)data;
+
+            /* Check if it's addressed to us */
+            if (memcmp(&msg->to, &ctx->local_id, sizeof(cyxwiz_node_id_t)) != 0) {
+                return CYXCHAT_OK;  /* Not for us */
+            }
+
+            /* Auto-accept connection */
+            cyxchat_relay_conn_internal_t *conn = find_connection(ctx, &msg->from);
+            if (!conn) {
+                conn = alloc_connection(ctx);
+                if (conn) {
+                    conn->peer_id = msg->from;
+                    conn->connected_at = get_time_ms();
+                    conn->last_activity = conn->connected_at;
+                    conn->last_keepalive = conn->connected_at;
+                    conn->server_index = 0;
+
+                    if (ctx->on_state) {
+                        ctx->on_state(ctx, &msg->from, 1, ctx->state_user_data);
+                    }
+                }
+            }
+            break;
+        }
+
+        default:
+            return CYXCHAT_ERR_INVALID;
+    }
+
+    return CYXCHAT_OK;
+}

@@ -27,6 +27,7 @@
 /* Forward declarations for broadcast helper */
 typedef struct {
     cyxwiz_router_t *router;
+    cyxwiz_transport_t *transport;
     const uint8_t *data;
     size_t len;
 } dns_broadcast_ctx_t;
@@ -35,22 +36,38 @@ static int dns_broadcast_callback(const cyxwiz_peer_t *peer, void *user_data)
 {
     dns_broadcast_ctx_t *ctx = (dns_broadcast_ctx_t*)user_data;
     if (peer->state == CYXWIZ_PEER_STATE_CONNECTED) {
-        cyxwiz_router_send(ctx->router, &peer->id, ctx->data, ctx->len);
+        if (ctx->router) {
+            cyxwiz_router_send(ctx->router, &peer->id, ctx->data, ctx->len);
+        } else if (ctx->transport) {
+            ctx->transport->ops->send(ctx->transport, &peer->id, ctx->data, ctx->len);
+        }
     }
     return 0;  /* Continue iteration */
 }
 
-/* Broadcast to all connected peers */
-static void dns_broadcast(cyxwiz_router_t *router, const uint8_t *data, size_t len)
+/* Broadcast to all connected peers using router */
+static void dns_broadcast_via_router(cyxwiz_router_t *router, const uint8_t *data, size_t len)
 {
     if (!router) return;
 
     cyxwiz_peer_table_t *table = cyxwiz_router_get_peer_table(router);
     if (!table) return;
 
-    dns_broadcast_ctx_t ctx = { router, data, len };
+    dns_broadcast_ctx_t ctx = { router, NULL, data, len };
     cyxwiz_peer_table_iterate(table, dns_broadcast_callback, &ctx);
 }
+
+/* Broadcast to all connected peers using transport directly */
+static void dns_broadcast_via_transport(cyxwiz_transport_t *transport, cyxwiz_peer_table_t *peer_table,
+                                        const uint8_t *data, size_t len)
+{
+    if (!transport || !peer_table) return;
+
+    dns_broadcast_ctx_t ctx = { NULL, transport, data, len };
+    cyxwiz_peer_table_iterate(peer_table, dns_broadcast_callback, &ctx);
+}
+
+/* Forward declaration - dns_ctx_broadcast defined after struct cyxchat_dns_ctx */
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -100,8 +117,12 @@ typedef struct {
 
 /* DNS context */
 struct cyxchat_dns_ctx {
-    /* Router for messaging */
+    /* Router for messaging (preferred) */
     cyxwiz_router_t *router;
+
+    /* Direct transport (alternative to router) */
+    cyxwiz_transport_t *transport;
+    cyxwiz_peer_table_t *peer_table;
 
     /* Our identity */
     cyxwiz_node_id_t local_id;
@@ -131,6 +152,17 @@ struct cyxchat_dns_ctx {
     /* Statistics */
     cyxchat_dns_stats_t stats;
 };
+
+/* Broadcast to all connected peers (auto-selects method) */
+static void dns_ctx_broadcast(cyxchat_dns_ctx_t *ctx, const uint8_t *data, size_t len)
+{
+    if (ctx->router) {
+        dns_broadcast_via_router(ctx->router, data, len);
+    } else if (ctx->transport && ctx->peer_table) {
+        dns_broadcast_via_transport(ctx->transport, ctx->peer_table, data, len);
+    }
+    /* If neither is available, silently fail - registration is still stored locally */
+}
 
 /* ============================================================
  * Helper Functions
@@ -578,7 +610,7 @@ static void handle_register(cyxchat_dns_ctx_t *ctx, const cyxwiz_node_id_t *from
 
         if (msg_len > 0 && ctx->router) {
             /* Broadcast to all connected peers */
-            dns_broadcast(ctx->router, msg, msg_len);
+            dns_ctx_broadcast(ctx, msg, msg_len);
             ctx->stats.gossip_forwards++;
         }
     }
@@ -731,6 +763,20 @@ cyxchat_error_t cyxchat_dns_create(cyxchat_dns_ctx_t **ctx_out,
     return CYXCHAT_OK;
 }
 
+cyxchat_error_t cyxchat_dns_set_transport(cyxchat_dns_ctx_t *ctx,
+                                           cyxwiz_transport_t *transport,
+                                           cyxwiz_peer_table_t *peer_table)
+{
+    if (!ctx) {
+        return CYXCHAT_ERR_NULL;
+    }
+
+    ctx->transport = transport;
+    ctx->peer_table = peer_table;
+
+    return CYXCHAT_OK;
+}
+
 void cyxchat_dns_destroy(cyxchat_dns_ctx_t *ctx)
 {
     if (!ctx) return;
@@ -825,7 +871,7 @@ cyxchat_error_t cyxchat_dns_register(cyxchat_dns_ctx_t *ctx,
     size_t msg_len = serialize_register(&ctx->my_record, 0, msg, sizeof(msg));
 
     if (msg_len > 0 && ctx->router) {
-        dns_broadcast(ctx->router, msg, msg_len);
+        dns_ctx_broadcast(ctx, msg, msg_len);
     }
 
     ctx->stats.registrations++;
@@ -856,7 +902,7 @@ cyxchat_error_t cyxchat_dns_refresh(cyxchat_dns_ctx_t *ctx)
     size_t msg_len = serialize_register(&ctx->my_record, 0, msg, sizeof(msg));
 
     if (msg_len > 0 && ctx->router) {
-        dns_broadcast(ctx->router, msg, msg_len);
+        dns_ctx_broadcast(ctx, msg, msg_len);
     }
 
     return CYXCHAT_OK;
@@ -877,7 +923,7 @@ cyxchat_error_t cyxchat_dns_unregister(cyxchat_dns_ctx_t *ctx)
     size_t msg_len = serialize_register(&ctx->my_record, 0, msg, sizeof(msg));
 
     if (msg_len > 0 && ctx->router) {
-        dns_broadcast(ctx->router, msg, msg_len);
+        dns_ctx_broadcast(ctx, msg, msg_len);
     }
 
     ctx->is_registered = 0;
@@ -970,7 +1016,7 @@ cyxchat_error_t cyxchat_dns_lookup(cyxchat_dns_ctx_t *ctx,
     size_t msg_len = serialize_lookup(normalized, pending->query_id, msg, sizeof(msg));
 
     if (msg_len > 0 && ctx->router) {
-        dns_broadcast(ctx->router, msg, msg_len);
+        dns_ctx_broadcast(ctx, msg, msg_len);
     }
 
     ctx->stats.lookups_sent++;
@@ -1212,9 +1258,15 @@ cyxchat_error_t cyxchat_dns_normalize_name(const char *name,
 
     size_t len = strlen(name);
 
-    /* Strip .cyx suffix if present */
-    if (len > 4 && strcmp(name + len - 4, CYXCHAT_DNS_SUFFIX) == 0) {
-        len -= 4;
+    /* Strip .cyx suffix if present (case-insensitive) */
+    if (len > 4) {
+        const char *suffix = name + len - 4;
+        if (suffix[0] == '.' &&
+            (suffix[1] == 'c' || suffix[1] == 'C') &&
+            (suffix[2] == 'y' || suffix[2] == 'Y') &&
+            (suffix[3] == 'x' || suffix[3] == 'X')) {
+            len -= 4;
+        }
     }
 
     if (len >= out_len) {

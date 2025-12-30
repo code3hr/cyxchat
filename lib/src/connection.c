@@ -184,6 +184,28 @@ static void set_peer_state(cyxchat_conn_ctx_t *ctx, cyxchat_peer_conn_t *peer,
     }
 }
 
+/* Relay data callback - forwards relay data to application */
+static void on_relay_data(cyxchat_relay_ctx_t *relay_ctx,
+                          const cyxwiz_node_id_t *from,
+                          const uint8_t *data, size_t len,
+                          void *user_data)
+{
+    (void)relay_ctx;
+    cyxchat_conn_ctx_t *ctx = (cyxchat_conn_ctx_t*)user_data;
+
+    /* Update peer connection state */
+    cyxchat_peer_conn_t *peer = find_peer_conn(ctx, from);
+    if (peer) {
+        peer->last_activity = get_time_ms();
+        peer->bytes_received += (uint32_t)len;
+    }
+
+    /* Forward to application callback */
+    if (ctx->on_data) {
+        ctx->on_data(ctx, from, data, len, ctx->data_user_data);
+    }
+}
+
 /* Transport callbacks */
 static void on_transport_recv(cyxwiz_transport_t *transport,
                               const cyxwiz_node_id_t *from,
@@ -192,6 +214,12 @@ static void on_transport_recv(cyxwiz_transport_t *transport,
 {
     (void)transport;  /* Unused - we use the transport from context */
     cyxchat_conn_ctx_t *ctx = (cyxchat_conn_ctx_t*)user_data;
+
+    /* Check for relay messages and handle them */
+    if (len > 0 && ctx->relay && cyxchat_relay_is_relay_message(data[0])) {
+        cyxchat_relay_handle_message(ctx->relay, data, len);
+        return;  /* Relay handler forwards data via callback */
+    }
 
     /* Update peer connection state */
     cyxchat_peer_conn_t *peer = find_peer_conn(ctx, from);
@@ -317,6 +345,11 @@ cyxchat_error_t cyxchat_conn_create(cyxchat_conn_ctx_t **ctx,
 
     /* Create relay context */
     cyxchat_relay_create(&c->relay, c->transport, local_id);
+
+    /* Set relay callbacks */
+    if (c->relay) {
+        cyxchat_relay_set_on_data(c->relay, on_relay_data, c);
+    }
 
     /* Start discovery */
     c->transport->ops->discover(c->transport);

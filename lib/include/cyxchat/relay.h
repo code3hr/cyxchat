@@ -219,6 +219,32 @@ CYXCHAT_API void cyxchat_relay_set_on_state(
     void *user_data
 );
 
+/* ============================================================
+ * Message Handling
+ * ============================================================ */
+
+/**
+ * Handle incoming relay message
+ *
+ * Call this when a message is received that may be a relay protocol
+ * message (types 0xE0-0xE5).
+ *
+ * @param ctx           Relay context
+ * @param data          Message data
+ * @param len           Message length
+ * @return              CYXCHAT_OK if handled, CYXCHAT_ERR_INVALID if not a relay msg
+ */
+CYXCHAT_API cyxchat_error_t cyxchat_relay_handle_message(
+    cyxchat_relay_ctx_t *ctx,
+    const uint8_t *data,
+    size_t len
+);
+
+/**
+ * Check if message type is a relay message
+ */
+CYXCHAT_API int cyxchat_relay_is_relay_message(uint8_t msg_type);
+
 #ifdef __cplusplus
 }
 #endif

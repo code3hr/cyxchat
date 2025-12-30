@@ -10,6 +10,7 @@
 int test_chat(void);
 int test_contact(void);
 int test_group(void);
+int test_dns(void);
 
 /* Test runner */
 typedef struct {
@@ -21,6 +22,7 @@ static test_case_t tests[] = {
     { "chat",    test_chat },
     { "contact", test_contact },
     { "group",   test_group },
+    { "dns",     test_dns },
     { NULL, NULL }
 };
 

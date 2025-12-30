@@ -13,6 +13,8 @@
 
 #include "types.h"
 #include <cyxwiz/routing.h>
+#include <cyxwiz/transport.h>
+#include <cyxwiz/peer.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -95,7 +97,7 @@ typedef struct cyxchat_dns_ctx cyxchat_dns_ctx_t;
  * Create DNS context
  *
  * @param ctx_out      Output: created context
- * @param router       CyxWiz router for messaging
+ * @param router       CyxWiz router for messaging (can be NULL if using transport)
  * @param local_id     Our node ID
  * @param signing_key  Our Ed25519 signing key (64 bytes, secret+public)
  * @return             CYXCHAT_OK or error
@@ -105,6 +107,23 @@ CYXCHAT_API cyxchat_error_t cyxchat_dns_create(
     cyxwiz_router_t *router,
     const cyxwiz_node_id_t *local_id,
     const uint8_t *signing_key
+);
+
+/**
+ * Set transport for DNS messaging (alternative to router)
+ *
+ * Use this when you have a transport but no router.
+ * DNS will broadcast directly to connected peers.
+ *
+ * @param ctx          DNS context
+ * @param transport    CyxWiz transport for sending
+ * @param peer_table   Peer table for finding connected peers
+ * @return             CYXCHAT_OK or error
+ */
+CYXCHAT_API cyxchat_error_t cyxchat_dns_set_transport(
+    cyxchat_dns_ctx_t *ctx,
+    cyxwiz_transport_t *transport,
+    cyxwiz_peer_table_t *peer_table
 );
 
 /**

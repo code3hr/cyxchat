@@ -218,7 +218,7 @@ if(CYXCHAT_BUILD_STATIC)
     target_compile_definitions(cyxchat_static PRIVATE CYXCHAT_STATIC CYXWIZ_HAS_CRYPTO)
 
     if(WIN32)
-        target_compile_definitions(cyxchat_static PRIVATE _CRT_SECURE_NO_WARNINGS)
+        target_compile_definitions(cyxchat_static PRIVATE _CRT_SECURE_NO_WARNINGS SODIUM_STATIC)
     else()
         target_compile_options(cyxchat_static PRIVATE -Wall -Wextra -Werror)
     endif()
@@ -248,6 +248,7 @@ if(CYXCHAT_BUILD_TESTS)
         tests/test_chat.c
         tests/test_contact.c
         tests/test_group.c
+        tests/test_dns.c
     )
 
     target_include_directories(test_cyxchat PRIVATE
@@ -258,7 +259,7 @@ if(CYXCHAT_BUILD_TESTS)
     target_compile_definitions(test_cyxchat PRIVATE CYXCHAT_STATIC CYXWIZ_HAS_CRYPTO)
 
     if(WIN32)
-        target_compile_definitions(test_cyxchat PRIVATE _CRT_SECURE_NO_WARNINGS)
+        target_compile_definitions(test_cyxchat PRIVATE _CRT_SECURE_NO_WARNINGS SODIUM_STATIC)
     endif()
 
     # Always link static for tests
