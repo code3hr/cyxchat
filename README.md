@@ -11,6 +11,12 @@ Privacy-first messaging application built on the [CyxWiz](https://github.com/cod
 - **Group Chat**: Private groups with rotating keys
 - **Cross-Platform**: Desktop (Windows, macOS, Linux) + Mobile (iOS, Android)
 
+## Screenshots
+
+| Chats | Contacts | Settings | Add Contact |
+|:-----:|:--------:|:--------:|:-----------:|
+| ![Chats](cyxchat1.png) | ![Contacts](cyxchat2.png) | ![Settings](cyxchat3.png) | ![Add Contact](cyxchat4.png) |
+
 ## Architecture
 
 ```
