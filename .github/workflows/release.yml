@@ -144,6 +144,11 @@ jobs:
           mkdir -p app/native
           Expand-Archive -Path cyxchat-lib-*.zip -DestinationPath app/native/
 
+      - name: Add platform support
+        run: |
+          cd app
+          flutter create --platforms=${{ matrix.target }} .
+
       - name: Get dependencies
         run: |
           cd app
@@ -330,7 +335,7 @@ jobs:
       - name: Build iOS (simulator - device requires signing)
         run: |
           cd app
-          flutter build ios --release --simulator || echo "Note: Device build skipped (requires code signing)"
+          flutter build ios --debug --simulator || echo "Note: Device build skipped (requires code signing)"
 
       - name: Package iOS
         run: |

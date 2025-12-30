@@ -122,6 +122,11 @@ jobs:
           name: cyxchat-${{ matrix.target }}
           path: app/native/
 
+      - name: Add platform support
+        run: |
+          cd app
+          flutter create --platforms=${{ matrix.target }} .
+
       - name: Get dependencies
         run: |
           cd app
@@ -322,7 +327,7 @@ jobs:
       - name: Build iOS (simulator only - no codesign for device)
         run: |
           cd app
-          flutter build ios --release --simulator
+          flutter build ios --debug --simulator
 
       - name: Upload iOS build
         uses: actions/upload-artifact@v4
