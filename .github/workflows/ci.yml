@@ -247,6 +247,10 @@ jobs:
           cat settings.gradle | head -20
           cat app/build.gradle | head -30
 
+      - name: Install Android SDK Platform 35
+        run: |
+          sdkmanager --install "platforms;android-35" "build-tools;35.0.0"
+
       - name: Clone and build cyxwiz for Android
         run: |
           git clone https://github.com/code3hr/conspiracy.git ../cyxwiz

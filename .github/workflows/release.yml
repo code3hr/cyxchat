@@ -267,6 +267,10 @@ jobs:
           # Update compileSdk to 35 (required by flutter_plugin_android_lifecycle)
           sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 35/' app/build.gradle
 
+      - name: Install Android SDK Platform 35
+        run: |
+          sdkmanager --install "platforms;android-35" "build-tools;35.0.0"
+
       - name: Clone and build cyxwiz for Android
         run: |
           git clone https://github.com/code3hr/conspiracy.git ../cyxwiz
