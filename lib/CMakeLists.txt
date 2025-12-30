@@ -19,11 +19,20 @@ if(NOT TARGET cyxwiz)
     # Check for CYXWIZ_ROOT (from CI or command line)
     if(DEFINED CYXWIZ_ROOT AND EXISTS "${CYXWIZ_ROOT}/include/cyxwiz")
         set(CYXWIZ_INCLUDE_DIR "${CYXWIZ_ROOT}/include")
-        set(CYXWIZ_LIBRARY_DIR "${CYXWIZ_ROOT}/build")
+        # Use CYXWIZ_BUILD_DIR if specified (for cross-compilation), otherwise default to /build
+        if(DEFINED CYXWIZ_BUILD_DIR AND EXISTS "${CYXWIZ_BUILD_DIR}")
+            set(CYXWIZ_LIBRARY_DIR "${CYXWIZ_BUILD_DIR}")
+        else()
+            set(CYXWIZ_LIBRARY_DIR "${CYXWIZ_ROOT}/build")
+        endif()
     # Try to find in parent directory
     elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../include/cyxwiz")
         set(CYXWIZ_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../include")
-        set(CYXWIZ_LIBRARY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../build")
+        if(DEFINED CYXWIZ_BUILD_DIR AND EXISTS "${CYXWIZ_BUILD_DIR}")
+            set(CYXWIZ_LIBRARY_DIR "${CYXWIZ_BUILD_DIR}")
+        else()
+            set(CYXWIZ_LIBRARY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../build")
+        endif()
     endif()
 
     if(CYXWIZ_LIBRARY_DIR)
@@ -38,8 +47,9 @@ if(NOT TARGET cyxwiz)
             )
         else()
             find_library(CYXWIZ_LIBRARY
-                NAMES cyxwiz libcyxwiz cyxwiz_static
+                NAMES cyxwiz libcyxwiz cyxwiz_static libcyxwiz_static
                 PATHS "${CYXWIZ_LIBRARY_DIR}"
+                NO_DEFAULT_PATH
             )
         endif()
     else()
