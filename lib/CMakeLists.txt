@@ -57,8 +57,14 @@ message(STATUS "CYXWIZ_INCLUDE_DIR: ${CYXWIZ_INCLUDE_DIR}")
 message(STATUS "CYXWIZ_LIBRARY: ${CYXWIZ_LIBRARY}")
 
 # Find libsodium
-if(PKG_CONFIG_FOUND)
+# Skip pkg-config when cross-compiling (it finds host libraries, not target)
+if(PKG_CONFIG_FOUND AND NOT CMAKE_CROSSCOMPILING)
     pkg_check_modules(SODIUM libsodium)
+endif()
+
+# If pkg-config found sodium but paths are empty, consider it not found
+if(SODIUM_FOUND AND (NOT SODIUM_INCLUDE_DIRS OR NOT SODIUM_LIBRARIES))
+    set(SODIUM_FOUND FALSE)
 endif()
 
 if(NOT SODIUM_FOUND)
