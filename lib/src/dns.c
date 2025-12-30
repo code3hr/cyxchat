@@ -501,6 +501,7 @@ static size_t serialize_lookup(const char *name, uint8_t query_id,
 static size_t serialize_response(uint8_t query_id, const cyxchat_dns_record_t *record,
                                   uint8_t *out, size_t out_len)
 {
+    (void)out_len; /* TODO: Add bounds checking */
     size_t offset = 0;
 
     out[offset++] = CYXCHAT_MSG_DNS_RESPONSE;
@@ -541,6 +542,7 @@ static size_t serialize_response(uint8_t query_id, const cyxchat_dns_record_t *r
 static void handle_register(cyxchat_dns_ctx_t *ctx, const cyxwiz_node_id_t *from,
                             const uint8_t *data, size_t len)
 {
+    (void)from; /* Record contains node_id, from is for routing only */
     cyxchat_dns_record_t record;
     uint8_t hops;
 
@@ -590,7 +592,7 @@ static void handle_lookup(cyxchat_dns_ctx_t *ctx, const cyxwiz_node_id_t *from,
     uint8_t query_id = data[1];
     uint8_t name_len = data[2];
 
-    if (name_len > CYXCHAT_DNS_MAX_NAME || len < 3 + name_len) return;
+    if (name_len > CYXCHAT_DNS_MAX_NAME || len < (size_t)(3 + name_len)) return;
 
     char name[CYXCHAT_DNS_MAX_NAME + 1];
     memcpy(name, data + 3, name_len);
@@ -623,6 +625,7 @@ static void handle_lookup(cyxchat_dns_ctx_t *ctx, const cyxwiz_node_id_t *from,
 static void handle_response(cyxchat_dns_ctx_t *ctx, const cyxwiz_node_id_t *from,
                              const uint8_t *data, size_t len)
 {
+    (void)from; /* Response matched by query_id, not sender */
     if (len < DNS_RESPONSE_MIN_SIZE) return;
 
     uint8_t query_id = data[1];
@@ -798,7 +801,8 @@ cyxchat_error_t cyxchat_dns_register(cyxchat_dns_ctx_t *ctx,
     /* Normalize and copy name */
     char normalized[CYXCHAT_DNS_MAX_NAME + 1];
     cyxchat_dns_normalize_name(name, normalized, sizeof(normalized));
-    strncpy(ctx->my_record.name, normalized, CYXCHAT_DNS_MAX_NAME);
+    strncpy(ctx->my_record.name, normalized, CYXCHAT_DNS_MAX_NAME - 1);
+    ctx->my_record.name[CYXCHAT_DNS_MAX_NAME - 1] = '\0';
 
     ctx->my_record.node_id = ctx->local_id;
     memcpy(ctx->my_record.pubkey, ctx->pubkey, 32);
@@ -924,7 +928,8 @@ cyxchat_error_t cyxchat_dns_lookup(cyxchat_dns_ctx_t *ctx,
         memset(&record, 0, sizeof(record));
 
         if (cyxchat_dns_parse_crypto_name(normalized, &record.node_id) == CYXCHAT_OK) {
-            strncpy(record.name, normalized, CYXCHAT_DNS_MAX_NAME);
+            strncpy(record.name, normalized, CYXCHAT_DNS_MAX_NAME - 1);
+            record.name[CYXCHAT_DNS_MAX_NAME - 1] = '\0';
             record.ttl = UINT32_MAX;  /* Never expires */
 
             if (callback) {
@@ -957,7 +962,8 @@ cyxchat_error_t cyxchat_dns_lookup(cyxchat_dns_ctx_t *ctx,
         return CYXCHAT_ERR_FULL;
     }
 
-    strncpy(pending->name, normalized, CYXCHAT_DNS_MAX_NAME);
+    strncpy(pending->name, normalized, CYXCHAT_DNS_MAX_NAME - 1);
+    pending->name[CYXCHAT_DNS_MAX_NAME - 1] = '\0';
     pending->callback = callback;
     pending->user_data = user_data;
     pending->start_time = get_time_ms();
