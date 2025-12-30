@@ -801,8 +801,7 @@ cyxchat_error_t cyxchat_dns_register(cyxchat_dns_ctx_t *ctx,
     /* Normalize and copy name */
     char normalized[CYXCHAT_DNS_MAX_NAME + 1];
     cyxchat_dns_normalize_name(name, normalized, sizeof(normalized));
-    strncpy(ctx->my_record.name, normalized, CYXCHAT_DNS_MAX_NAME - 1);
-    ctx->my_record.name[CYXCHAT_DNS_MAX_NAME - 1] = '\0';
+    snprintf(ctx->my_record.name, sizeof(ctx->my_record.name), "%s", normalized);
 
     ctx->my_record.node_id = ctx->local_id;
     memcpy(ctx->my_record.pubkey, ctx->pubkey, 32);
@@ -928,8 +927,7 @@ cyxchat_error_t cyxchat_dns_lookup(cyxchat_dns_ctx_t *ctx,
         memset(&record, 0, sizeof(record));
 
         if (cyxchat_dns_parse_crypto_name(normalized, &record.node_id) == CYXCHAT_OK) {
-            strncpy(record.name, normalized, CYXCHAT_DNS_MAX_NAME - 1);
-            record.name[CYXCHAT_DNS_MAX_NAME - 1] = '\0';
+            snprintf(record.name, sizeof(record.name), "%s", normalized);
             record.ttl = UINT32_MAX;  /* Never expires */
 
             if (callback) {
@@ -962,8 +960,7 @@ cyxchat_error_t cyxchat_dns_lookup(cyxchat_dns_ctx_t *ctx,
         return CYXCHAT_ERR_FULL;
     }
 
-    strncpy(pending->name, normalized, CYXCHAT_DNS_MAX_NAME - 1);
-    pending->name[CYXCHAT_DNS_MAX_NAME - 1] = '\0';
+    snprintf(pending->name, sizeof(pending->name), "%s", normalized);
     pending->callback = callback;
     pending->user_data = user_data;
     pending->start_time = get_time_ms();
@@ -1063,8 +1060,7 @@ cyxchat_error_t cyxchat_dns_set_petname(cyxchat_dns_ctx_t *ctx,
     }
 
     entry->node_id = *node_id;
-    strncpy(entry->petname, petname, CYXCHAT_DNS_MAX_NAME);
-    entry->petname[CYXCHAT_DNS_MAX_NAME] = '\0';
+    snprintf(entry->petname, sizeof(entry->petname), "%s", petname);
 
     return CYXCHAT_OK;
 }
