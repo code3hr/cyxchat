@@ -338,6 +338,183 @@ Key functions:
 
 ---
 
+## Bootstrap Server Protocol
+
+The bootstrap server helps peers discover each other. It's combined with relay in `cyxchat-server.c`.
+
+### Message Types (0xF0-0xF3)
+
+| Code | Message | Direction | Purpose |
+|------|---------|-----------|---------|
+| 0xF0 | REGISTER | Client→Server | "I'm online" |
+| 0xF1 | REGISTER_ACK | Server→Client | "Got it" |
+| 0xF2 | PEER_LIST | Server→Client | "Here's who's online" |
+| 0xF3 | CONNECT_REQ | Both ways | "Peer X wants to connect" |
+
+### Message Formats
+
+**REGISTER (0xF0)**
+```
+┌──────────┬──────────────┬────────────┐
+│ type (1) │ node_id (32) │ port (2)   │
+└──────────┴──────────────┴────────────┘
+Total: 35 bytes
+```
+
+**REGISTER_ACK (0xF1)**
+```
+┌──────────┐
+│ type (1) │
+└──────────┘
+Total: 1 byte
+```
+
+**PEER_LIST (0xF2)**
+```
+┌──────────┬─────────────┬─────────────────────────────────┐
+│ type (1) │ count (1)   │ peers[] (38 bytes each)         │
+└──────────┴─────────────┴─────────────────────────────────┘
+                         │
+                         ▼ (repeated for each peer)
+              ┌──────────────┬──────────┬────────────┐
+              │ node_id (32) │ ip (4)   │ port (2)   │
+              └──────────────┴──────────┴────────────┘
+Max peers per list: 10
+```
+
+**CONNECT_REQ (0xF3)**
+```
+┌──────────┬───────────────────┬─────────────────┬─────────────────┐
+│ type (1) │ requester_id (32) │ requester_ip (4)│ requester_port (2)│
+└──────────┴───────────────────┴─────────────────┴─────────────────┘
+Total: 39 bytes
+```
+
+### Bootstrap Flow
+
+```
+Peer A                    Bootstrap Server                    Peer B
+   │                            │                               │
+   │── REGISTER (A's ID) ──────►│                               │
+   │◄── REGISTER_ACK ───────────│                               │
+   │◄── PEER_LIST (B, C, ...) ──│                               │
+   │                            │                               │
+   │   (A wants to talk to B)   │                               │
+   │                            │                               │
+   │── CONNECT_REQ (to B) ─────►│                               │
+   │                            │── CONNECT_REQ (from A) ──────►│
+   │                            │   (includes A's IP:port)      │
+   │                            │                               │
+   │◄─────────── UDP Hole Punch (both sides send) ─────────────►│
+```
+
+---
+
+## Relay Protocol Details
+
+When hole punching fails, traffic goes through the relay server.
+
+### Message Types (0xE0-0xE5)
+
+| Code | Message | Direction | Purpose |
+|------|---------|-----------|---------|
+| 0xE0 | RELAY_CONNECT | Client→Server | "I want to relay to peer X" |
+| 0xE1 | RELAY_CONNECT_ACK | Server→Client | "Relay established" |
+| 0xE2 | RELAY_DISCONNECT | Client→Server | "Done relaying" |
+| 0xE3 | RELAY_DATA | Both ways | "Forward this data" |
+| 0xE4 | RELAY_KEEPALIVE | Client→Server | "I'm still here" |
+| 0xE5 | RELAY_ERROR | Server→Client | "Something went wrong" |
+
+### Message Formats
+
+**RELAY_CONNECT (0xE0)**
+```
+┌──────────┬──────────────┬────────────┐
+│ type (1) │ from_id (32) │ to_id (32) │
+└──────────┴──────────────┴────────────┘
+Total: 65 bytes
+```
+
+**RELAY_DATA (0xE3)**
+```
+┌──────────┬──────────────┬────────────┬──────────────┬─────────────┐
+│ type (1) │ from_id (32) │ to_id (32) │ data_len (2) │ payload (N) │
+└──────────┴──────────────┴────────────┴──────────────┴─────────────┘
+Header: 67 bytes
+Max payload: 1400 bytes
+```
+
+### Relay Flow
+
+```
+Peer A                      Relay Server                      Peer B
+   │                             │                               │
+   │  (hole punch failed)        │                               │
+   │                             │                               │
+   │── RELAY_CONNECT ───────────►│                               │
+   │   (from=A, to=B)            │── RELAY_CONNECT ─────────────►│
+   │                             │   (from=A, to=B)              │
+   │◄── RELAY_CONNECT_ACK ───────│◄── RELAY_CONNECT_ACK ─────────│
+   │                             │                               │
+   │── RELAY_DATA ──────────────►│                               │
+   │   (to=B, encrypted msg)     │── RELAY_DATA ────────────────►│
+   │                             │   (from=A, encrypted msg)     │
+   │                             │                               │
+   │                             │◄── RELAY_DATA ────────────────│
+   │◄── RELAY_DATA ──────────────│   (to=A, encrypted reply)     │
+   │   (from=B, encrypted reply) │                               │
+```
+
+### What the Relay Server Sees
+
+| Data | Visible to Server? |
+|------|--------------------|
+| Who is talking to whom | **Yes** (from_id, to_id in header) |
+| When messages are sent | **Yes** (server processes them) |
+| Message size | **Yes** (data_len field) |
+| Message content | **No** (E2E encrypted payload) |
+| Public keys | **No** (only node IDs) |
+
+---
+
+## Known Limitations
+
+### IP Change During Active Session
+
+**Current behavior:**
+```
+1. User on WiFi (IP: 1.2.3.4)
+2. UDP hole punch established with peer
+3. User moves to mobile data (IP: 5.6.7.8)
+4. Old hole punch breaks (wrong IP)
+5. Peer timeout after 30 seconds
+6. Connection marked as disconnected
+7. User must manually reconnect
+```
+
+**What should happen:**
+```
+1. Periodic STUN refresh (every 30-60s)
+2. Detect IP change
+3. Re-register with bootstrap server
+4. Use relay as bridge during transition
+5. Re-punch hole with new IP
+6. Seamlessly restore direct connection
+7. No message loss, no manual intervention
+```
+
+**Status:** Not yet implemented. See `TODO.md` for implementation plan.
+
+### Symmetric NAT on Both Sides
+
+When both peers have symmetric NAT, hole punching almost always fails.
+Relay is required. This adds:
+- ~50-100ms latency (extra hop)
+- Server sees metadata (who talks to whom)
+- Dependency on relay server availability
+
+---
+
 ## References
 
 - RFC 5389: STUN Protocol
