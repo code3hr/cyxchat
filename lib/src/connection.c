@@ -25,8 +25,11 @@
 #include <ws2tcpip.h>
 #else
 #include <arpa/inet.h>
+#include <netdb.h>
+#include <sys/socket.h>
 #include <sys/time.h>
 #include <time.h>
+#include <errno.h>
 #endif
 
 /* ============================================================
@@ -268,6 +271,7 @@ static void on_transport_recv(cyxwiz_transport_t *transport,
             for (int i = 0; i < 32; i++) {
                 if (pk[i] != 0) { has_pk = 1; break; }
             }
+            (void)has_pk;  /* Used for debugging */
         }
         cyxwiz_discovery_handle_message(ctx->discovery, from, data, len);
         /* Don't return - also process below for connection state updates */
