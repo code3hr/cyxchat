@@ -177,4 +177,18 @@ class ContactActions {
     await ContactService.instance.deleteContact(nodeId);
     _ref.invalidate(contactsProvider);
   }
+
+  /// Update contact presence
+  Future<void> updatePresence(
+    String nodeId,
+    PresenceStatus presence, {
+    String? statusText,
+  }) async {
+    await ContactService.instance.updatePresence(
+      nodeId,
+      presence,
+      statusText: statusText,
+    );
+    _ref.invalidate(contactsProvider);
+  }
 }

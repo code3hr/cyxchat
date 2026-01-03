@@ -64,6 +64,11 @@ class ChatActions {
     _ref.invalidate(messagesProvider(conversationId));
   }
 
+  Future<void> editMessage(String messageId, String conversationId, String newContent) async {
+    await ChatService.instance.editMessage(messageId, newContent);
+    _ref.invalidate(messagesProvider(conversationId));
+  }
+
   Future<void> togglePin(String conversationId) async {
     await ChatService.instance.togglePin(conversationId);
     _ref.invalidate(conversationsProvider);

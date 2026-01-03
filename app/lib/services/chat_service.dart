@@ -426,12 +426,29 @@ class ChatService {
     // Emit to stream
     _messageController.add(message);
 
+    // Update sender's presence to online (they're actively messaging)
+    await _updateSenderPresence(received.fromNodeId);
+
     // Send ACK back to sender
     if (_chatProvider != null) {
       // Need native msg ID to ACK - but we don't have it from the wire format
       // The native layer should handle ACK automatically via callback
       debugPrint('ChatService: Received message from ${received.fromNodeId}: ${parsed.text}');
     }
+  }
+
+  /// Update sender's presence when we receive a message from them
+  Future<void> _updateSenderPresence(String nodeId) async {
+    final db = await DatabaseService.instance.database;
+    await db.update(
+      'contacts',
+      {
+        'presence': PresenceStatus.online.index,
+        'last_seen': DateTime.now().millisecondsSinceEpoch,
+      },
+      where: 'node_id = ?',
+      whereArgs: [nodeId],
+    );
   }
 
   /// Handle ACK (delivery/read receipt)

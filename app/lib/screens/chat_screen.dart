@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:file_picker/file_picker.dart';
 import '../providers/conversation_provider.dart';
 import '../models/models.dart';
 
@@ -90,6 +92,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                     final message = messages[messages.length - 1 - index];
                     return _MessageBubble(
                       message: message,
+                      conversationId: widget.conversationId,
                       onReply: () => _setReplyTo(message),
                     );
                   },
@@ -175,20 +178,22 @@ class _EmptyMessages extends StatelessWidget {
   }
 }
 
-class _MessageBubble extends StatefulWidget {
+class _MessageBubble extends ConsumerStatefulWidget {
   final Message message;
+  final String conversationId;
   final VoidCallback onReply;
 
   const _MessageBubble({
     required this.message,
+    required this.conversationId,
     required this.onReply,
   });
 
   @override
-  State<_MessageBubble> createState() => _MessageBubbleState();
+  ConsumerState<_MessageBubble> createState() => _MessageBubbleState();
 }
 
-class _MessageBubbleState extends State<_MessageBubble> {
+class _MessageBubbleState extends ConsumerState<_MessageBubble> {
   final _scrollController = ScrollController();
 
   @override
@@ -278,7 +283,7 @@ class _MessageBubbleState extends State<_MessageBubble> {
   void _showMessageOptions(BuildContext context) {
     showModalBottomSheet(
       context: context,
-      builder: (context) {
+      builder: (sheetContext) {
         return SafeArea(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -287,7 +292,7 @@ class _MessageBubbleState extends State<_MessageBubble> {
                 leading: const Icon(Icons.reply),
                 title: const Text('Reply'),
                 onTap: () {
-                  Navigator.pop(context);
+                  Navigator.pop(sheetContext);
                   widget.onReply();
                 },
               ),
@@ -295,8 +300,14 @@ class _MessageBubbleState extends State<_MessageBubble> {
                 leading: const Icon(Icons.copy),
                 title: const Text('Copy'),
                 onTap: () {
-                  // TODO: Copy to clipboard
-                  Navigator.pop(context);
+                  Clipboard.setData(ClipboardData(text: widget.message.content));
+                  Navigator.pop(sheetContext);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Message copied to clipboard'),
+                      duration: Duration(seconds: 2),
+                    ),
+                  );
                 },
               ),
               if (widget.message.isOutgoing && !widget.message.isDeleted) ...[
@@ -304,21 +315,99 @@ class _MessageBubbleState extends State<_MessageBubble> {
                   leading: const Icon(Icons.edit),
                   title: const Text('Edit'),
                   onTap: () {
-                    // TODO: Edit message
-                    Navigator.pop(context);
+                    Navigator.pop(sheetContext);
+                    _showEditDialog(context);
                   },
                 ),
                 ListTile(
                   leading: const Icon(Icons.delete_outline, color: Colors.red),
                   title: const Text('Delete', style: TextStyle(color: Colors.red)),
                   onTap: () {
-                    // TODO: Delete message
-                    Navigator.pop(context);
+                    Navigator.pop(sheetContext);
+                    _showDeleteConfirmation(context);
                   },
                 ),
               ],
             ],
           ),
+        );
+      },
+    );
+  }
+
+  void _showEditDialog(BuildContext context) {
+    final controller = TextEditingController(text: widget.message.content);
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Edit Message'),
+          content: TextField(
+            controller: controller,
+            maxLines: null,
+            autofocus: true,
+            decoration: const InputDecoration(
+              hintText: 'Enter new message',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                final newContent = controller.text.trim();
+                if (newContent.isEmpty) return;
+                if (newContent == widget.message.content) {
+                  Navigator.pop(dialogContext);
+                  return;
+                }
+
+                Navigator.pop(dialogContext);
+                await ref.read(chatActionsProvider).editMessage(
+                  widget.message.id,
+                  widget.conversationId,
+                  newContent,
+                );
+              },
+              child: const Text('Save'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _showDeleteConfirmation(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Delete Message'),
+          content: const Text('Are you sure you want to delete this message? This cannot be undone.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                Navigator.pop(dialogContext);
+                await ref.read(chatActionsProvider).deleteMessage(
+                  widget.message.id,
+                  widget.conversationId,
+                );
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Delete'),
+            ),
+          ],
         );
       },
     );
@@ -374,6 +463,57 @@ class _MessageInput extends StatelessWidget {
     required this.onSend,
   });
 
+  Future<void> _pickFile(BuildContext context) async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.any,
+        allowMultiple: false,
+        withData: true, // Load file bytes for small files
+      );
+
+      if (result == null || result.files.isEmpty) return;
+
+      final file = result.files.first;
+      final fileSize = file.size;
+      final maxSize = 64 * 1024; // 64KB limit as per COMPARISON.md
+
+      if (fileSize > maxSize) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'File too large (${(fileSize / 1024).toStringAsFixed(1)} KB). '
+                'Maximum size is 64 KB.',
+              ),
+              duration: const Duration(seconds: 3),
+            ),
+          );
+        }
+        return;
+      }
+
+      // File selected and within size limit
+      // TODO: Implement file transfer FFI bindings
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Selected: ${file.name} (${(fileSize / 1024).toStringAsFixed(1)} KB)\n'
+              'File transfer coming in next update!',
+            ),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error picking file: $e')),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -391,9 +531,7 @@ class _MessageInput extends StatelessWidget {
           children: [
             IconButton(
               icon: const Icon(Icons.attach_file),
-              onPressed: () {
-                // TODO: Attach file
-              },
+              onPressed: () => _pickFile(context),
             ),
             Expanded(
               child: ConstrainedBox(

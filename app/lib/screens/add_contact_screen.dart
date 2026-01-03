@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
 import '../providers/identity_provider.dart';
 import '../providers/dns_provider.dart';
 import '../providers/contact_provider.dart';
@@ -126,11 +127,244 @@ class _MyQrTab extends ConsumerWidget {
   }
 }
 
-class _ScanTab extends StatelessWidget {
+class _ScanTab extends ConsumerStatefulWidget {
   const _ScanTab();
 
   @override
+  ConsumerState<_ScanTab> createState() => _ScanTabState();
+}
+
+class _ScanTabState extends ConsumerState<_ScanTab> {
+  MobileScannerController? _controller;
+  bool _isScanning = false;
+  bool _hasScanned = false;
+  String? _scannedNodeId;
+  String? _scannedPubkey;
+  String? _error;
+
+  @override
+  void dispose() {
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  void _startScanning() {
+    setState(() {
+      _isScanning = true;
+      _hasScanned = false;
+      _error = null;
+      _controller = MobileScannerController();
+    });
+  }
+
+  void _stopScanning() {
+    _controller?.dispose();
+    setState(() {
+      _isScanning = false;
+      _controller = null;
+    });
+  }
+
+  void _onDetect(BarcodeCapture capture) {
+    if (_hasScanned) return;
+
+    final barcode = capture.barcodes.firstOrNull;
+    if (barcode == null || barcode.rawValue == null) return;
+
+    final data = barcode.rawValue!;
+
+    // Parse cyxchat://add/{nodeId}/{pubkeyHex}
+    if (!data.startsWith('cyxchat://add/')) {
+      setState(() {
+        _error = 'Invalid QR code - not a CyxChat contact';
+      });
+      return;
+    }
+
+    final parts = data.substring('cyxchat://add/'.length).split('/');
+    if (parts.length != 2) {
+      setState(() {
+        _error = 'Invalid QR code format';
+      });
+      return;
+    }
+
+    final nodeId = parts[0];
+    final pubkey = parts[1];
+
+    // Validate node ID (64 hex chars)
+    if (nodeId.length != 64 || !RegExp(r'^[0-9a-f]+$').hasMatch(nodeId)) {
+      setState(() {
+        _error = 'Invalid node ID in QR code';
+      });
+      return;
+    }
+
+    setState(() {
+      _hasScanned = true;
+      _scannedNodeId = nodeId;
+      _scannedPubkey = pubkey;
+    });
+
+    _stopScanning();
+  }
+
+  Future<void> _addScannedContact() async {
+    if (_scannedNodeId == null) return;
+
+    try {
+      await ref.read(contactActionsProvider).addContact(
+        nodeId: _scannedNodeId!,
+        displayName: null,
+      );
+
+      final conversation = await ref.read(chatActionsProvider).startConversation(_scannedNodeId!);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Added ${_scannedNodeId!.substring(0, 8)}...')),
+        );
+
+        Navigator.pop(context);
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => ChatScreen(conversationId: conversation.id),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to add contact: $e')),
+        );
+      }
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    if (_isScanning && _controller != null) {
+      return Stack(
+        children: [
+          MobileScanner(
+            controller: _controller!,
+            onDetect: _onDetect,
+          ),
+          Positioned(
+            top: 16,
+            left: 16,
+            child: IconButton(
+              onPressed: _stopScanning,
+              icon: const CircleAvatar(
+                backgroundColor: Colors.black54,
+                child: Icon(Icons.close, color: Colors.white),
+              ),
+            ),
+          ),
+          Center(
+            child: Container(
+              width: 250,
+              height: 250,
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.white, width: 2),
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+          ),
+          Positioned(
+            bottom: 32,
+            left: 0,
+            right: 0,
+            child: Text(
+              'Point camera at a CyxChat QR code',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.white,
+                backgroundColor: Colors.black54,
+                fontSize: 14,
+              ),
+            ),
+          ),
+          if (_error != null)
+            Positioned(
+              bottom: 80,
+              left: 16,
+              right: 16,
+              child: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.red.shade700,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  _error!,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.white),
+                ),
+              ),
+            ),
+        ],
+      );
+    }
+
+    if (_hasScanned && _scannedNodeId != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Card(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.check_circle,
+                    size: 64,
+                    color: Colors.green,
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Contact Found!',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Node ID: ${_scannedNodeId!.substring(0, 16)}...',
+                    style: TextStyle(
+                      fontFamily: 'monospace',
+                      color: Colors.grey[600],
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      OutlinedButton(
+                        onPressed: () {
+                          setState(() {
+                            _hasScanned = false;
+                            _scannedNodeId = null;
+                            _scannedPubkey = null;
+                          });
+                        },
+                        child: const Text('Cancel'),
+                      ),
+                      const SizedBox(width: 16),
+                      ElevatedButton(
+                        onPressed: _addScannedContact,
+                        child: const Text('Add Contact'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -152,10 +386,7 @@ class _ScanTab extends StatelessWidget {
           ),
           const SizedBox(height: 24),
           ElevatedButton.icon(
-            onPressed: () {
-              // TODO: Open camera scanner
-              // Use mobile_scanner package
-            },
+            onPressed: _startScanning,
             icon: const Icon(Icons.camera_alt),
             label: const Text('Open Camera'),
           ),

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import '../main.dart';
 import '../providers/identity_provider.dart';
 import '../providers/dns_provider.dart';
@@ -356,13 +357,13 @@ class _ResetWarningItem extends StatelessWidget {
   }
 }
 
-class _ProfileCard extends StatelessWidget {
+class _ProfileCard extends ConsumerWidget {
   final dynamic identity;
 
   const _ProfileCard({required this.identity});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
       padding: const EdgeInsets.all(16),
@@ -459,7 +460,7 @@ class _ProfileCard extends StatelessWidget {
           ),
           // Actions
           IconButton(
-            onPressed: () {},
+            onPressed: () => _showQrDialog(context, ref),
             icon: Container(
               padding: const EdgeInsets.all(6),
               decoration: BoxDecoration(
@@ -560,6 +561,68 @@ class _ProfileCard extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showQrDialog(BuildContext context, WidgetRef ref) {
+    final qrData = ref.read(identityActionsProvider).generateQrData();
+    if (qrData.isEmpty) return;
+
+    final identityVal = identity as Identity?;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.bgDarkSecondary,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Your QR Code',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: AppColors.textDark,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Others can scan this to add you as a contact',
+              style: TextStyle(
+                fontSize: 13,
+                color: AppColors.textDarkSecondary,
+              ),
+            ),
+            const SizedBox(height: 24),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: QrImageView(
+                data: qrData,
+                size: 200,
+                backgroundColor: Colors.white,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              identityVal?.shortId ?? '',
+              style: const TextStyle(
+                fontFamily: 'monospace',
+                fontSize: 12,
+                color: AppColors.textDarkSecondary,
+              ),
+            ),
+            const SizedBox(height: 16),
           ],
         ),
       ),
