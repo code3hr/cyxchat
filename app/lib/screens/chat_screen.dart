@@ -84,6 +84,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                   controller: _scrollController,
                   reverse: true,
                   padding: const EdgeInsets.all(16),
+                  clipBehavior: Clip.hardEdge,
                   itemCount: messages.length,
                   itemBuilder: (context, index) {
                     final message = messages[messages.length - 1 - index];
@@ -174,7 +175,7 @@ class _EmptyMessages extends StatelessWidget {
   }
 }
 
-class _MessageBubble extends StatelessWidget {
+class _MessageBubble extends StatefulWidget {
   final Message message;
   final VoidCallback onReply;
 
@@ -184,95 +185,92 @@ class _MessageBubble extends StatelessWidget {
   });
 
   @override
+  State<_MessageBubble> createState() => _MessageBubbleState();
+}
+
+class _MessageBubbleState extends State<_MessageBubble> {
+  final _scrollController = ScrollController();
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final isOutgoing = message.isOutgoing;
+    final isOutgoing = widget.message.isOutgoing;
     final colorScheme = Theme.of(context).colorScheme;
+    final maxBubbleHeight = 250.0; // Fixed max height for any message
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        mainAxisAlignment:
-            isOutgoing ? MainAxisAlignment.end : MainAxisAlignment.start,
-        children: [
-          GestureDetector(
-            onLongPress: () => _showMessageOptions(context),
-            child: Container(
-              constraints: BoxConstraints(
-                maxWidth: MediaQuery.of(context).size.width * 0.75,
+      child: Align(
+        alignment: isOutgoing ? Alignment.centerRight : Alignment.centerLeft,
+        child: GestureDetector(
+          onLongPress: () => _showMessageOptions(context),
+          child: Container(
+            constraints: BoxConstraints(
+              maxWidth: MediaQuery.of(context).size.width * 0.75,
+              maxHeight: maxBubbleHeight,
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            decoration: BoxDecoration(
+              color: isOutgoing
+                  ? colorScheme.primary
+                  : colorScheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.only(
+                topLeft: const Radius.circular(16),
+                topRight: const Radius.circular(16),
+                bottomLeft: Radius.circular(isOutgoing ? 16 : 4),
+                bottomRight: Radius.circular(isOutgoing ? 4 : 16),
               ),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              decoration: BoxDecoration(
-                color: isOutgoing
-                    ? colorScheme.primary
-                    : colorScheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.only(
-                  topLeft: const Radius.circular(16),
-                  topRight: const Radius.circular(16),
-                  bottomLeft: Radius.circular(isOutgoing ? 16 : 4),
-                  bottomRight: Radius.circular(isOutgoing ? 4 : 16),
-                ),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (message.isDeleted)
-                    Text(
-                      'Message deleted',
-                      style: TextStyle(
-                        fontStyle: FontStyle.italic,
-                        color: isOutgoing
-                            ? colorScheme.onPrimary.withOpacity(0.7)
-                            : colorScheme.onSurface.withOpacity(0.7),
-                      ),
-                    )
-                  else
-                    Text(
-                      message.content,
-                      softWrap: true,
-                      style: TextStyle(
-                        color: isOutgoing
-                            ? colorScheme.onPrimary
-                            : colorScheme.onSurface,
-                      ),
-                    ),
-                  const SizedBox(height: 4),
-                  Wrap(
-                    spacing: 4,
-                    children: [
+            ),
+            child: Scrollbar(
+              controller: _scrollController,
+              thumbVisibility: true,
+              child: SingleChildScrollView(
+                controller: _scrollController,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (widget.message.isDeleted)
                       Text(
-                        message.timeString,
+                        'Message deleted',
                         style: TextStyle(
-                          fontSize: 11,
+                          fontStyle: FontStyle.italic,
                           color: isOutgoing
                               ? colorScheme.onPrimary.withOpacity(0.7)
-                              : colorScheme.onSurface.withOpacity(0.5),
+                              : colorScheme.onSurface.withOpacity(0.7),
+                        ),
+                      )
+                    else
+                      Text(
+                        widget.message.content,
+                        softWrap: true,
+                        style: TextStyle(
+                          color: isOutgoing
+                              ? colorScheme.onPrimary
+                              : colorScheme.onSurface,
                         ),
                       ),
-                      if (message.isEdited)
-                        Text(
-                          '(edited)',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: isOutgoing
-                                ? colorScheme.onPrimary.withOpacity(0.7)
-                                : colorScheme.onSurface.withOpacity(0.5),
-                          ),
-                        ),
-                      if (isOutgoing)
-                        Text(
-                          message.status.icon,
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: colorScheme.onPrimary.withOpacity(0.7),
-                          ),
-                        ),
-                    ],
-                  ),
-                ],
+                    const SizedBox(height: 4),
+                    Text(
+                      '${widget.message.timeString}${widget.message.isEdited ? ' (edited)' : ''}${isOutgoing ? ' ${widget.message.status.icon}' : ''}',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: isOutgoing
+                            ? colorScheme.onPrimary.withOpacity(0.7)
+                            : colorScheme.onSurface.withOpacity(0.5),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),
-        ],
+        ),
       ),
     );
   }
@@ -290,7 +288,7 @@ class _MessageBubble extends StatelessWidget {
                 title: const Text('Reply'),
                 onTap: () {
                   Navigator.pop(context);
-                  onReply();
+                  widget.onReply();
                 },
               ),
               ListTile(
@@ -301,7 +299,7 @@ class _MessageBubble extends StatelessWidget {
                   Navigator.pop(context);
                 },
               ),
-              if (message.isOutgoing && !message.isDeleted) ...[
+              if (widget.message.isOutgoing && !widget.message.isDeleted) ...[
                 ListTile(
                   leading: const Icon(Icons.edit),
                   title: const Text('Edit'),
@@ -398,15 +396,18 @@ class _MessageInput extends StatelessWidget {
               },
             ),
             Expanded(
-              child: TextField(
-                controller: controller,
-                decoration: const InputDecoration(
-                  hintText: 'Message',
-                  border: InputBorder.none,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 120),
+                child: TextField(
+                  controller: controller,
+                  decoration: const InputDecoration(
+                    hintText: 'Message',
+                    border: InputBorder.none,
+                  ),
+                  textCapitalization: TextCapitalization.sentences,
+                  maxLines: null,
+                  onSubmitted: (_) => onSend(),
                 ),
-                textCapitalization: TextCapitalization.sentences,
-                maxLines: null,
-                onSubmitted: (_) => onSend(),
               ),
             ),
             IconButton(
