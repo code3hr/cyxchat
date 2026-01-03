@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../main.dart';
 import '../providers/identity_provider.dart';
 import '../providers/dns_provider.dart';
+import '../providers/settings_provider.dart';
 import '../services/identity_service.dart';
+import '../models/identity.dart';
 import 'onboarding_screen.dart';
 
 class SettingsScreen extends ConsumerWidget {
@@ -137,6 +140,7 @@ class SettingsScreen extends ConsumerWidget {
                       trailing: _StatusChip(label: '3 Peers', isActive: true),
                       onTap: () {},
                     ),
+                    const _ServerConfigTile(),
                   ],
                 ),
 
@@ -425,18 +429,28 @@ class _ProfileCard extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 4),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: AppColors.bgDarkTertiary,
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Text(
-                    identity?.shortId ?? 'Loading...',
-                    style: const TextStyle(
-                      fontFamily: 'monospace',
-                      fontSize: 10,
-                      color: AppColors.textDarkSecondary,
+                GestureDetector(
+                  onTap: () => _showNodeIdDialog(context, identity),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: AppColors.bgDarkTertiary,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          identity?.shortId ?? 'Loading...',
+                          style: const TextStyle(
+                            fontFamily: 'monospace',
+                            fontSize: 10,
+                            color: AppColors.textDarkSecondary,
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        const Icon(Icons.copy_rounded, size: 10, color: AppColors.textDarkSecondary),
+                      ],
                     ),
                   ),
                 ),
@@ -467,6 +481,87 @@ class _ProfileCard extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  void _showNodeIdDialog(BuildContext context, Identity? identity) {
+    if (identity == null) return;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.bgDarkSecondary,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Your Node ID',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: AppColors.textDark,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Share this ID with others to let them message you',
+              style: TextStyle(
+                fontSize: 13,
+                color: AppColors.textDarkSecondary,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.bgDarkTertiary,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: SelectableText(
+                identity.nodeId,
+                style: const TextStyle(
+                  fontFamily: 'monospace',
+                  fontSize: 12,
+                  color: AppColors.textDark,
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: () {
+                  Clipboard.setData(ClipboardData(text: identity.nodeId));
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Node ID copied to clipboard'),
+                      duration: Duration(seconds: 2),
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.copy_rounded),
+                label: const Text('Copy Node ID'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
       ),
     );
   }
@@ -1071,5 +1166,155 @@ class _UsernameSectionState extends ConsumerState<_UsernameSection> {
         _error = 'Error: ${e.toString()}';
       });
     }
+  }
+}
+
+/// Server configuration tile
+class _ServerConfigTile extends ConsumerStatefulWidget {
+  const _ServerConfigTile();
+
+  @override
+  ConsumerState<_ServerConfigTile> createState() => _ServerConfigTileState();
+}
+
+class _ServerConfigTileState extends ConsumerState<_ServerConfigTile> {
+  @override
+  Widget build(BuildContext context) {
+    final settings = ref.watch(settingsProvider);
+    final hasServer = settings.bootstrapServer.isNotEmpty;
+
+    return _SettingsTile(
+      icon: Icons.dns_rounded,
+      title: 'Bootstrap Server',
+      subtitle: hasServer ? settings.bootstrapServer : 'Not configured',
+      trailing: _StatusChip(
+        label: hasServer ? 'Connected' : 'Offline',
+        isActive: hasServer,
+      ),
+      onTap: () => _showServerDialog(context),
+    );
+  }
+
+  void _showServerDialog(BuildContext context) {
+    final settings = ref.read(settingsProvider);
+    final controller = TextEditingController(text: settings.bootstrapServer);
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: AppColors.accent.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Icon(
+                Icons.dns_rounded,
+                size: 24,
+                color: AppColors.accent,
+              ),
+            ),
+            const SizedBox(width: 14),
+            const Expanded(child: Text('Bootstrap Server')),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Enter the address of your CyxChat server for P2P discovery and relay.',
+              style: TextStyle(
+                fontSize: 13,
+                color: AppColors.textDarkSecondary.withOpacity(0.7),
+              ),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: controller,
+              decoration: InputDecoration(
+                hintText: 'e.g., 123.45.67.89:7777',
+                prefixIcon: const Icon(Icons.link_rounded),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              keyboardType: TextInputType.url,
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.bgDarkTertiary,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.info_outline_rounded,
+                    size: 18,
+                    color: AppColors.textDarkSecondary.withOpacity(0.7),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Format: IP:PORT (e.g., 192.168.1.100:7777)',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: AppColors.textDarkSecondary.withOpacity(0.7),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              controller.text = '';
+              ref.read(settingsProvider.notifier).setServer('');
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: const Text('Server cleared. Restart app to apply.'),
+                  behavior: SnackBarBehavior.floating,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              );
+            },
+            child: const Text('Clear'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final server = controller.text.trim();
+              ref.read(settingsProvider.notifier).setServer(server);
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(server.isEmpty
+                      ? 'Server cleared. Restart app to apply.'
+                      : 'Server set to $server. Restart app to apply.'),
+                  behavior: SnackBarBehavior.floating,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+              );
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
   }
 }

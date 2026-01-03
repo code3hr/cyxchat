@@ -36,6 +36,8 @@ dependencies:
 
   # Secure storage
   flutter_secure_storage: ^9.0.0
+  # Settings persistence
+  shared_preferences: ^2.2.0
 
   # File picker (for attachments)
   file_picker: ^6.1.1

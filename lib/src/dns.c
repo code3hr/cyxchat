@@ -428,7 +428,7 @@ static void sign_record(cyxchat_dns_ctx_t *ctx, cyxchat_dns_record_t *record)
 static size_t serialize_register(const cyxchat_dns_record_t *record, uint8_t hops,
                                   uint8_t *out, size_t out_len)
 {
-    if (out_len < 180) return 0;
+    if (out_len < 210) return 0;  /* 3 + 63 + 32 + 32 + 64 + 8 + 4 = 206 */
 
     size_t offset = 0;
     size_t name_len = strlen(record->name);
@@ -605,7 +605,7 @@ static void handle_register(cyxchat_dns_ctx_t *ctx, const cyxwiz_node_id_t *from
 
     /* Re-gossip if hops remaining */
     if (hops < CYXCHAT_DNS_GOSSIP_HOPS) {
-        uint8_t msg[200];
+        uint8_t msg[210];
         size_t msg_len = serialize_register(&record, hops + 1, msg, sizeof(msg));
 
         if (msg_len > 0 && ctx->router) {
@@ -867,10 +867,10 @@ cyxchat_error_t cyxchat_dns_register(cyxchat_dns_ctx_t *ctx,
     ctx->pending_register.active = 1;
 
     /* Broadcast registration */
-    uint8_t msg[200];
+    uint8_t msg[210];
     size_t msg_len = serialize_register(&ctx->my_record, 0, msg, sizeof(msg));
 
-    if (msg_len > 0 && ctx->router) {
+    if (msg_len > 0) {
         dns_ctx_broadcast(ctx, msg, msg_len);
     }
 
@@ -898,10 +898,10 @@ cyxchat_error_t cyxchat_dns_refresh(cyxchat_dns_ctx_t *ctx)
     ctx->last_refresh = get_time_ms();
 
     /* Broadcast update */
-    uint8_t msg[200];
+    uint8_t msg[210];
     size_t msg_len = serialize_register(&ctx->my_record, 0, msg, sizeof(msg));
 
-    if (msg_len > 0 && ctx->router) {
+    if (msg_len > 0) {
         dns_ctx_broadcast(ctx, msg, msg_len);
     }
 
@@ -919,10 +919,10 @@ cyxchat_error_t cyxchat_dns_unregister(cyxchat_dns_ctx_t *ctx)
     sign_record(ctx, &ctx->my_record);
 
     /* Broadcast unregistration */
-    uint8_t msg[200];
+    uint8_t msg[210];
     size_t msg_len = serialize_register(&ctx->my_record, 0, msg, sizeof(msg));
 
-    if (msg_len > 0 && ctx->router) {
+    if (msg_len > 0) {
         dns_ctx_broadcast(ctx, msg, msg_len);
     }
 
@@ -1036,6 +1036,13 @@ cyxchat_error_t cyxchat_dns_resolve(cyxchat_dns_ctx_t *ctx,
     char normalized[CYXCHAT_DNS_MAX_NAME + 1];
     cyxchat_dns_normalize_name(name, normalized, sizeof(normalized));
 
+    /* Check own registration first */
+    if (ctx->is_registered && strcmp(normalized, ctx->my_record.name) == 0) {
+        *record_out = ctx->my_record;
+        ctx->stats.cache_hits++;
+        return CYXCHAT_OK;
+    }
+
     /* Check cache */
     dns_cache_entry_t *entry = find_cache_entry(ctx, normalized);
     if (entry && !is_cache_expired(entry, get_time_ms())) {
@@ -1054,6 +1061,11 @@ int cyxchat_dns_is_cached(cyxchat_dns_ctx_t *ctx, const char *name)
 
     char normalized[CYXCHAT_DNS_MAX_NAME + 1];
     cyxchat_dns_normalize_name(name, normalized, sizeof(normalized));
+
+    /* Check own registration first */
+    if (ctx->is_registered && strcmp(normalized, ctx->my_record.name) == 0) {
+        return 1;
+    }
 
     dns_cache_entry_t *entry = find_cache_entry(ctx, normalized);
     return entry && !is_cache_expired(entry, get_time_ms());

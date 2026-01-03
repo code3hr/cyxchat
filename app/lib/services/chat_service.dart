@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 import '../models/models.dart';
+import '../providers/chat_provider.dart';
 import 'database_service.dart';
 import 'identity_service.dart';
 
@@ -11,7 +13,56 @@ class ChatService {
   final _uuid = const Uuid();
   final _messageController = StreamController<Message>.broadcast();
 
+  // Native message ID -> Local UUID mapping
+  final Map<String, String> _nativeMsgIdToLocalId = {};
+  final Map<String, String> _localIdToNativeMsgId = {};
+
+  // ChatProvider reference (set after initialization)
+  ChatProvider? _chatProvider;
+
+  // Subscriptions
+  StreamSubscription? _messageSubscription;
+  StreamSubscription? _ackSubscription;
+  StreamSubscription? _typingSubscription;
+  StreamSubscription? _reactionSubscription;
+  StreamSubscription? _deleteSubscription;
+  StreamSubscription? _editSubscription;
+
   ChatService._();
+
+  /// Connect to ChatProvider for FFI messaging
+  void connectProvider(ChatProvider provider) {
+    _chatProvider = provider;
+
+    // Cancel existing subscriptions
+    _messageSubscription?.cancel();
+    _ackSubscription?.cancel();
+    _typingSubscription?.cancel();
+    _reactionSubscription?.cancel();
+    _deleteSubscription?.cancel();
+    _editSubscription?.cancel();
+
+    // Subscribe to incoming messages
+    _messageSubscription = provider.messageStream.listen(_handleIncomingMessage);
+    _ackSubscription = provider.ackStream.listen(_handleAck);
+    _typingSubscription = provider.typingStream.listen(_handleTyping);
+    _reactionSubscription = provider.reactionStream.listen(_handleReaction);
+    _deleteSubscription = provider.deleteStream.listen(_handleDelete);
+    _editSubscription = provider.editStream.listen(_handleEdit);
+
+    debugPrint('ChatService: Connected to ChatProvider');
+  }
+
+  /// Disconnect from ChatProvider
+  void disconnectProvider() {
+    _messageSubscription?.cancel();
+    _ackSubscription?.cancel();
+    _typingSubscription?.cancel();
+    _reactionSubscription?.cancel();
+    _deleteSubscription?.cancel();
+    _editSubscription?.cancel();
+    _chatProvider = null;
+  }
 
   /// Stream of new messages
   Stream<Message> get messageStream => _messageController.stream;
@@ -108,6 +159,17 @@ class ChatService {
       throw StateError('No identity');
     }
 
+    // Get conversation to find peer ID
+    final convRows = await db.query(
+      'conversations',
+      where: 'id = ?',
+      whereArgs: [conversationId],
+    );
+    if (convRows.isEmpty) {
+      throw StateError('Conversation not found');
+    }
+    final conversation = Conversation.fromMap(convRows.first);
+
     final message = Message(
       id: _uuid.v4(),
       conversationId: conversationId,
@@ -132,18 +194,58 @@ class ChatService {
       whereArgs: [conversationId],
     );
 
-    // TODO: Send via libcyxchat
-    // For now, mark as sent
-    final sentMessage = message.copyWith(status: MessageStatus.sent);
-    await db.update(
-      'messages',
-      {'status': MessageStatus.sent.index},
-      where: 'id = ?',
-      whereArgs: [message.id],
-    );
+    // Try to send via native chat
+    Message resultMessage;
+    if (_chatProvider != null && conversation.peerId != null) {
+      // Get native reply-to ID if replying
+      String? nativeReplyToId;
+      if (replyToId != null) {
+        nativeReplyToId = _localIdToNativeMsgId[replyToId];
+      }
 
-    _messageController.add(sentMessage);
-    return sentMessage;
+      final result = await _chatProvider!.sendText(
+        toPeerId: conversation.peerId!,
+        text: content,
+        replyToMsgId: nativeReplyToId,
+      );
+
+      if (result.success && result.nativeMsgId != null) {
+        // Store mapping
+        _nativeMsgIdToLocalId[result.nativeMsgId!] = message.id;
+        _localIdToNativeMsgId[message.id] = result.nativeMsgId!;
+
+        resultMessage = message.copyWith(status: MessageStatus.sent);
+        await db.update(
+          'messages',
+          {'status': MessageStatus.sent.index},
+          where: 'id = ?',
+          whereArgs: [message.id],
+        );
+      } else {
+        // Send failed - mark as failed
+        resultMessage = message.copyWith(status: MessageStatus.failed);
+        await db.update(
+          'messages',
+          {'status': MessageStatus.failed.index},
+          where: 'id = ?',
+          whereArgs: [message.id],
+        );
+        debugPrint('ChatService: Send failed: ${result.error}');
+      }
+    } else {
+      // No native chat available - mark as pending
+      resultMessage = message.copyWith(status: MessageStatus.pending);
+      await db.update(
+        'messages',
+        {'status': MessageStatus.pending.index},
+        where: 'id = ?',
+        whereArgs: [message.id],
+      );
+      debugPrint('ChatService: No native chat available, message queued');
+    }
+
+    _messageController.add(resultMessage);
+    return resultMessage;
   }
 
   /// Mark messages as read
@@ -169,6 +271,16 @@ class ChatService {
   Future<void> deleteMessage(String messageId) async {
     final db = await DatabaseService.instance.database;
 
+    // Get message info to find peer
+    final msgRows = await db.query('messages', where: 'id = ?', whereArgs: [messageId]);
+    if (msgRows.isEmpty) return;
+    final msg = Message.fromMap(msgRows.first);
+
+    // Get conversation to find peer ID
+    final convRows = await db.query('conversations', where: 'id = ?', whereArgs: [msg.conversationId]);
+    if (convRows.isEmpty) return;
+    final conv = Conversation.fromMap(convRows.first);
+
     await db.update(
       'messages',
       {'is_deleted': 1, 'content': ''},
@@ -176,12 +288,31 @@ class ChatService {
       whereArgs: [messageId],
     );
 
-    // TODO: Send delete notification via libcyxchat
+    // Send delete notification via native chat
+    if (_chatProvider != null && conv.peerId != null) {
+      final nativeMsgId = _localIdToNativeMsgId[messageId];
+      if (nativeMsgId != null) {
+        await _chatProvider!.sendDelete(
+          toPeerId: conv.peerId!,
+          msgId: nativeMsgId,
+        );
+      }
+    }
   }
 
   /// Edit message
   Future<void> editMessage(String messageId, String newContent) async {
     final db = await DatabaseService.instance.database;
+
+    // Get message info to find peer
+    final msgRows = await db.query('messages', where: 'id = ?', whereArgs: [messageId]);
+    if (msgRows.isEmpty) return;
+    final msg = Message.fromMap(msgRows.first);
+
+    // Get conversation to find peer ID
+    final convRows = await db.query('conversations', where: 'id = ?', whereArgs: [msg.conversationId]);
+    if (convRows.isEmpty) return;
+    final conv = Conversation.fromMap(convRows.first);
 
     await db.update(
       'messages',
@@ -190,7 +321,17 @@ class ChatService {
       whereArgs: [messageId],
     );
 
-    // TODO: Send edit via libcyxchat
+    // Send edit via native chat
+    if (_chatProvider != null && conv.peerId != null) {
+      final nativeMsgId = _localIdToNativeMsgId[messageId];
+      if (nativeMsgId != null) {
+        await _chatProvider!.sendEdit(
+          toPeerId: conv.peerId!,
+          msgId: nativeMsgId,
+          newText: newContent,
+        );
+      }
+    }
   }
 
   /// Pin/unpin conversation
@@ -237,7 +378,150 @@ class ChatService {
     );
   }
 
+  // ============================================================
+  // Incoming Message Handlers
+  // ============================================================
+
+  /// Handle incoming text message from native layer
+  Future<void> _handleIncomingMessage(ReceivedMessage received) async {
+    final parsed = received.parseTextMessage();
+    if (parsed == null) {
+      debugPrint('ChatService: Failed to parse text message');
+      return;
+    }
+
+    final db = await DatabaseService.instance.database;
+
+    // Get or create conversation with sender
+    final conversation = await getOrCreateDirectConversation(received.fromNodeId);
+
+    // Create message
+    final message = Message(
+      id: _uuid.v4(),
+      conversationId: conversation.id,
+      senderId: received.fromNodeId,
+      content: parsed.text,
+      timestamp: received.receivedAt,
+      status: MessageStatus.delivered,
+      replyToId: parsed.replyToMsgId != null
+          ? _nativeMsgIdToLocalId[parsed.replyToMsgId]
+          : null,
+      isOutgoing: false,
+    );
+
+    // Save to database
+    await db.insert('messages', message.toMap());
+
+    // Update conversation
+    await db.update(
+      'conversations',
+      {
+        'last_activity_at': message.timestamp.millisecondsSinceEpoch,
+        'unread_count': conversation.unreadCount + 1,
+      },
+      where: 'id = ?',
+      whereArgs: [conversation.id],
+    );
+
+    // Emit to stream
+    _messageController.add(message);
+
+    // Send ACK back to sender
+    if (_chatProvider != null) {
+      // Need native msg ID to ACK - but we don't have it from the wire format
+      // The native layer should handle ACK automatically via callback
+      debugPrint('ChatService: Received message from ${received.fromNodeId}: ${parsed.text}');
+    }
+  }
+
+  /// Handle ACK (delivery/read receipt)
+  Future<void> _handleAck(AckData ack) async {
+    final localId = _nativeMsgIdToLocalId[ack.msgId];
+    if (localId == null) {
+      debugPrint('ChatService: Unknown message ACK: ${ack.msgId}');
+      return;
+    }
+
+    final db = await DatabaseService.instance.database;
+    final newStatus = ack.isRead ? MessageStatus.read : MessageStatus.delivered;
+
+    await db.update(
+      'messages',
+      {'status': newStatus.index},
+      where: 'id = ?',
+      whereArgs: [localId],
+    );
+
+    debugPrint('ChatService: Message $localId status: ${newStatus.name}');
+  }
+
+  /// Handle typing indicator
+  void _handleTyping(TypingStatus status) {
+    debugPrint('ChatService: ${status.peerId} is ${status.isTyping ? "typing" : "not typing"}');
+    // Typing status is managed by ChatProvider
+    // UI can listen to chatProvider.typingStatuses
+  }
+
+  /// Handle reaction
+  Future<void> _handleReaction(ReactionData reaction) async {
+    final localId = _nativeMsgIdToLocalId[reaction.msgId];
+    if (localId == null) {
+      debugPrint('ChatService: Unknown message reaction: ${reaction.msgId}');
+      return;
+    }
+
+    final db = await DatabaseService.instance.database;
+
+    // Get current reactions
+    final rows = await db.query('messages', where: 'id = ?', whereArgs: [localId]);
+    if (rows.isEmpty) return;
+
+    // For now, just log - proper reaction storage would need a separate table
+    debugPrint('ChatService: Reaction ${reaction.reaction} ${reaction.remove ? "removed from" : "added to"} $localId');
+  }
+
+  /// Handle delete request
+  Future<void> _handleDelete(String nativeMsgId) async {
+    final localId = _nativeMsgIdToLocalId[nativeMsgId];
+    if (localId == null) {
+      debugPrint('ChatService: Unknown message delete: $nativeMsgId');
+      return;
+    }
+
+    final db = await DatabaseService.instance.database;
+
+    await db.update(
+      'messages',
+      {'is_deleted': 1, 'content': ''},
+      where: 'id = ?',
+      whereArgs: [localId],
+    );
+
+    debugPrint('ChatService: Message $localId deleted by sender');
+  }
+
+  /// Handle edit request
+  Future<void> _handleEdit(EditData edit) async {
+    final localId = _nativeMsgIdToLocalId[edit.msgId];
+    if (localId == null) {
+      debugPrint('ChatService: Unknown message edit: ${edit.msgId}');
+      return;
+    }
+
+    final db = await DatabaseService.instance.database;
+
+    await db.update(
+      'messages',
+      {'content': edit.newText, 'is_edited': 1},
+      where: 'id = ?',
+      whereArgs: [localId],
+    );
+
+    debugPrint('ChatService: Message $localId edited to: ${edit.newText}');
+  }
+
   void dispose() {
+    disconnectProvider();
     _messageController.close();
   }
 }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/contact.dart';
 import '../providers/conversation_provider.dart';
+import '../providers/contact_provider.dart';
 import 'chat_screen.dart';
 import 'add_contact_screen.dart';
 import 'mail_compose_screen.dart';
@@ -13,8 +14,7 @@ class ContactsScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // TODO: Add contacts provider
-    final contacts = <Contact>[];
+    final contactsAsync = ref.watch(contactsProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -33,17 +33,21 @@ class ContactsScreen extends ConsumerWidget {
           ),
         ],
       ),
-      body: contacts.isEmpty
-          ? const _EmptyContacts()
-          : ListView.builder(
-              itemCount: contacts.length,
-              itemBuilder: (context, index) {
-                return _ContactTile(
-                  contact: contacts[index],
-                  onTap: () => _onContactTap(context, ref, contacts[index]),
-                );
-              },
-            ),
+      body: contactsAsync.when(
+        data: (contacts) => contacts.isEmpty
+            ? const _EmptyContacts()
+            : ListView.builder(
+                itemCount: contacts.length,
+                itemBuilder: (context, index) {
+                  return _ContactTile(
+                    contact: contacts[index],
+                    onTap: () => _onContactTap(context, ref, contacts[index]),
+                  );
+                },
+              ),
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (error, _) => Center(child: Text('Error: $error')),
+      ),
     );
   }
 
@@ -113,7 +117,7 @@ class _EmptyContacts extends StatelessWidget {
   }
 }
 
-class _ContactTile extends StatelessWidget {
+class _ContactTile extends ConsumerWidget {
   final Contact contact;
   final VoidCallback onTap;
 
@@ -123,7 +127,7 @@ class _ContactTile extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return ListTile(
       leading: Stack(
         children: [
@@ -175,14 +179,14 @@ class _ContactTile extends StatelessWidget {
         style: TextStyle(color: Colors.grey[600]),
       ),
       onTap: onTap,
-      onLongPress: () => _showContactOptions(context),
+      onLongPress: () => _showContactOptions(context, ref),
     );
   }
 
-  void _showContactOptions(BuildContext context) {
+  void _showContactOptions(BuildContext context, WidgetRef ref) {
     showModalBottomSheet(
       context: context,
-      builder: (context) {
+      builder: (sheetContext) {
         return SafeArea(
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -191,7 +195,7 @@ class _ContactTile extends StatelessWidget {
                 leading: const Icon(Icons.mail_outline),
                 title: const Text('Send Email'),
                 onTap: () {
-                  Navigator.pop(context);
+                  Navigator.pop(sheetContext);
                   Navigator.push(
                     context,
                     MaterialPageRoute(
@@ -207,8 +211,8 @@ class _ContactTile extends StatelessWidget {
                 leading: const Icon(Icons.verified_outlined),
                 title: Text(contact.verified ? 'Unverify' : 'Verify'),
                 onTap: () {
-                  // TODO: Toggle verified
-                  Navigator.pop(context);
+                  ref.read(contactActionsProvider).toggleVerified(contact.nodeId);
+                  Navigator.pop(sheetContext);
                 },
               ),
               ListTile(
@@ -217,16 +221,16 @@ class _ContactTile extends StatelessWidget {
                 ),
                 title: Text(contact.blocked ? 'Unblock' : 'Block'),
                 onTap: () {
-                  // TODO: Toggle block
-                  Navigator.pop(context);
+                  ref.read(contactActionsProvider).toggleBlocked(contact.nodeId);
+                  Navigator.pop(sheetContext);
                 },
               ),
               ListTile(
                 leading: const Icon(Icons.delete_outline, color: Colors.red),
                 title: const Text('Delete', style: TextStyle(color: Colors.red)),
                 onTap: () {
-                  // TODO: Delete contact
-                  Navigator.pop(context);
+                  ref.read(contactActionsProvider).deleteContact(contact.nodeId);
+                  Navigator.pop(sheetContext);
                 },
               ),
             ],

@@ -2,7 +2,11 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'connection_provider.dart';
 import 'dns_provider.dart';
+import 'chat_provider.dart';
+import 'dht_provider.dart';
+import 'settings_provider.dart';
 import '../services/identity_service.dart';
+import '../services/chat_service.dart';
 
 /// Global connection provider instance
 final connectionNotifierProvider = ChangeNotifierProvider<ConnectionProvider>((ref) {
@@ -26,7 +30,8 @@ class ConnectionActions {
       debugPrint('Cannot connect: no identity');
       return false;
     }
-    final bootstrap = bootstrapServer ?? 'stun.l.google.com:19302';
+    final settings = _ref.read(settingsProvider);
+    final bootstrap = bootstrapServer ?? (settings.bootstrapServer.isNotEmpty ? settings.bootstrapServer : '');
     final nodeIdBytes = _hexToBytes(identity.nodeId);
 
     // Initialize connection first
@@ -53,10 +58,35 @@ class ConnectionActions {
       // Don't fail - DNS is optional for basic messaging
     }
 
+    // Initialize Chat provider for P2P messaging
+    final chatProvider = _ref.read(chatNotifierProvider);
+    final chatResult = await chatProvider.initialize(localId: nodeIdBytes);
+
+    if (!chatResult) {
+      debugPrint('Chat initialization failed (continuing anyway)');
+      // Don't fail - chat can be retried
+    } else {
+      // Connect ChatService to ChatProvider for message handling
+      ChatService.instance.connectProvider(chatProvider);
+    }
+
+    // Initialize DHT for decentralized peer discovery
+    // DHT is created automatically with the connection, just initialize the provider
+    final dhtProvider = _ref.read(dhtNotifierProvider);
+    dhtProvider.initialize();
+
+    if (dhtProvider.isReady) {
+      debugPrint('DHT initialized and ready');
+    } else {
+      debugPrint('DHT initialized (no seed nodes yet)');
+    }
+
     return true;
   }
 
   void disconnect() {
+    ChatService.instance.disconnectProvider();
+    _ref.read(chatNotifierProvider).shutdown();
     _ref.read(dnsNotifierProvider).shutdown();
     _ref.read(connectionNotifierProvider).shutdown();
   }

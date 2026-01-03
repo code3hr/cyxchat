@@ -37,7 +37,7 @@ extern "C" {
 #define CYXCHAT_MSG_ID_SIZE         8       /* Message ID size */
 #define CYXCHAT_GROUP_ID_SIZE       8       /* Group ID size */
 #define CYXCHAT_FILE_ID_SIZE        8       /* File ID size */
-#define CYXCHAT_MAX_TEXT_LEN        256     /* Max text per message */
+#define CYXCHAT_MAX_TEXT_LEN        4096     /* Max text per message */
 #define CYXCHAT_MAX_DISPLAY_NAME    64      /* Max display name */
 #define CYXCHAT_MAX_STATUS_LEN      128     /* Max status text */
 #define CYXCHAT_MAX_FILENAME        128     /* Max filename */

@@ -70,6 +70,234 @@ class CyxChatBindings {
   }
 
   // ============================================================
+  // Chat Core
+  // ============================================================
+
+  /// Chat context pointer (opaque)
+  Pointer<Void>? _chatCtx;
+
+  /// Create chat context
+  /// Requires onion context from connection
+  int chatCreate(Pointer<Uint8> localId) {
+    if (_connCtx == null) return CyxChatError.errNull;
+    final ctxPtr = calloc<Pointer<Void>>();
+    try {
+      // Get onion context from connection
+      final onion = _native.cyxchat_conn_get_onion(_connCtx!);
+      if (onion == nullptr) return CyxChatError.errNull;
+
+      final result = _native.cyxchat_create(ctxPtr, onion, localId);
+      if (result == 0) {
+        _chatCtx = ctxPtr.value;
+      }
+      return result;
+    } finally {
+      calloc.free(ctxPtr);
+    }
+  }
+
+  /// Destroy chat context
+  void chatDestroy() {
+    if (_chatCtx != null) {
+      _native.cyxchat_destroy(_chatCtx!);
+      _chatCtx = null;
+    }
+  }
+
+  /// Poll chat events
+  int chatPoll(int nowMs) {
+    if (_chatCtx == null) return 0;
+    return _native.cyxchat_poll(_chatCtx!, nowMs);
+  }
+
+  /// Get next received message
+  /// Returns map with 'from', 'type', 'data' keys, or null if queue empty
+  Map<String, dynamic>? chatRecvNext() {
+    if (_chatCtx == null) return null;
+
+    final fromPtr = calloc<Uint8>(32);
+    final typePtr = calloc<Uint8>(1);
+    final dataPtr = calloc<Uint8>(4096);
+    final lenPtr = calloc<Size>(1);
+    lenPtr.value = 4096;
+
+    try {
+      final result = _native.cyxchat_recv_next(
+        _chatCtx!,
+        fromPtr,
+        typePtr,
+        dataPtr,
+        lenPtr,
+      );
+
+      if (result != 0) {
+        // Copy data before freeing
+        final fromBytes = List<int>.generate(32, (i) => fromPtr[i]);
+        final type = typePtr[0];
+        final dataLen = lenPtr.value;
+        final data = List<int>.generate(dataLen, (i) => dataPtr[i]);
+
+        return {
+          'from': fromBytes,
+          'type': type,
+          'data': data,
+        };
+      }
+      return null;
+    } finally {
+      calloc.free(fromPtr);
+      calloc.free(typePtr);
+      calloc.free(dataPtr);
+      calloc.free(lenPtr);
+    }
+  }
+
+  /// Send text message
+  /// Returns message ID hex string on success, null on failure
+  String? chatSendText(
+    Pointer<Uint8> to,
+    String text, {
+    String? replyToHex,
+  }) {
+    if (_chatCtx == null) return null;
+
+    final textPtr = text.toNativeUtf8();
+    final replyToPtr = calloc<Uint8>(8);
+    final msgIdOutPtr = calloc<Uint8>(8);
+
+    try {
+      if (replyToHex != null) {
+        final parseResult = _native.cyxchat_msg_id_from_hex(
+          replyToHex.toNativeUtf8().cast(),
+          replyToPtr,
+        );
+        if (parseResult != 0) return null;
+      }
+
+      final result = _native.cyxchat_send_text(
+        _chatCtx!,
+        to,
+        textPtr.cast(),
+        text.length,
+        replyToHex != null ? replyToPtr : nullptr,
+        msgIdOutPtr,
+      );
+
+      if (result == 0) {
+        final hexOut = calloc<Int8>(17);
+        _native.cyxchat_msg_id_to_hex(msgIdOutPtr, hexOut);
+        final hex = hexOut.cast<Utf8>().toDartString();
+        calloc.free(hexOut);
+        return hex;
+      }
+      return null;
+    } finally {
+      calloc.free(textPtr);
+      calloc.free(replyToPtr);
+      calloc.free(msgIdOutPtr);
+    }
+  }
+
+  /// Send ACK for received message
+  int chatSendAck(Pointer<Uint8> to, String msgIdHex, int status) {
+    if (_chatCtx == null) return CyxChatError.errNull;
+
+    final msgIdPtr = calloc<Uint8>(8);
+    try {
+      final parseResult = _native.cyxchat_msg_id_from_hex(
+        msgIdHex.toNativeUtf8().cast(),
+        msgIdPtr,
+      );
+      if (parseResult != 0) return parseResult;
+
+      return _native.cyxchat_send_ack(_chatCtx!, to, msgIdPtr, status);
+    } finally {
+      calloc.free(msgIdPtr);
+    }
+  }
+
+  /// Send typing indicator
+  int chatSendTyping(Pointer<Uint8> to, bool isTyping) {
+    if (_chatCtx == null) return CyxChatError.errNull;
+    return _native.cyxchat_send_typing(_chatCtx!, to, isTyping ? 1 : 0);
+  }
+
+  /// Send reaction to message
+  int chatSendReaction(
+    Pointer<Uint8> to,
+    String msgIdHex,
+    String reaction, {
+    bool remove = false,
+  }) {
+    if (_chatCtx == null) return CyxChatError.errNull;
+
+    final msgIdPtr = calloc<Uint8>(8);
+    final reactionPtr = reaction.toNativeUtf8();
+    try {
+      final parseResult = _native.cyxchat_msg_id_from_hex(
+        msgIdHex.toNativeUtf8().cast(),
+        msgIdPtr,
+      );
+      if (parseResult != 0) return parseResult;
+
+      return _native.cyxchat_send_reaction(
+        _chatCtx!,
+        to,
+        msgIdPtr,
+        reactionPtr.cast(),
+        remove ? 1 : 0,
+      );
+    } finally {
+      calloc.free(msgIdPtr);
+      calloc.free(reactionPtr);
+    }
+  }
+
+  /// Request message deletion
+  int chatSendDelete(Pointer<Uint8> to, String msgIdHex) {
+    if (_chatCtx == null) return CyxChatError.errNull;
+
+    final msgIdPtr = calloc<Uint8>(8);
+    try {
+      final parseResult = _native.cyxchat_msg_id_from_hex(
+        msgIdHex.toNativeUtf8().cast(),
+        msgIdPtr,
+      );
+      if (parseResult != 0) return parseResult;
+
+      return _native.cyxchat_send_delete(_chatCtx!, to, msgIdPtr);
+    } finally {
+      calloc.free(msgIdPtr);
+    }
+  }
+
+  /// Send edited message
+  int chatSendEdit(Pointer<Uint8> to, String msgIdHex, String newText) {
+    if (_chatCtx == null) return CyxChatError.errNull;
+
+    final msgIdPtr = calloc<Uint8>(8);
+    final textPtr = newText.toNativeUtf8();
+    try {
+      final parseResult = _native.cyxchat_msg_id_from_hex(
+        msgIdHex.toNativeUtf8().cast(),
+        msgIdPtr,
+      );
+      if (parseResult != 0) return parseResult;
+
+      return _native.cyxchat_send_edit(
+        _chatCtx!,
+        to,
+        msgIdPtr,
+        textPtr.cast(),
+        newText.length,
+      );
+    } finally {
+      calloc.free(msgIdPtr);
+      calloc.free(textPtr);
+    }
+  }
+
+  // ============================================================
   // Connection Management
   // ============================================================
 
@@ -188,6 +416,76 @@ class CyxChatBindings {
     return _native.cyxchat_conn_force_relay(_connCtx!, peerId);
   }
 
+  /// Add peer by address (for manual peer discovery)
+  /// [nodeId] - Peer's 32-byte node ID
+  /// [addr] - IP:port string (e.g., "127.0.0.1:55151")
+  int connAddPeerAddr(Pointer<Uint8> nodeId, String addr) {
+    if (_connCtx == null) return CyxChatError.errNull;
+    final addrPtr = addr.toNativeUtf8();
+    try {
+      return _native.cyxchat_conn_add_peer_addr(_connCtx!, nodeId, addrPtr.cast());
+    } finally {
+      calloc.free(addrPtr);
+    }
+  }
+
+  // ============================================================
+  // DHT (Distributed Hash Table) for Peer Discovery
+  // ============================================================
+
+  /// Bootstrap DHT with seed nodes
+  /// [seedNodes] - Flat array of node IDs (32 bytes each)
+  /// [count] - Number of seed nodes
+  int dhtBootstrap(Pointer<Uint8> seedNodes, int count) {
+    if (_connCtx == null) return CyxChatError.errNull;
+    return _native.cyxchat_conn_dht_bootstrap(_connCtx!, seedNodes, count);
+  }
+
+  /// Add a known node to DHT routing table
+  int dhtAddNode(Pointer<Uint8> nodeId) {
+    if (_connCtx == null) return CyxChatError.errNull;
+    return _native.cyxchat_conn_dht_add_node(_connCtx!, nodeId);
+  }
+
+  /// Find a node via DHT (fire-and-forget, no callback)
+  int dhtFindNode(Pointer<Uint8> targetId) {
+    if (_connCtx == null) return CyxChatError.errNull;
+    // Pass null for callback - fire-and-forget mode
+    return _native.cyxchat_conn_dht_find_node(
+        _connCtx!, targetId, nullptr, nullptr);
+  }
+
+  /// Get closest known nodes to target (synchronous)
+  /// Returns list of node ID byte arrays
+  List<List<int>> dhtGetClosest(Pointer<Uint8> targetId, {int maxNodes = 8}) {
+    if (_connCtx == null) return [];
+
+    // Allocate buffer for output nodes (32 bytes each)
+    final outNodes = calloc<Uint8>(32 * maxNodes);
+    try {
+      final count =
+          _native.cyxchat_conn_dht_get_closest(_connCtx!, targetId, outNodes, maxNodes);
+
+      final result = <List<int>>[];
+      for (int i = 0; i < count; i++) {
+        final nodeBytes = <int>[];
+        for (int j = 0; j < 32; j++) {
+          nodeBytes.add(outNodes[i * 32 + j]);
+        }
+        result.add(nodeBytes);
+      }
+      return result;
+    } finally {
+      calloc.free(outNodes);
+    }
+  }
+
+  /// Check if DHT is ready (has nodes)
+  bool dhtIsReady() {
+    if (_connCtx == null) return false;
+    return _native.cyxchat_conn_dht_is_ready(_connCtx!) != 0;
+  }
+
   // ============================================================
   // DNS Module
   // ============================================================
@@ -303,7 +601,7 @@ class CyxChatBindings {
   Pointer<Uint8>? dnsResolve(String name) {
     if (_dnsCtx == null) return null;
     final namePtr = name.toNativeUtf8();
-    final recordPtr = calloc<Uint8>(256); // DNS record is ~180 bytes
+    final recordPtr = calloc<Uint8>(4096); // DNS record is ~180 bytes
     try {
       final result = _native.cyxchat_dns_resolve(_dnsCtx!, namePtr.cast(), recordPtr);
       if (result == 0) {
@@ -955,6 +1253,10 @@ class CyxChatNative {
       Int32 Function(Pointer<Void>, Pointer<Uint8>),
       int Function(Pointer<Void>, Pointer<Uint8>)>('cyxchat_conn_force_relay');
 
+  late final cyxchat_conn_add_peer_addr = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>, Pointer<Int8>),
+      int Function(Pointer<Void>, Pointer<Uint8>, Pointer<Int8>)>('cyxchat_conn_add_peer_addr');
+
   // DNS functions
   late final cyxchat_dns_create = _lib.lookupFunction<
       Int32 Function(Pointer<Pointer<Void>>, Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>),
@@ -1038,6 +1340,90 @@ class CyxChatNative {
   late final cyxchat_conn_get_peer_table = _lib.lookupFunction<
       Pointer<Void> Function(Pointer<Void>),
       Pointer<Void> Function(Pointer<Void>)>('cyxchat_conn_get_peer_table');
+
+  late final cyxchat_conn_get_onion = _lib.lookupFunction<
+      Pointer<Void> Function(Pointer<Void>),
+      Pointer<Void> Function(Pointer<Void>)>('cyxchat_conn_get_onion');
+
+  late final cyxchat_conn_get_dht = _lib.lookupFunction<
+      Pointer<Void> Function(Pointer<Void>),
+      Pointer<Void> Function(Pointer<Void>)>('cyxchat_conn_get_dht');
+
+  // DHT functions
+  late final cyxchat_conn_dht_bootstrap = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>, Size),
+      int Function(Pointer<Void>, Pointer<Uint8>, int)>(
+      'cyxchat_conn_dht_bootstrap');
+
+  late final cyxchat_conn_dht_add_node = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>),
+      int Function(Pointer<Void>, Pointer<Uint8>)>('cyxchat_conn_dht_add_node');
+
+  late final cyxchat_conn_dht_find_node = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>, Pointer<Void>, Pointer<Void>),
+      int Function(Pointer<Void>, Pointer<Uint8>, Pointer<Void>, Pointer<Void>)>(
+      'cyxchat_conn_dht_find_node');
+
+  late final cyxchat_conn_dht_get_closest = _lib.lookupFunction<
+      Size Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>, Size),
+      int Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>, int)>(
+      'cyxchat_conn_dht_get_closest');
+
+  late final cyxchat_conn_dht_is_ready = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>),
+      int Function(Pointer<Void>)>('cyxchat_conn_dht_is_ready');
+
+  // Chat core functions
+  late final cyxchat_create = _lib.lookupFunction<
+      Int32 Function(Pointer<Pointer<Void>>, Pointer<Void>, Pointer<Uint8>),
+      int Function(Pointer<Pointer<Void>>, Pointer<Void>, Pointer<Uint8>)>(
+      'cyxchat_create');
+
+  late final cyxchat_destroy = _lib.lookupFunction<
+      Void Function(Pointer<Void>),
+      void Function(Pointer<Void>)>('cyxchat_destroy');
+
+  late final cyxchat_poll = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Uint64),
+      int Function(Pointer<Void>, int)>('cyxchat_poll');
+
+  late final cyxchat_recv_next = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>,
+          Pointer<Uint8>, Pointer<Size>),
+      int Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>,
+          Pointer<Uint8>, Pointer<Size>)>('cyxchat_recv_next');
+
+  late final cyxchat_send_text = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>, Pointer<Int8>, Size,
+          Pointer<Uint8>, Pointer<Uint8>),
+      int Function(Pointer<Void>, Pointer<Uint8>, Pointer<Int8>, int,
+          Pointer<Uint8>, Pointer<Uint8>)>('cyxchat_send_text');
+
+  late final cyxchat_send_ack = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>, Int32),
+      int Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>, int)>(
+      'cyxchat_send_ack');
+
+  late final cyxchat_send_typing = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>, Int32),
+      int Function(Pointer<Void>, Pointer<Uint8>, int)>('cyxchat_send_typing');
+
+  late final cyxchat_send_reaction = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>,
+          Pointer<Int8>, Int32),
+      int Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>,
+          Pointer<Int8>, int)>('cyxchat_send_reaction');
+
+  late final cyxchat_send_delete = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>),
+      int Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>)>(
+      'cyxchat_send_delete');
+
+  late final cyxchat_send_edit = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>,
+          Pointer<Int8>, Size),
+      int Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>,
+          Pointer<Int8>, int)>('cyxchat_send_edit');
 
   // Mail functions
   late final cyxchat_mail_ctx_create = _lib.lookupFunction<

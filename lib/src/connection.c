@@ -6,14 +6,14 @@
  * and automatic relay fallback.
  */
 
-#ifdef _MSC_VER
-#define _CRT_SECURE_NO_WARNINGS
-#endif
-
 #include "cyxchat/connection.h"
 #include "cyxchat/relay.h"
 #include <cyxwiz/memory.h>
 #include <cyxwiz/log.h>
+#include <cyxwiz/routing.h>
+#include <cyxwiz/onion.h>
+#include <cyxwiz/dht.h>
+#include <cyxwiz/peer.h>
 
 #include <string.h>
 #include <stdlib.h>
@@ -43,6 +43,9 @@ typedef struct {
     int active;
 } cyxchat_pending_conn_t;
 
+/* Throttle interval for sending ANNOUNCEs to same peer (60 seconds) */
+#define CYXCHAT_ANNOUNCE_THROTTLE_MS 60000
+
 /* Per-peer connection info */
 typedef struct {
     cyxwiz_node_id_t peer_id;
@@ -50,6 +53,8 @@ typedef struct {
     uint64_t connected_at;
     uint64_t last_activity;
     uint64_t last_keepalive;
+    uint64_t last_announce_sent;    /* When we last sent ANNOUNCE to this peer */
+    uint64_t last_key_exchange;     /* When we last processed key from this peer */
     uint32_t bytes_sent;
     uint32_t bytes_received;
     int8_t rssi;
@@ -57,11 +62,23 @@ typedef struct {
     int active;
 } cyxchat_peer_conn_t;
 
+/* DHT find callback wrapper */
+typedef struct {
+    cyxchat_conn_ctx_t *ctx;
+    cyxchat_dht_find_callback_t callback;
+    void *user_data;
+    cyxwiz_node_id_t target;
+} cyxchat_dht_find_ctx_t;
+
 /* Connection context */
 struct cyxchat_conn_ctx {
     /* CyxWiz components */
     cyxwiz_transport_t *transport;
     cyxwiz_peer_table_t *peer_table;
+    cyxwiz_router_t *router;
+    cyxwiz_onion_ctx_t *onion;
+    cyxwiz_dht_t *dht;
+    cyxwiz_discovery_t *discovery;
 
     /* Our identity */
     cyxwiz_node_id_t local_id;
@@ -90,6 +107,10 @@ struct cyxchat_conn_ctx {
     cyxchat_conn_data_callback_t on_data;
     void *data_user_data;
 
+    /* DHT callbacks */
+    cyxchat_dht_node_callback_t on_dht_node;
+    void *dht_node_user_data;
+
     /* Timing */
     uint64_t last_stun_time;
     uint64_t last_poll_time;
@@ -98,6 +119,10 @@ struct cyxchat_conn_ctx {
 /* ============================================================
  * Helper Functions
  * ============================================================ */
+
+/* Forward declaration for send_announce_to_peer (defined later) */
+static void send_announce_to_peer(cyxchat_conn_ctx_t *ctx,
+                                   const cyxwiz_node_id_t *peer_id);
 
 static uint64_t get_time_ms(void)
 {
@@ -206,6 +231,19 @@ static void on_relay_data(cyxchat_relay_ctx_t *relay_ctx,
     }
 }
 
+/* Discovery message types (0x01-0x05) */
+#define CYXCHAT_DISC_ANNOUNCE     0x01
+#define CYXCHAT_DISC_ANNOUNCE_ACK 0x02
+#define CYXCHAT_DISC_PING         0x03
+#define CYXCHAT_DISC_PONG         0x04
+#define CYXCHAT_DISC_GOODBYE      0x05
+
+/* Check if message is a discovery protocol message */
+static int is_discovery_message(uint8_t type)
+{
+    return type >= CYXCHAT_DISC_ANNOUNCE && type <= CYXCHAT_DISC_GOODBYE;
+}
+
 /* Transport callbacks */
 static void on_transport_recv(cyxwiz_transport_t *transport,
                               const cyxwiz_node_id_t *from,
@@ -219,6 +257,29 @@ static void on_transport_recv(cyxwiz_transport_t *transport,
     if (len > 0 && ctx->relay && cyxchat_relay_is_relay_message(data[0])) {
         cyxchat_relay_handle_message(ctx->relay, data, len);
         return;  /* Relay handler forwards data via callback */
+    }
+
+    /* Route discovery messages to discovery handler for key exchange */
+    if (len > 0 && ctx->discovery && is_discovery_message(data[0])) {
+        /* Debug: log announce message details (pubkey at offset 37) */
+        if (data[0] == CYXCHAT_DISC_ANNOUNCE && len >= 69) {
+            const uint8_t *pk = data + 37;  /* pubkey offset */
+            int has_pk = 0;
+            for (int i = 0; i < 32; i++) {
+                if (pk[i] != 0) { has_pk = 1; break; }
+            }
+        }
+        cyxwiz_discovery_handle_message(ctx->discovery, from, data, len);
+        /* Don't return - also process below for connection state updates */
+    }
+
+    /* Route onion data messages to onion handler */
+    if (len > 0 && ctx->onion && data[0] == CYXWIZ_MSG_ONION_DATA) {
+        cyxwiz_error_t err = cyxwiz_onion_handle_message(ctx->onion, from, data, len);
+        if (err != CYXWIZ_OK && err != CYXWIZ_ERR_RATE_LIMITED) {
+            CYXWIZ_DEBUG("Onion message handling failed: %d", err);
+        }
+        return;  /* Onion messages are fully handled by onion layer */
     }
 
     /* Update peer connection state */
@@ -244,8 +305,8 @@ static void on_transport_recv(cyxwiz_transport_t *transport,
         }
     }
 
-    /* Forward to application callback */
-    if (ctx->on_data) {
+    /* Forward to application callback (skip discovery messages) */
+    if (ctx->on_data && !(len > 0 && is_discovery_message(data[0]))) {
         ctx->on_data(ctx, from, data, len, ctx->data_user_data);
     }
 }
@@ -270,16 +331,190 @@ static void on_peer_discovered(cyxwiz_transport_t *transport,
 
     /* Update or create peer connection record */
     cyxchat_peer_conn_t *conn = find_peer_conn(ctx, &peer->id);
+    int is_new_peer = (conn == NULL);
+    uint64_t now = get_time_ms();
+
     if (!conn) {
         conn = alloc_peer_conn(ctx);
         if (conn) {
             conn->peer_id = peer->id;
             conn->state = CYXCHAT_CONN_DISCONNECTED;
             conn->rssi = peer->rssi;
+            conn->last_announce_sent = 0;  /* Never sent */
         }
     } else {
         conn->rssi = peer->rssi;
-        conn->last_activity = get_time_ms();
+        conn->last_activity = now;
+    }
+
+    /* Send discovery ANNOUNCE to initiate key exchange (with throttling) */
+    if (conn && ctx->onion) {
+        uint64_t elapsed = now - conn->last_announce_sent;
+        /* Send if: new peer OR throttle interval has passed */
+        if (is_new_peer || elapsed >= CYXCHAT_ANNOUNCE_THROTTLE_MS) {
+            CYXWIZ_INFO("Initiating key exchange with new peer (is_new=%d)", is_new_peer);
+            send_announce_to_peer(ctx, &peer->id);
+            conn->last_announce_sent = now;
+        }
+    } else {
+        CYXWIZ_WARN("Skip announce: conn=%p, onion=%p", (void*)conn, (void*)(ctx ? ctx->onion : NULL));
+    }
+}
+
+/* DHT node discovery callback - adds new nodes to peer table */
+static void on_dht_node_discovered(const cyxwiz_node_id_t *node_id, void *user_data)
+{
+    cyxchat_conn_ctx_t *ctx = (cyxchat_conn_ctx_t*)user_data;
+    if (!ctx || !node_id) return;
+
+    /* Add to peer table if not already there */
+    const cyxwiz_peer_t *peer = cyxwiz_peer_table_find(ctx->peer_table, node_id);
+    if (!peer) {
+        cyxwiz_peer_table_add(ctx->peer_table, node_id, CYXWIZ_TRANSPORT_UDP, 0);
+    }
+
+    /* Update or create peer connection record */
+    cyxchat_peer_conn_t *conn = find_peer_conn(ctx, node_id);
+    if (!conn) {
+        conn = alloc_peer_conn(ctx);
+        if (conn) {
+            conn->peer_id = *node_id;
+            conn->state = CYXCHAT_CONN_DISCONNECTED;
+            conn->rssi = 0;
+        }
+    }
+
+    /* Notify application */
+    if (ctx->on_dht_node) {
+        ctx->on_dht_node(ctx, node_id, ctx->dht_node_user_data);
+    }
+}
+
+/* Key exchange callback - called when peer's X25519 public key is received */
+static void on_peer_key_received(const cyxwiz_node_id_t *peer_id,
+                                  const uint8_t *peer_pubkey,
+                                  void *user_data)
+{
+    cyxchat_conn_ctx_t *ctx = (cyxchat_conn_ctx_t*)user_data;
+    if (!ctx || !ctx->onion || !peer_id || !peer_pubkey) {
+        return;
+    }
+
+    /* Find or create peer connection for throttle tracking */
+    cyxchat_peer_conn_t *conn = find_peer_conn(ctx, peer_id);
+    uint64_t now = get_time_ms();
+
+    if (!conn) {
+        /* Create peer connection for new peer */
+        conn = alloc_peer_conn(ctx);
+        if (conn) {
+            conn->peer_id = *peer_id;
+            conn->state = CYXCHAT_CONN_DISCONNECTED;
+            conn->last_key_exchange = 0;
+        }
+    }
+
+    /* Throttle key exchange processing */
+    if (conn && conn->last_key_exchange > 0) {
+        uint64_t elapsed = now - conn->last_key_exchange;
+        if (elapsed < CYXCHAT_ANNOUNCE_THROTTLE_MS) {
+            return;  /* Already processed recently */
+        }
+    }
+
+    /* Update key exchange timestamp */
+    if (conn) {
+        conn->last_key_exchange = now;
+    }
+
+    /* Add peer's public key to onion context for shared secret computation */
+    cyxwiz_error_t err = cyxwiz_onion_add_peer_key(ctx->onion, peer_id, peer_pubkey);
+    if (err == CYXWIZ_OK) {
+        char hex_id[17];
+        for (int i = 0; i < 8; i++) {
+            snprintf(hex_id + i*2, 3, "%02x", peer_id->bytes[i]);
+        }
+        CYXWIZ_INFO("Key exchange complete with peer %.16s...", hex_id);
+
+        /* WORKAROUND: Explicitly set peer to CONNECTED state after successful key exchange. */
+        if (ctx->peer_table) {
+            cyxwiz_peer_table_set_state(ctx->peer_table, peer_id, CYXWIZ_PEER_STATE_CONNECTED);
+            cyxwiz_peer_table_record_success(ctx->peer_table, peer_id);
+        }
+    }
+}
+
+/* Minimal UDP state view for socket access (punch function) */
+typedef struct {
+    uint8_t initialized;  /* bool - 1 byte */
+    uint8_t _pad1[7];     /* padding to align socket */
+#ifdef _WIN32
+    SOCKET socket_fd;
+#else
+    int socket_fd;
+#endif
+    /* Rest not needed */
+} cyxchat_udp_state_view_t;
+
+/* Discovery announce message - matches cyxwiz_disc_announce_t */
+#ifdef _MSC_VER
+#pragma pack(push, 1)
+#endif
+typedef struct {
+    uint8_t type;           /* 0x01 = ANNOUNCE */
+    uint8_t version;        /* 1 */
+    cyxwiz_node_id_t node_id;
+    uint8_t capabilities;
+    uint16_t port;
+    uint8_t pubkey[32];
+}
+#ifdef __GNUC__
+__attribute__((packed))
+#endif
+cyxchat_announce_t;
+#ifdef _MSC_VER
+#pragma pack(pop)
+#endif
+
+/* Send discovery ANNOUNCE to a specific peer to initiate key exchange */
+static void send_announce_to_peer(cyxchat_conn_ctx_t *ctx,
+                                   const cyxwiz_node_id_t *peer_id)
+{
+    if (!ctx || !ctx->transport || !ctx->onion || !peer_id) return;
+
+    /* Get our X25519 public key */
+    uint8_t our_pubkey[32];
+    if (cyxwiz_onion_get_pubkey(ctx->onion, our_pubkey) != CYXWIZ_OK) {
+        CYXWIZ_WARN("Cannot send announce - failed to get pubkey");
+        return;
+    }
+
+    /* Build ANNOUNCE message with our pubkey */
+    cyxchat_announce_t announce;
+    memset(&announce, 0, sizeof(announce));
+    announce.type = 0x01;  /* CYXWIZ_DISC_ANNOUNCE */
+    announce.version = 1;
+    memcpy(&announce.node_id, &ctx->local_id, sizeof(cyxwiz_node_id_t));
+    announce.capabilities = 0;
+    announce.port = 0;  /* Will be filled by transport */
+    memcpy(announce.pubkey, our_pubkey, 32);
+
+    /* Use transport's send function - it knows how to reach connected peers */
+    cyxwiz_error_t err = ctx->transport->ops->send(ctx->transport, peer_id,
+                                                    (uint8_t*)&announce, sizeof(announce));
+
+    if (err == CYXWIZ_OK) {
+        char hex_id[17];
+        for (int i = 0; i < 8; i++) {
+            snprintf(hex_id + i*2, 3, "%02x", peer_id->bytes[i]);
+        }
+        CYXWIZ_INFO("Sent key exchange announce to peer %.16s...", hex_id);
+    } else {
+        char hex_id[17];
+        for (int i = 0; i < 8; i++) {
+            snprintf(hex_id + i*2, 3, "%02x", peer_id->bytes[i]);
+        }
+        CYXWIZ_DEBUG("Failed to send announce to %.16s... (err=%d)", hex_id, err);
     }
 }
 
@@ -297,11 +532,14 @@ cyxchat_error_t cyxchat_conn_create(cyxchat_conn_ctx_t **ctx,
 
     /* Set bootstrap environment if provided */
     if (bootstrap && strlen(bootstrap) > 0) {
+        CYXWIZ_INFO("Setting bootstrap server: %s", bootstrap);
 #ifdef _WIN32
         _putenv_s("CYXWIZ_BOOTSTRAP", bootstrap);
 #else
         setenv("CYXWIZ_BOOTSTRAP", bootstrap, 1);
 #endif
+    } else {
+        CYXWIZ_WARN("No bootstrap server provided (bootstrap=%s)", bootstrap ? bootstrap : "NULL");
     }
 
     /* Allocate context */
@@ -326,13 +564,7 @@ cyxchat_error_t cyxchat_conn_create(cyxchat_conn_ctx_t **ctx,
     cyxwiz_transport_set_recv_callback(c->transport, on_transport_recv, c);
     cyxwiz_transport_set_peer_callback(c->transport, on_peer_discovered, c);
 
-    /* Initialize transport */
-    err = c->transport->ops->init(c->transport);
-    if (err != CYXWIZ_OK) {
-        cyxwiz_transport_destroy(c->transport);
-        free(c);
-        return CYXCHAT_ERR_NETWORK;
-    }
+    /* Note: cyxwiz_transport_create already calls init internally */
 
     /* Create peer table */
     err = cyxwiz_peer_table_create(&c->peer_table);
@@ -341,6 +573,88 @@ cyxchat_error_t cyxchat_conn_create(cyxchat_conn_ctx_t **ctx,
         cyxwiz_transport_destroy(c->transport);
         free(c);
         return CYXCHAT_ERR_MEMORY;
+    }
+
+    /* Create router */
+    err = cyxwiz_router_create(&c->router, c->peer_table, c->transport, local_id);
+    if (err != CYXWIZ_OK) {
+        cyxwiz_peer_table_destroy(c->peer_table);
+        c->transport->ops->shutdown(c->transport);
+        cyxwiz_transport_destroy(c->transport);
+        free(c);
+        return CYXCHAT_ERR_MEMORY;
+    }
+
+    /* Start router for route discovery and message handling */
+    err = cyxwiz_router_start(c->router);
+    if (err != CYXWIZ_OK) {
+        cyxwiz_router_destroy(c->router);
+        cyxwiz_peer_table_destroy(c->peer_table);
+        c->transport->ops->shutdown(c->transport);
+        cyxwiz_transport_destroy(c->transport);
+        free(c);
+        return CYXCHAT_ERR_NETWORK;
+    }
+
+    /* Create onion routing context */
+    err = cyxwiz_onion_create(&c->onion, c->router, local_id);
+    if (err != CYXWIZ_OK) {
+        cyxwiz_router_destroy(c->router);
+        cyxwiz_peer_table_destroy(c->peer_table);
+        c->transport->ops->shutdown(c->transport);
+        cyxwiz_transport_destroy(c->transport);
+        free(c);
+        return CYXCHAT_ERR_MEMORY;
+    }
+
+    /* Create discovery context for peer discovery and key exchange */
+    CYXWIZ_INFO("Creating discovery context...");
+    err = cyxwiz_discovery_create(&c->discovery, c->peer_table, c->transport, local_id);
+    if (err != CYXWIZ_OK) {
+        /* Discovery is critical for key exchange - fail if we can't create it */
+        CYXWIZ_WARN("Failed to create discovery context: %d", err);
+        c->discovery = NULL;
+    } else {
+        CYXWIZ_INFO("Discovery context created, getting onion pubkey...");
+        /* Get onion's X25519 public key for announcements */
+        uint8_t onion_pubkey[32];
+        err = cyxwiz_onion_get_pubkey(c->onion, onion_pubkey);
+        if (err == CYXWIZ_OK) {
+            /* Verify pubkey is non-zero */
+            int has_key = 0;
+            for (int i = 0; i < 32; i++) {
+                if (onion_pubkey[i] != 0) { has_key = 1; break; }
+            }
+            CYXWIZ_INFO("Got onion pubkey (has_key=%d, first bytes: %02x%02x%02x%02x)",
+                       has_key, onion_pubkey[0], onion_pubkey[1], onion_pubkey[2], onion_pubkey[3]);
+
+            /* Set public key for discovery announcements */
+            cyxwiz_discovery_set_pubkey(c->discovery, onion_pubkey);
+
+            /* Set callback for when peer public keys arrive */
+            CYXWIZ_INFO("Setting key exchange callback on discovery context");
+            cyxwiz_discovery_set_key_callback(c->discovery, on_peer_key_received, c);
+
+            /* Start discovery */
+            err = cyxwiz_discovery_start(c->discovery);
+            if (err == CYXWIZ_OK) {
+                CYXWIZ_INFO("Discovery started with key exchange enabled");
+            } else {
+                CYXWIZ_WARN("Failed to start discovery: %d", err);
+            }
+        } else {
+            CYXWIZ_WARN("Failed to get onion public key for discovery: %d", err);
+        }
+    }
+
+    /* Create DHT for decentralized peer discovery */
+    err = cyxwiz_dht_create(&c->dht, c->router, local_id);
+    if (err != CYXWIZ_OK) {
+        /* DHT is optional - continue without it */
+        c->dht = NULL;
+    } else {
+        /* Set DHT node discovery callback */
+        cyxwiz_dht_set_node_callback(c->dht, on_dht_node_discovered, c);
     }
 
     /* Create relay context */
@@ -365,6 +679,28 @@ cyxchat_error_t cyxchat_conn_create(cyxchat_conn_ctx_t **ctx,
 void cyxchat_conn_destroy(cyxchat_conn_ctx_t *ctx)
 {
     if (!ctx) return;
+
+    /* Stop and destroy discovery */
+    if (ctx->discovery) {
+        cyxwiz_discovery_stop(ctx->discovery);
+        cyxwiz_discovery_destroy(ctx->discovery);
+    }
+
+    /* Destroy DHT */
+    if (ctx->dht) {
+        cyxwiz_dht_destroy(ctx->dht);
+    }
+
+    /* Destroy onion context */
+    if (ctx->onion) {
+        cyxwiz_onion_destroy(ctx->onion);
+    }
+
+    /* Stop and destroy router */
+    if (ctx->router) {
+        cyxwiz_router_stop(ctx->router);
+        cyxwiz_router_destroy(ctx->router);
+    }
 
     /* Destroy relay */
     if (ctx->relay) {
@@ -401,6 +737,26 @@ int cyxchat_conn_poll(cyxchat_conn_ctx_t *ctx, uint64_t now_ms)
     /* Poll relay */
     if (ctx->relay) {
         events += cyxchat_relay_poll(ctx->relay, now_ms);
+    }
+
+    /* Poll router */
+    if (ctx->router) {
+        cyxwiz_router_poll(ctx->router, now_ms);
+    }
+
+    /* Poll onion */
+    if (ctx->onion) {
+        cyxwiz_onion_poll(ctx->onion, now_ms);
+    }
+
+    /* Poll DHT */
+    if (ctx->dht) {
+        cyxwiz_dht_poll(ctx->dht, now_ms);
+    }
+
+    /* Poll discovery for announcements and key exchange */
+    if (ctx->discovery) {
+        cyxwiz_discovery_poll(ctx->discovery, now_ms);
     }
 
     /* Update NAT info from transport */
@@ -667,6 +1023,18 @@ void cyxchat_conn_get_status(cyxchat_conn_ctx_t *ctx, cyxchat_network_status_t *
             }
         }
     }
+
+    /* DHT status */
+    status_out->dht_enabled = (ctx->dht != NULL);
+    status_out->dht_nodes = 0;
+    status_out->dht_active_buckets = 0;
+
+    if (ctx->dht) {
+        cyxwiz_dht_stats_t stats;
+        cyxwiz_dht_get_stats(ctx->dht, &stats);
+        status_out->dht_nodes = stats.total_nodes;
+        status_out->dht_active_buckets = stats.active_buckets;
+    }
 }
 
 cyxchat_error_t cyxchat_conn_get_public_addr(cyxchat_conn_ctx_t *ctx,
@@ -804,4 +1172,291 @@ cyxwiz_transport_t* cyxchat_conn_get_transport(cyxchat_conn_ctx_t *ctx)
 cyxwiz_peer_table_t* cyxchat_conn_get_peer_table(cyxchat_conn_ctx_t *ctx)
 {
     return ctx ? ctx->peer_table : NULL;
+}
+
+cyxwiz_onion_ctx_t* cyxchat_conn_get_onion(cyxchat_conn_ctx_t *ctx)
+{
+    return ctx ? ctx->onion : NULL;
+}
+
+cyxwiz_dht_t* cyxchat_conn_get_dht(cyxchat_conn_ctx_t *ctx)
+{
+    return ctx ? ctx->dht : NULL;
+}
+
+/* ============================================================
+ * DHT (Distributed Hash Table) for Peer Discovery
+ * ============================================================ */
+
+cyxchat_error_t cyxchat_conn_dht_bootstrap(cyxchat_conn_ctx_t *ctx,
+                                            const cyxwiz_node_id_t *seed_nodes,
+                                            size_t count)
+{
+    if (!ctx || !seed_nodes || count == 0) {
+        return CYXCHAT_ERR_NULL;
+    }
+
+    if (!ctx->dht) {
+        return CYXCHAT_ERR_INVALID;
+    }
+
+    cyxwiz_error_t err = cyxwiz_dht_bootstrap(ctx->dht, seed_nodes, count);
+    return (err == CYXWIZ_OK) ? CYXCHAT_OK : CYXCHAT_ERR_NETWORK;
+}
+
+cyxchat_error_t cyxchat_conn_dht_add_node(cyxchat_conn_ctx_t *ctx,
+                                           const cyxwiz_node_id_t *node_id)
+{
+    if (!ctx || !node_id) {
+        return CYXCHAT_ERR_NULL;
+    }
+
+    if (!ctx->dht) {
+        return CYXCHAT_ERR_INVALID;
+    }
+
+    cyxwiz_error_t err = cyxwiz_dht_add_node(ctx->dht, node_id);
+    return (err == CYXWIZ_OK) ? CYXCHAT_OK : CYXCHAT_ERR_FULL;
+}
+
+/* Wrapper callback for DHT find */
+static void dht_find_wrapper_cb(const cyxwiz_node_id_t *target,
+                                 bool found,
+                                 const cyxwiz_node_id_t *result,
+                                 void *user_data)
+{
+    (void)result;  /* We only care if found or not */
+    cyxchat_dht_find_ctx_t *find_ctx = (cyxchat_dht_find_ctx_t*)user_data;
+    if (!find_ctx) return;
+
+    if (find_ctx->callback) {
+        find_ctx->callback(find_ctx->ctx, target, found ? 1 : 0, find_ctx->user_data);
+    }
+
+    /* Free the wrapper context */
+    free(find_ctx);
+}
+
+cyxchat_error_t cyxchat_conn_dht_find_node(cyxchat_conn_ctx_t *ctx,
+                                            const cyxwiz_node_id_t *target,
+                                            cyxchat_dht_find_callback_t callback,
+                                            void *user_data)
+{
+    if (!ctx || !target) {
+        return CYXCHAT_ERR_NULL;
+    }
+
+    if (!ctx->dht) {
+        return CYXCHAT_ERR_INVALID;
+    }
+
+    /* Allocate wrapper context for callback */
+    cyxchat_dht_find_ctx_t *find_ctx = NULL;
+    if (callback) {
+        find_ctx = (cyxchat_dht_find_ctx_t*)malloc(sizeof(cyxchat_dht_find_ctx_t));
+        if (!find_ctx) {
+            return CYXCHAT_ERR_MEMORY;
+        }
+        find_ctx->ctx = ctx;
+        find_ctx->callback = callback;
+        find_ctx->user_data = user_data;
+        find_ctx->target = *target;
+    }
+
+    cyxwiz_error_t err = cyxwiz_dht_find_node(ctx->dht, target,
+        callback ? dht_find_wrapper_cb : NULL,
+        callback ? find_ctx : NULL);
+
+    if (err != CYXWIZ_OK) {
+        free(find_ctx);
+        return CYXCHAT_ERR_NETWORK;
+    }
+
+    return CYXCHAT_OK;
+}
+
+size_t cyxchat_conn_dht_get_closest(cyxchat_conn_ctx_t *ctx,
+                                     const cyxwiz_node_id_t *target,
+                                     cyxwiz_node_id_t *out_nodes,
+                                     size_t max_nodes)
+{
+    if (!ctx || !target || !out_nodes || max_nodes == 0) {
+        return 0;
+    }
+
+    if (!ctx->dht) {
+        return 0;
+    }
+
+    return cyxwiz_dht_get_closest(ctx->dht, target, out_nodes, max_nodes);
+}
+
+void cyxchat_conn_dht_set_node_callback(cyxchat_conn_ctx_t *ctx,
+                                         cyxchat_dht_node_callback_t callback,
+                                         void *user_data)
+{
+    if (!ctx) return;
+
+    ctx->on_dht_node = callback;
+    ctx->dht_node_user_data = user_data;
+}
+
+void cyxchat_conn_dht_get_stats(cyxchat_conn_ctx_t *ctx,
+                                 cyxwiz_dht_stats_t *stats_out)
+{
+    if (!ctx || !stats_out) return;
+
+    memset(stats_out, 0, sizeof(cyxwiz_dht_stats_t));
+
+    if (ctx->dht) {
+        cyxwiz_dht_get_stats(ctx->dht, stats_out);
+    }
+}
+
+int cyxchat_conn_dht_is_ready(cyxchat_conn_ctx_t *ctx)
+{
+    if (!ctx || !ctx->dht) {
+        return 0;
+    }
+
+    cyxwiz_dht_stats_t stats;
+    cyxwiz_dht_get_stats(ctx->dht, &stats);
+
+    /* Consider DHT ready if we have at least some nodes */
+    return stats.total_nodes >= 1;
+}
+
+/* ============================================================
+ * Manual Peer Addition
+ * ============================================================ */
+
+/* Internal UDP punch packet type */
+#define CYXWIZ_UDP_PUNCH 0xF4
+
+/* Socket error code macro */
+#ifdef _WIN32
+#define CONN_SOCKET_ERROR WSAGetLastError()
+#else
+#define CONN_SOCKET_ERROR errno
+#endif
+
+/* UDP punch packet structure (matches udp.c - packed for network) */
+#ifdef _MSC_VER
+#pragma pack(push, 1)
+#endif
+typedef struct {
+    uint8_t type;
+    cyxwiz_node_id_t sender_id;
+    uint32_t punch_id;
+}
+#ifdef __GNUC__
+__attribute__((packed))
+#endif
+cyxchat_punch_packet_t;
+#ifdef _MSC_VER
+#pragma pack(pop)
+#endif
+
+/* Note: cyxchat_udp_state_view_t is defined earlier in this file */
+
+cyxchat_error_t cyxchat_conn_add_peer_addr(cyxchat_conn_ctx_t *ctx,
+                                            const cyxwiz_node_id_t *node_id,
+                                            const char *addr)
+{
+    if (!ctx || !node_id || !addr) {
+        return CYXCHAT_ERR_NULL;
+    }
+
+    if (!ctx->transport) {
+        return CYXCHAT_ERR_NETWORK;
+    }
+
+    /* Parse IP:port string */
+    char ip_str[64];
+    int port = 0;
+
+    const char *colon = strchr(addr, ':');
+    if (!colon) {
+        CYXWIZ_WARN("Invalid address format (missing port): %s", addr);
+        return CYXCHAT_ERR_INVALID;
+    }
+
+    size_t ip_len = (size_t)(colon - addr);
+    if (ip_len >= sizeof(ip_str)) {
+        return CYXCHAT_ERR_INVALID;
+    }
+
+    memcpy(ip_str, addr, ip_len);
+    ip_str[ip_len] = '\0';
+    port = atoi(colon + 1);
+
+    if (port <= 0 || port > 65535) {
+        CYXWIZ_WARN("Invalid port: %d", port);
+        return CYXCHAT_ERR_INVALID;
+    }
+
+    /* Resolve IP address */
+    struct sockaddr_in dest_addr;
+    memset(&dest_addr, 0, sizeof(dest_addr));
+    dest_addr.sin_family = AF_INET;
+    dest_addr.sin_port = htons((uint16_t)port);
+
+    if (inet_pton(AF_INET, ip_str, &dest_addr.sin_addr) != 1) {
+        /* Try resolving as hostname */
+        struct addrinfo hints, *result;
+        memset(&hints, 0, sizeof(hints));
+        hints.ai_family = AF_INET;
+        hints.ai_socktype = SOCK_DGRAM;
+
+        if (getaddrinfo(ip_str, NULL, &hints, &result) != 0) {
+            CYXWIZ_WARN("Failed to resolve address: %s", ip_str);
+            return CYXCHAT_ERR_NETWORK;
+        }
+
+        struct sockaddr_in *sin = (struct sockaddr_in *)result->ai_addr;
+        dest_addr.sin_addr = sin->sin_addr;
+        freeaddrinfo(result);
+    }
+
+    /* Add peer to peer table (ignore if already exists) */
+    cyxwiz_peer_table_add(ctx->peer_table, node_id, CYXWIZ_TRANSPORT_UDP, 0);
+
+    /* Get the transport's socket from driver_data */
+    cyxchat_udp_state_view_t *udp_state =
+        (cyxchat_udp_state_view_t *)ctx->transport->driver_data;
+    if (!udp_state || !udp_state->initialized) {
+        return CYXCHAT_ERR_NETWORK;  /* Transport not initialized */
+    }
+
+#ifdef _WIN32
+    SOCKET sock = udp_state->socket_fd;
+    if (sock == INVALID_SOCKET) {
+        return CYXCHAT_ERR_NETWORK;
+    }
+#else
+    int sock = udp_state->socket_fd;
+    if (sock < 0) {
+        return CYXCHAT_ERR_NETWORK;
+    }
+#endif
+
+    /* Build punch packet */
+    cyxchat_punch_packet_t punch;
+    memset(&punch, 0, sizeof(punch));
+    punch.type = CYXWIZ_UDP_PUNCH;
+    memcpy(&punch.sender_id, &ctx->local_id, sizeof(cyxwiz_node_id_t));
+    punch.punch_id = (uint32_t)(get_time_ms() & 0xFFFFFFFF);
+
+    /* Send punch to peer */
+    int sent = sendto(sock, (const char *)&punch, sizeof(punch), 0,
+                      (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+
+    if (sent < 0) {
+        CYXWIZ_WARN("Failed to send punch packet: %d", CONN_SOCKET_ERROR);
+        return CYXCHAT_ERR_NETWORK;
+    }
+
+    CYXWIZ_INFO("Sent punch to %s:%d for peer discovery", ip_str, port);
+
+    return CYXCHAT_OK;
 }

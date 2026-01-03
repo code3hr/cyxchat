@@ -151,6 +151,27 @@ CYXCHAT_API void cyxchat_destroy(cyxchat_ctx_t *ctx);
 CYXCHAT_API int cyxchat_poll(cyxchat_ctx_t *ctx, uint64_t now_ms);
 
 /**
+ * Get next received message (for FFI polling)
+ *
+ * Retrieves the next message from the receive queue.
+ * Call this in a loop after cyxchat_poll() until it returns 0.
+ *
+ * @param ctx           Chat context
+ * @param from_out      Output: sender node ID
+ * @param type_out      Output: message type (CYXCHAT_MSG_*)
+ * @param data_out      Output buffer for message data
+ * @param data_len      Input: buffer size, Output: actual data length
+ * @return              1 if message retrieved, 0 if queue empty
+ */
+CYXCHAT_API int cyxchat_recv_next(
+    cyxchat_ctx_t *ctx,
+    cyxwiz_node_id_t *from_out,
+    uint8_t *type_out,
+    uint8_t *data_out,
+    size_t *data_len
+);
+
+/**
  * Get local node ID
  */
 CYXCHAT_API const cyxwiz_node_id_t* cyxchat_get_local_id(cyxchat_ctx_t *ctx);

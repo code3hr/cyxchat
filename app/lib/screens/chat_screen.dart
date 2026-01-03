@@ -26,6 +26,20 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     });
   }
 
+  /// Listen for incoming messages and refresh UI
+  void _setupMessageListener() {
+    ref.listen<AsyncValue<Message>>(messageStreamProvider, (previous, next) {
+      next.whenData((message) {
+        // Refresh if message is for this conversation
+        if (message.conversationId == widget.conversationId) {
+          ref.invalidate(messagesProvider(widget.conversationId));
+        }
+        // Also refresh conversation list for unread count
+        ref.invalidate(conversationsProvider);
+      });
+    });
+  }
+
   @override
   void dispose() {
     _textController.dispose();
@@ -35,6 +49,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Listen for incoming messages
+    _setupMessageListener();
+
     final conversationAsync = ref.watch(conversationProvider(widget.conversationId));
     final messagesAsync = ref.watch(messagesProvider(widget.conversationId));
 

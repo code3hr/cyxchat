@@ -1,6 +1,6 @@
 # CyxChat
 
-Privacy-first messaging application built on the [CyxWiz](https://github.com/code3hr/cyxwiz) mesh network protocol.
+Privacy-first messaging application built on the [CyxWiz](https://github.com/code3hr/conspiracy) mesh network protocol.
 
 ## Features
 
@@ -16,6 +16,102 @@ Privacy-first messaging application built on the [CyxWiz](https://github.com/cod
 | Chats | Contacts | Settings | Add Contact |
 |:-----:|:--------:|:--------:|:-----------:|
 | ![Chats](cyxchat1.png) | ![Contacts](cyxchat2.png) | ![Settings](cyxchat3.png) | ![Add Contact](cyxchat4.png) |
+
+---
+
+## Quick Start Guide
+
+CyxChat requires the **CyxWiz protocol library** as a dependency. Clone the parent conspiracy repository which contains both.
+
+### Step 1: Clone the Repository
+
+```bash
+git clone https://github.com/code3hr/conspiracy.git
+cd conspiracy
+```
+
+### Step 2: Install Dependencies
+
+**Windows** (via vcpkg):
+```powershell
+vcpkg install libsodium:x64-windows
+```
+
+**Linux**:
+```bash
+sudo apt install build-essential cmake libsodium-dev
+```
+
+**macOS**:
+```bash
+brew install cmake libsodium
+```
+
+### Step 3: Build CyxWiz Protocol Library
+
+From the conspiracy root:
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --config Release
+```
+
+### Step 4: Build CyxChat C Library
+
+```bash
+cd cyxchat/lib
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --config Release
+```
+
+### Step 5: Copy Native Library to Flutter App
+
+**Windows:** `copy lib\build\Release\cyxchat.dll app\`
+**Linux:** `cp lib/build/libcyxchat.so app/`
+**macOS:** `cp lib/build/libcyxchat.dylib app/`
+
+### Step 6: Run the Bootstrap Server
+
+From conspiracy root:
+```bash
+./build/cyxwizd
+```
+
+In the daemon prompt:
+```
+/bootstrap 7777
+```
+
+Keep this running while testing.
+
+### Step 7: Run the Flutter App
+
+```bash
+cd cyxchat/app
+flutter pub get
+flutter run -d windows  # or linux, macos
+```
+
+In app settings, set bootstrap to `127.0.0.1:7777`
+
+---
+
+## Running Multiple Instances (Testing)
+
+**Terminal 1 - Instance A:**
+```bash
+cd cyxchat/app
+flutter run -d windows
+```
+
+**Terminal 2 - Instance B:**
+```bash
+cd cyxchat/app
+flutter run -d windows --dart-define=INSTANCE_ID=2
+```
+
+Each instance gets its own identity and database. Add each other using Node ID from Settings.
+
+---
 
 ## Architecture
 
@@ -155,12 +251,34 @@ cyxchat_group_invite(group_ctx, &group_id, &member_id, member_pubkey);
 | Key Exchange | X25519 | Establish shared secrets |
 | Hashing | BLAKE2b | Integrity verification |
 
+## Troubleshooting
+
+### Bootstrap connection failed
+1. Ensure bootstrap server is running (`./build/cyxwizd` then `/bootstrap 7777`)
+2. Check firewall allows UDP on that port
+3. Verify bootstrap address in app settings
+
+### Peer not found or messages not sending
+1. Both peers must use the same bootstrap server
+2. Wait for key exchange to complete (see logs)
+3. NAT traversal may take a few seconds
+
+### Windows: DLL not found
+Copy `cyxchat.dll` to the app directory or add to PATH.
+
+### Linux: libsodium not found
+```bash
+sudo ldconfig
+export LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH
+```
+
+---
+
 ## Documentation
 
 - [Architecture](docs/ARCHITECTURE.md) - System design
-- [API Reference](docs/API.md) - C library API
-- [Database Schema](docs/DATABASE.md) - Local storage
-- [Quick Start](QUICKSTART.md) - Getting started guide
+- [NAT Traversal](docs/NAT-TRAVERSAL.md) - How peer connectivity works
+- [DNS](docs/DNS.md) - Username resolution system
 
 ## License
 

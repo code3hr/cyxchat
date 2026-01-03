@@ -4,6 +4,7 @@ import '../main.dart';
 import '../providers/conversation_provider.dart';
 import '../providers/mail_provider.dart';
 import '../providers/network_provider.dart';
+import '../providers/settings_provider.dart';
 import '../models/models.dart';
 import 'chat_screen.dart';
 import 'group_chat_screen.dart';
@@ -21,6 +22,37 @@ class HomeScreen extends ConsumerStatefulWidget {
 
 class _HomeScreenState extends ConsumerState<HomeScreen> {
   int _selectedIndex = 0;
+  bool _autoConnectAttempted = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Auto-connect on startup after first frame
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _autoConnect();
+    });
+  }
+
+  Future<void> _autoConnect() async {
+    if (_autoConnectAttempted) return;
+    _autoConnectAttempted = true;
+
+    // Wait for settings to load from SharedPreferences
+    await Future.delayed(const Duration(milliseconds: 500));
+
+    final connectionState = ref.read(connectionNotifierProvider);
+    if (!connectionState.initialized) {
+      final settings = ref.read(settingsProvider);
+      debugPrint('CyxChat: Bootstrap server = "${settings.bootstrapServer}"');
+
+      // Auto-connect to network
+      final success = await ref.read(connectionActionsProvider).connect();
+      if (mounted && success) {
+        debugPrint('CyxChat: Auto-connected to network');
+      }
+    }
+  }
+
 
   @override
   Widget build(BuildContext context) {
@@ -111,6 +143,13 @@ class _ChatsTab extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // Listen for incoming messages to refresh conversation list
+    ref.listen<AsyncValue<Message>>(messageStreamProvider, (previous, next) {
+      next.whenData((message) {
+        ref.invalidate(conversationsProvider);
+      });
+    });
+
     final conversationsAsync = ref.watch(conversationsProvider);
 
     return Scaffold(

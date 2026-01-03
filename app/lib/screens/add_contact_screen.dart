@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:provider/provider.dart' as provider;
 import 'package:qr_flutter/qr_flutter.dart';
 import '../providers/identity_provider.dart';
 import '../providers/dns_provider.dart';
+import '../providers/contact_provider.dart';
+import '../providers/conversation_provider.dart';
+import 'chat_screen.dart';
 
 class AddContactScreen extends ConsumerStatefulWidget {
   const AddContactScreen({super.key});
@@ -163,10 +165,24 @@ class _ScanTab extends StatelessWidget {
   }
 }
 
-class _ManualTab extends StatelessWidget {
+class _ManualTab extends ConsumerStatefulWidget {
   final TextEditingController controller;
 
   const _ManualTab({required this.controller});
+
+  @override
+  ConsumerState<_ManualTab> createState() => _ManualTabState();
+}
+
+class _ManualTabState extends ConsumerState<_ManualTab> {
+  final _displayNameController = TextEditingController();
+  bool _isAdding = false;
+
+  @override
+  void dispose() {
+    _displayNameController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -186,7 +202,7 @@ class _ManualTab extends StatelessWidget {
           ),
           const SizedBox(height: 24),
           TextField(
-            controller: controller,
+            controller: widget.controller,
             decoration: const InputDecoration(
               labelText: 'Node ID',
               hintText: 'Enter 64 hex characters',
@@ -196,6 +212,7 @@ class _ManualTab extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           TextField(
+            controller: _displayNameController,
             decoration: const InputDecoration(
               labelText: 'Display name (optional)',
               hintText: 'How you want to call them',
@@ -203,37 +220,84 @@ class _ManualTab extends StatelessWidget {
           ),
           const SizedBox(height: 24),
           ElevatedButton(
-            onPressed: () {
-              // TODO: Add contact
-              final nodeId = controller.text.trim();
-              if (nodeId.length != 64) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Invalid node ID')),
-                );
-                return;
-              }
-              // Add contact logic
-              Navigator.pop(context);
-            },
-            child: const Text('Add Contact'),
+            onPressed: _isAdding ? null : _addContact,
+            child: _isAdding
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Text('Add Contact'),
           ),
         ],
       ),
     );
   }
+
+  Future<void> _addContact() async {
+    final nodeId = widget.controller.text.trim().toLowerCase();
+
+    // Validate node ID format (64 hex characters)
+    if (nodeId.length != 64 || !RegExp(r'^[0-9a-f]+$').hasMatch(nodeId)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Invalid node ID - must be 64 hex characters')),
+      );
+      return;
+    }
+
+    setState(() => _isAdding = true);
+
+    try {
+      final displayName = _displayNameController.text.trim();
+
+      // Add contact
+      await ref.read(contactActionsProvider).addContact(
+        nodeId: nodeId,
+        displayName: displayName.isEmpty ? null : displayName,
+      );
+
+      // Create/get conversation
+      final conversation = await ref.read(chatActionsProvider).startConversation(nodeId);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Added ${displayName.isEmpty ? nodeId.substring(0, 8) : displayName}')),
+        );
+
+        // Navigate to chat
+        Navigator.pop(context); // Pop add contact screen
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => ChatScreen(conversationId: conversation.id),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to add contact: $e')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isAdding = false);
+      }
+    }
+  }
 }
 
 /// Username lookup tab
-class _UsernameTab extends StatefulWidget {
+class _UsernameTab extends ConsumerStatefulWidget {
   final TextEditingController controller;
 
   const _UsernameTab({required this.controller});
 
   @override
-  State<_UsernameTab> createState() => _UsernameTabState();
+  ConsumerState<_UsernameTab> createState() => _UsernameTabState();
 }
 
-class _UsernameTabState extends State<_UsernameTab> {
+class _UsernameTabState extends ConsumerState<_UsernameTab> {
   bool _isLookingUp = false;
   String? _lookupError;
   DnsRecord? _resolvedRecord;
@@ -417,7 +481,7 @@ class _UsernameTabState extends State<_UsernameTab> {
       return;
     }
 
-    final dnsProvider = provider.Provider.of<DnsProvider>(context, listen: false);
+    final dnsProvider = ref.read(dnsNotifierProvider);
 
     // Validate name format
     if (!dnsProvider.validateName(username)) {
@@ -459,11 +523,37 @@ class _UsernameTabState extends State<_UsernameTab> {
     }
   }
 
-  void _addContact(DnsRecord record) {
-    // TODO: Actually add the contact to the contact list
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Added ${record.fullName}')),
-    );
-    Navigator.pop(context);
+  Future<void> _addContact(DnsRecord record) async {
+    try {
+      // Add contact
+      await ref.read(contactActionsProvider).addContact(
+        nodeId: record.nodeId,
+        displayName: record.name,
+      );
+
+      // Create/get conversation
+      final conversation = await ref.read(chatActionsProvider).startConversation(record.nodeId);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Added ${record.fullName}')),
+        );
+
+        // Navigate to chat
+        Navigator.pop(context);
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => ChatScreen(conversationId: conversation.id),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to add contact: $e')),
+        );
+      }
+    }
   }
 }

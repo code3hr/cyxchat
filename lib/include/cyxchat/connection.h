@@ -12,6 +12,8 @@
 #include "types.h"
 #include <cyxwiz/transport.h>
 #include <cyxwiz/peer.h>
+#include <cyxwiz/onion.h>
+#include <cyxwiz/dht.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -65,6 +67,10 @@ typedef struct {
     int bootstrap_connected;            /* Connected to bootstrap server */
     size_t active_connections;          /* Number of active connections */
     size_t relay_connections;           /* Number of relay connections */
+    /* DHT status */
+    int dht_enabled;                    /* DHT is active */
+    size_t dht_nodes;                   /* Nodes in DHT routing table */
+    size_t dht_active_buckets;          /* Non-empty DHT buckets */
 } cyxchat_network_status_t;
 
 /* ============================================================
@@ -330,6 +336,150 @@ CYXCHAT_API cyxwiz_transport_t* cyxchat_conn_get_transport(
  */
 CYXCHAT_API cyxwiz_peer_table_t* cyxchat_conn_get_peer_table(
     cyxchat_conn_ctx_t *ctx
+);
+
+/**
+ * Get onion routing context
+ * (For use with chat module)
+ */
+CYXCHAT_API cyxwiz_onion_ctx_t* cyxchat_conn_get_onion(
+    cyxchat_conn_ctx_t *ctx
+);
+
+/**
+ * Get DHT context
+ * (Advanced use only)
+ */
+CYXCHAT_API cyxwiz_dht_t* cyxchat_conn_get_dht(
+    cyxchat_conn_ctx_t *ctx
+);
+
+/* ============================================================
+ * DHT (Distributed Hash Table) for Peer Discovery
+ * ============================================================ */
+
+/**
+ * Callback for DHT node lookup completion
+ */
+typedef void (*cyxchat_dht_find_callback_t)(
+    cyxchat_conn_ctx_t *ctx,
+    const cyxwiz_node_id_t *target,
+    int found,
+    void *user_data
+);
+
+/**
+ * Callback when new node discovered via DHT
+ */
+typedef void (*cyxchat_dht_node_callback_t)(
+    cyxchat_conn_ctx_t *ctx,
+    const cyxwiz_node_id_t *node_id,
+    void *user_data
+);
+
+/**
+ * Bootstrap DHT with seed nodes
+ *
+ * @param ctx         Connection context
+ * @param seed_nodes  Array of seed node IDs
+ * @param count       Number of seed nodes
+ * @return            CYXCHAT_OK on success
+ */
+CYXCHAT_API cyxchat_error_t cyxchat_conn_dht_bootstrap(
+    cyxchat_conn_ctx_t *ctx,
+    const cyxwiz_node_id_t *seed_nodes,
+    size_t count
+);
+
+/**
+ * Add a known node to DHT routing table
+ *
+ * @param ctx      Connection context
+ * @param node_id  Node to add
+ * @return         CYXCHAT_OK on success
+ */
+CYXCHAT_API cyxchat_error_t cyxchat_conn_dht_add_node(
+    cyxchat_conn_ctx_t *ctx,
+    const cyxwiz_node_id_t *node_id
+);
+
+/**
+ * Find a node via DHT (iterative lookup)
+ *
+ * @param ctx        Connection context
+ * @param target     Target node ID to find
+ * @param callback   Called when lookup completes (or NULL for fire-and-forget)
+ * @param user_data  Passed to callback
+ * @return           CYXCHAT_OK if lookup started
+ */
+CYXCHAT_API cyxchat_error_t cyxchat_conn_dht_find_node(
+    cyxchat_conn_ctx_t *ctx,
+    const cyxwiz_node_id_t *target,
+    cyxchat_dht_find_callback_t callback,
+    void *user_data
+);
+
+/**
+ * Get closest known nodes to target (synchronous)
+ *
+ * @param ctx        Connection context
+ * @param target     Target node ID
+ * @param out_nodes  Output: array of closest nodes
+ * @param max_nodes  Maximum nodes to return
+ * @return           Number of nodes returned
+ */
+CYXCHAT_API size_t cyxchat_conn_dht_get_closest(
+    cyxchat_conn_ctx_t *ctx,
+    const cyxwiz_node_id_t *target,
+    cyxwiz_node_id_t *out_nodes,
+    size_t max_nodes
+);
+
+/**
+ * Set callback for newly discovered DHT nodes
+ *
+ * @param ctx        Connection context
+ * @param callback   Called when new node discovered
+ * @param user_data  Passed to callback
+ */
+CYXCHAT_API void cyxchat_conn_dht_set_node_callback(
+    cyxchat_conn_ctx_t *ctx,
+    cyxchat_dht_node_callback_t callback,
+    void *user_data
+);
+
+/**
+ * Get DHT statistics
+ */
+CYXCHAT_API void cyxchat_conn_dht_get_stats(
+    cyxchat_conn_ctx_t *ctx,
+    cyxwiz_dht_stats_t *stats_out
+);
+
+/**
+ * Check if DHT is enabled and has nodes
+ */
+CYXCHAT_API int cyxchat_conn_dht_is_ready(cyxchat_conn_ctx_t *ctx);
+
+/* ============================================================
+ * Manual Peer Addition (for testing/bootstrapping)
+ * ============================================================ */
+
+/**
+ * Add a peer by address (for local testing or manual bootstrapping)
+ *
+ * This allows manually adding a peer when automatic discovery isn't available.
+ * The peer will be added to the peer table and a discovery message sent.
+ *
+ * @param ctx       Connection context
+ * @param node_id   Peer's 32-byte node ID
+ * @param addr      IP:port string (e.g., "127.0.0.1:55151")
+ * @return          CYXCHAT_OK on success
+ */
+CYXCHAT_API cyxchat_error_t cyxchat_conn_add_peer_addr(
+    cyxchat_conn_ctx_t *ctx,
+    const cyxwiz_node_id_t *node_id,
+    const char *addr
 );
 
 #ifdef __cplusplus

@@ -1,12 +1,19 @@
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 
+/// Instance ID for running multiple test instances
+/// Set via --dart-define=INSTANCE_ID=2
+const String _instanceId = String.fromEnvironment('INSTANCE_ID', defaultValue: '');
+
 /// Database service for local storage
 class DatabaseService {
   static final DatabaseService instance = DatabaseService._();
   static Database? _database;
 
   DatabaseService._();
+
+  /// Get instance suffix for display
+  static String get instanceSuffix => _instanceId.isEmpty ? '' : ' (Instance $_instanceId)';
 
   Future<Database> get database async {
     _database ??= await _initDatabase();
@@ -15,7 +22,8 @@ class DatabaseService {
 
   Future<Database> _initDatabase() async {
     final dbPath = await getDatabasesPath();
-    final path = join(dbPath, 'cyxchat.db');
+    final dbName = _instanceId.isEmpty ? 'cyxchat.db' : 'cyxchat_$_instanceId.db';
+    final path = join(dbPath, dbName);
 
     return await openDatabase(
       path,
