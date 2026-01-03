@@ -178,7 +178,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: app-${{ matrix.os }}
-          path: cyxchat-*.*
+          path: cyxchat-${{ matrix.target }}-x64.*
 
   release:
     name: Create Release
