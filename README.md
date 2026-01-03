@@ -95,6 +95,73 @@ In app settings, set bootstrap to `127.0.0.1:7777`
 
 ---
 
+## Usage Guide
+
+### First Launch
+
+On first launch, CyxChat automatically:
+1. **Generates your identity** - A unique 64-character Node ID (your address)
+2. **Creates encryption keys** - X25519 for key exchange, XChaCha20-Poly1305 for messages
+3. **Connects to bootstrap** - Registers with the network
+
+### Your Node ID
+
+Your Node ID is your identity on the network - like a phone number, but anonymous.
+
+1. Go to **Settings** (gear icon)
+2. Tap your **profile card** at the top
+3. Your full Node ID appears - tap to copy
+4. Share this with contacts (or scan their QR code)
+
+### Adding Contacts
+
+**Method 1: By Node ID**
+1. Go to **Contacts** tab
+2. Tap **+** button
+3. Paste their 64-character Node ID
+4. (Optional) Add a display name
+5. Tap **Add Contact**
+
+**Method 2: QR Code** (coming soon)
+1. Go to **Contacts** → **+** → **Scan QR**
+2. Scan their QR code from Settings
+
+### Sending Messages
+
+1. Tap a contact to open chat
+2. Type your message (up to 4096 characters supported)
+3. Tap send
+
+**Message Status Icons:**
+- ⏳ Pending - queued locally
+- ✓ Sent - delivered to network
+- ✓✓ Delivered - recipient received
+- 👁 Read - recipient opened
+
+### Long Messages
+
+Messages over 80 bytes are automatically **fragmented** into chunks:
+- Sent via onion routing (anonymous)
+- Reassembled on recipient's device
+- Works transparently - just type and send!
+
+### Settings
+
+| Setting | Description |
+|---------|-------------|
+| **Bootstrap Server** | Network entry point (default: `127.0.0.1:7777`) |
+| **Display Name** | Your name shown to contacts |
+| **Node ID** | Your unique address (tap to copy) |
+| **Network Status** | Shows connection state and peer count |
+
+### Network Requirements
+
+- **UDP ports**: CyxChat uses UDP for peer-to-peer connections
+- **NAT traversal**: Automatic via STUN (works behind most routers)
+- **Bootstrap server**: Required for initial peer discovery
+
+---
+
 ## Running Multiple Instances (Testing)
 
 **Terminal 1 - Instance A:**

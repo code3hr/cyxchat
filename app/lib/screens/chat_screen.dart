@@ -228,6 +228,7 @@ class _MessageBubble extends StatelessWidget {
                   else
                     Text(
                       message.content,
+                      softWrap: true,
                       style: TextStyle(
                         color: isOutgoing
                             ? colorScheme.onPrimary
@@ -235,8 +236,8 @@ class _MessageBubble extends StatelessWidget {
                       ),
                     ),
                   const SizedBox(height: 4),
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
+                  Wrap(
+                    spacing: 4,
                     children: [
                       Text(
                         message.timeString,
@@ -247,8 +248,7 @@ class _MessageBubble extends StatelessWidget {
                               : colorScheme.onSurface.withOpacity(0.5),
                         ),
                       ),
-                      if (message.isEdited) ...[
-                        const SizedBox(width: 4),
+                      if (message.isEdited)
                         Text(
                           '(edited)',
                           style: TextStyle(
@@ -258,9 +258,7 @@ class _MessageBubble extends StatelessWidget {
                                 : colorScheme.onSurface.withOpacity(0.5),
                           ),
                         ),
-                      ],
-                      if (isOutgoing) ...[
-                        const SizedBox(width: 4),
+                      if (isOutgoing)
                         Text(
                           message.status.icon,
                           style: TextStyle(
@@ -268,7 +266,6 @@ class _MessageBubble extends StatelessWidget {
                             color: colorScheme.onPrimary.withOpacity(0.7),
                           ),
                         ),
-                      ],
                     ],
                   ),
                 ],
