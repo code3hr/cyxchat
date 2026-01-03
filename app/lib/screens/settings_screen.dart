@@ -6,6 +6,7 @@ import '../main.dart';
 import '../providers/identity_provider.dart';
 import '../providers/dns_provider.dart';
 import '../providers/settings_provider.dart';
+import '../providers/network_provider.dart';
 import '../services/identity_service.dart';
 import '../models/identity.dart';
 import 'onboarding_screen.dart';
@@ -1241,20 +1242,139 @@ class _ServerConfigTile extends ConsumerStatefulWidget {
 }
 
 class _ServerConfigTileState extends ConsumerState<_ServerConfigTile> {
+  bool _isConnecting = false;
+
   @override
   Widget build(BuildContext context) {
     final settings = ref.watch(settingsProvider);
+    final connection = ref.watch(connectionNotifierProvider);
     final hasServer = settings.bootstrapServer.isNotEmpty;
+    final isConnected = connection.initialized;
 
-    return _SettingsTile(
-      icon: Icons.dns_rounded,
-      title: 'Bootstrap Server',
-      subtitle: hasServer ? settings.bootstrapServer : 'Not configured',
-      trailing: _StatusChip(
-        label: hasServer ? 'Connected' : 'Offline',
-        isActive: hasServer,
+    return Column(
+      children: [
+        _SettingsTile(
+          icon: Icons.dns_rounded,
+          title: 'Bootstrap Server',
+          subtitle: hasServer ? settings.bootstrapServer : 'Not configured',
+          trailing: _StatusChip(
+            label: isConnected ? 'Connected' : (hasServer ? 'Offline' : 'Not set'),
+            isActive: isConnected,
+          ),
+          onTap: () => _showServerDialog(context),
+        ),
+        // Connect/Disconnect button
+        if (hasServer)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: SizedBox(
+              width: double.infinity,
+              child: _isConnecting
+                  ? const Center(
+                      child: Padding(
+                        padding: EdgeInsets.all(12),
+                        child: SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.5,
+                            valueColor: AlwaysStoppedAnimation(AppColors.accent),
+                          ),
+                        ),
+                      ),
+                    )
+                  : ElevatedButton.icon(
+                      onPressed: () => isConnected ? _disconnect() : _connect(),
+                      icon: Icon(
+                        isConnected ? Icons.link_off_rounded : Icons.link_rounded,
+                        size: 18,
+                      ),
+                      label: Text(isConnected ? 'Disconnect' : 'Connect'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: isConnected
+                            ? AppColors.bgDarkTertiary
+                            : AppColors.accentGreen,
+                        foregroundColor: isConnected
+                            ? AppColors.textDark
+                            : Colors.black,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                    ),
+            ),
+          ),
+        // Network info when connected
+        if (isConnected && connection.networkStatus.publicAddress != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.bgDarkTertiary,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.public_rounded,
+                    size: 16,
+                    color: AppColors.accentGreen.withOpacity(0.8),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Public: ${connection.networkStatus.publicAddress}',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontFamily: 'monospace',
+                      color: AppColors.textDarkSecondary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Future<void> _connect() async {
+    setState(() => _isConnecting = true);
+
+    try {
+      final success = await ref.read(connectionActionsProvider).connect();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(success
+                ? 'Connected to server'
+                : 'Failed to connect'),
+            behavior: SnackBarBehavior.floating,
+            backgroundColor: success ? AppColors.accentGreen : AppColors.error,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isConnecting = false);
+      }
+    }
+  }
+
+  void _disconnect() {
+    ref.read(connectionActionsProvider).disconnect();
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('Disconnected from server'),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
       ),
-      onTap: () => _showServerDialog(context),
     );
   }
 
@@ -1340,10 +1460,14 @@ class _ServerConfigTileState extends ConsumerState<_ServerConfigTile> {
             onPressed: () {
               controller.text = '';
               ref.read(settingsProvider.notifier).setServer('');
+              // Disconnect if connected
+              if (ref.read(connectionNotifierProvider).initialized) {
+                ref.read(connectionActionsProvider).disconnect();
+              }
               Navigator.pop(context);
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
-                  content: const Text('Server cleared. Restart app to apply.'),
+                  content: const Text('Server cleared'),
                   behavior: SnackBarBehavior.floating,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
@@ -1360,13 +1484,17 @@ class _ServerConfigTileState extends ConsumerState<_ServerConfigTile> {
           ElevatedButton(
             onPressed: () {
               final server = controller.text.trim();
+              // Disconnect first if connected with different server
+              if (ref.read(connectionNotifierProvider).initialized) {
+                ref.read(connectionActionsProvider).disconnect();
+              }
               ref.read(settingsProvider.notifier).setServer(server);
               Navigator.pop(context);
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
                   content: Text(server.isEmpty
-                      ? 'Server cleared. Restart app to apply.'
-                      : 'Server set to $server. Restart app to apply.'),
+                      ? 'Server cleared'
+                      : 'Server set to $server. Tap Connect to join.'),
                   behavior: SnackBarBehavior.floating,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
