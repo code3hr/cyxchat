@@ -9,9 +9,39 @@ CyxChat is a decentralized, privacy-first messaging application built on the Cyx
 **Vision**: "WhatsApp + Gmail without servers"
 - No central servers - all peer-to-peer
 - Works from any location (behind NAT, firewalls, mobile networks)
-- End-to-end encrypted
+- End-to-end encrypted (X25519 + XChaCha20-Poly1305)
 - Local storage (your data stays on your device)
 - Cross-platform (mobile + desktop)
+
+## Current Status
+
+**Focus**: 1:1 P2P chat between two devices on different networks behind NAT.
+
+| Component | Status | Notes |
+|-----------|--------|-------|
+| C Library (libcyxchat) | Complete | Chat, connection, relay all working |
+| FFI Bindings | Complete | Full Dart-to-C bridge |
+| Bootstrap Server | Complete | Docker-ready, handles registration + relay |
+| Flutter UI | Complete | Auto-connect, real-time message updates |
+
+## Message Flow
+
+```
+SENDING:
+UI (ChatScreen) → ChatService.sendMessage() → ChatProvider.sendText()
+    → FFI bindings → cyxchat_chat_send_text() → Network
+
+RECEIVING:
+Network → cyxchat_chat_poll() → FFI bindings → ChatProvider.messageStream
+    → ChatService._handleIncomingMessage() → SQLite DB
+    → _messageController.stream → messageStreamProvider
+    → ref.listen() invalidates providers → UI refreshes
+```
+
+Key integration points:
+- `ChatService.connectProvider()` subscribes to ChatProvider streams
+- `messageStreamProvider` exposes incoming messages to UI
+- `ref.listen()` in chat/home screens triggers provider invalidation
 
 ## CRITICAL: Do Not Modify Core CyxWiz
 
@@ -100,10 +130,14 @@ cyxchat/
 │   │   │   ├── database_service.dart
 │   │   │   ├── identity_service.dart
 │   │   │   └── chat_service.dart
-│   │   ├── providers/      # State management
-│   │   │   ├── identity_provider.dart
-│   │   │   ├── conversation_provider.dart
-│   │   │   └── dns_provider.dart
+│   │   ├── providers/      # State management (Riverpod)
+│   │   │   ├── network_provider.dart    # ConnectionActions (connect/disconnect)
+│   │   │   ├── connection_provider.dart # Low-level FFI connection
+│   │   │   ├── chat_provider.dart       # Chat FFI + message streams
+│   │   │   ├── conversation_provider.dart # UI providers for messages
+│   │   │   ├── dns_provider.dart        # Username resolution
+│   │   │   ├── dht_provider.dart        # Distributed hash table
+│   │   │   └── settings_provider.dart   # App settings (bootstrap server)
 │   │   └── screens/        # UI screens
 │   │       ├── home_screen.dart
 │   │       ├── chat_screen.dart
@@ -259,8 +293,83 @@ cd cyxchat/app
 flutter test
 ```
 
+## Bootstrap Server (Docker)
+
+The bootstrap server handles peer discovery and relay fallback. Located in `../../tools/`.
+
+```bash
+# Build and run locally
+cd ../../tools
+docker build -t cyxchat-server .
+docker run -d -p 7777:7777/udp --name cyxchat-server cyxchat-server
+
+# Management
+docker logs -f cyxchat-server  # View logs
+docker stop cyxchat-server     # Stop
+docker rm cyxchat-server       # Remove
+
+# Deploy to VPS
+scp tools/cyxchat-server.c tools/Dockerfile user@server:~/cyxchat/
+ssh user@server "cd ~/cyxchat && docker build -t cyxchat-server . && docker run -d -p 7777:7777/udp cyxchat-server"
+```
+
+See [DOCKER.md](DOCKER.md) for full deployment instructions.
+
+## Local Testing (Two Instances)
+
+To test P2P messaging locally:
+
+1. **Start bootstrap server:**
+   ```bash
+   docker run -d -p 7777:7777/udp --name cyxchat-server cyxchat-server
+   ```
+
+2. **Configure app:** Settings → Network → Bootstrap Server → `127.0.0.1:7777`
+
+3. **Run two instances** (each needs separate data directory):
+   ```bash
+   # Instance A (default)
+   cd app && flutter run -d windows
+
+   # Instance B (separate terminal, different data)
+   # Use different user profile or --dart-define for data path
+   ```
+
+4. **Test flow:**
+   - Each instance auto-generates a unique node ID on first run
+   - Copy node ID from Instance A (shown in Settings → Identity)
+   - In Instance B: Contacts → Add → paste node ID
+   - Send message from B to A
+   - Message should appear in A's chat in real-time
+
+## Key Providers
+
+| Provider | Purpose |
+|----------|---------|
+| `connectionNotifierProvider` | Connection state (initialized, network status) |
+| `connectionActionsProvider` | Connect/disconnect actions |
+| `chatNotifierProvider` | FFI chat operations + message streams |
+| `conversationsProvider` | List of conversations from DB |
+| `messagesProvider(id)` | Messages for a conversation |
+| `messageStreamProvider` | Stream of incoming messages |
+| `chatActionsProvider` | Send message, mark read, etc. |
+
+## Startup Flow
+
+1. `main.dart` → loads identity from secure storage
+2. `HomeScreen.initState()` → calls `_autoConnect()`
+3. `ConnectionActions.connect()` → initializes:
+   - ConnectionProvider (STUN, bootstrap registration)
+   - DNSProvider (username resolution)
+   - ChatProvider (message sending/receiving)
+   - DHTProvider (decentralized peer discovery)
+4. `ChatService.connectProvider()` → subscribes to message streams
+5. App is ready for P2P messaging
+
 ## Related Documentation
 
 - [../CLAUDE.md](../CLAUDE.md) - Main CyxWiz protocol documentation
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - CyxChat architecture
 - [docs/NAT-TRAVERSAL.md](docs/NAT-TRAVERSAL.md) - NAT traversal details
+- [docs/COMMUNICATION-FLOW.md](docs/COMMUNICATION-FLOW.md) - Full message flow diagram
+- [DOCKER.md](DOCKER.md) - Server deployment guide
