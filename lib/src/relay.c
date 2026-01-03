@@ -556,7 +556,7 @@ cyxchat_error_t cyxchat_relay_handle_message(cyxchat_relay_ctx_t *ctx,
                 (const cyxchat_relay_data_msg_t*)data;
 
             uint16_t data_len = ntohs(msg->data_len);
-            if (len < CYXCHAT_RELAY_DATA_HDR_SIZE + data_len) {
+            if (len < (size_t)(CYXCHAT_RELAY_DATA_HDR_SIZE + data_len)) {
                 return CYXCHAT_ERR_INVALID;
             }
 
