@@ -13,11 +13,11 @@ const String _bootstrapServerOverride = String.fromEnvironment('BOOTSTRAP_SERVER
 
 /// Default values
 class SettingsDefaults {
-  // Public bootstrap server via playit.gg tunnel
-  // Use dart-define override if set, otherwise use public server
+  // Default to localhost for local development
+  // Users can change to public server (e.g., 147.185.221.16:50841) in settings
   static String get bootstrapServer => _bootstrapServerOverride.isNotEmpty
       ? _bootstrapServerOverride
-      : '16.ip.gl.ply.gg:50841';
+      : '127.0.0.1:7777';
   static const String relayServer = '';
 }
 
