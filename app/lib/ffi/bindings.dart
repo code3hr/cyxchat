@@ -2,6 +2,60 @@ import 'dart:ffi';
 import 'dart:io';
 import 'package:ffi/ffi.dart';
 
+/// Native callback type for file request
+typedef _FileRequestCallback = Void Function(
+    Pointer<Void> ctx,
+    Pointer<Uint8> from,
+    Pointer<_FileMetaNative> meta,
+    Pointer<Void> userData);
+
+/// Native callback type for file complete
+typedef _FileCompleteCallback = Void Function(
+    Pointer<Void> ctx,
+    Pointer<Uint8> fileId,
+    Pointer<Uint8> data,
+    Size dataLen,
+    Pointer<Void> userData);
+
+/// Native callback type for file progress
+typedef _FileProgressCallback = Void Function(
+    Pointer<Void> ctx,
+    Pointer<Uint8> fileId,
+    Uint16 chunksDone,
+    Uint16 chunksTotal,
+    Pointer<Void> userData);
+
+/// Native callback type for file error
+typedef _FileErrorCallback = Void Function(
+    Pointer<Void> ctx,
+    Pointer<Uint8> fileId,
+    Int32 error,
+    Pointer<Void> userData);
+
+/// Native file metadata structure
+final class _FileMetaNative extends Struct {
+  @Array(8)
+  external Array<Uint8> fileId;
+
+  @Array(128)
+  external Array<Int8> filename;
+
+  @Array(64)
+  external Array<Int8> mimeType;
+
+  @Uint32()
+  external int size;
+
+  @Uint16()
+  external int chunkCount;
+
+  @Array(32)
+  external Array<Uint8> fileKey;
+
+  @Array(32)
+  external Array<Uint8> fileHash;
+}
+
 /// FFI bindings for libcyxchat
 class CyxChatBindings {
   static CyxChatBindings? _instance;
@@ -1150,6 +1204,431 @@ class CyxChatBindings {
       calloc.free(hexPtr);
     }
   }
+
+  // ============================================================
+  // File Transfer Module
+  // ============================================================
+
+  /// File context pointer (opaque)
+  Pointer<Void>? _fileCtx;
+
+  /// File callback storage (prevent GC)
+  NativeCallable<_FileRequestCallback>? _onFileRequest;
+  NativeCallable<_FileCompleteCallback>? _onFileComplete;
+  NativeCallable<_FileProgressCallback>? _onFileProgress;
+  NativeCallable<_FileErrorCallback>? _onFileError;
+
+  /// Dart callbacks for file events
+  void Function(String fromPeerId, String fileId, String filename, String mimeType, int size)? onFileRequest;
+  void Function(String fileId, List<int> data)? onFileComplete;
+  void Function(String fileId, int chunksDone, int chunksTotal)? onFileProgress;
+  void Function(String fileId, int error)? onFileError;
+
+  /// Create file transfer context
+  int fileCtxCreate() {
+    if (_chatCtx == null) return CyxChatError.errNull;
+    final ctxPtr = calloc<Pointer<Void>>();
+    try {
+      final result = _native.cyxchat_file_ctx_create(ctxPtr, _chatCtx!);
+      if (result == 0) {
+        _fileCtx = ctxPtr.value;
+        // Register file context with chat layer for message routing
+        _native.cyxchat_set_file_ctx(_chatCtx!, _fileCtx!);
+      }
+      return result;
+    } finally {
+      calloc.free(ctxPtr);
+    }
+  }
+
+  /// Destroy file transfer context
+  void fileCtxDestroy() {
+    // Clean up callbacks
+    _onFileRequest?.close();
+    _onFileComplete?.close();
+    _onFileProgress?.close();
+    _onFileError?.close();
+    _onFileRequest = null;
+    _onFileComplete = null;
+    _onFileProgress = null;
+    _onFileError = null;
+
+    if (_fileCtx != null) {
+      _native.cyxchat_file_ctx_destroy(_fileCtx!);
+      _fileCtx = null;
+    }
+  }
+
+  /// Set up file transfer callbacks
+  void fileSetupCallbacks() {
+    if (_fileCtx == null) return;
+
+    // Create native callback for file request
+    _onFileRequest = NativeCallable<_FileRequestCallback>.listener(
+      _handleFileRequest,
+    );
+    _native.cyxchat_file_set_on_request(
+      _fileCtx!,
+      _onFileRequest!.nativeFunction,
+      nullptr,
+    );
+
+    // Create native callback for file complete
+    _onFileComplete = NativeCallable<_FileCompleteCallback>.listener(
+      _handleFileComplete,
+    );
+    _native.cyxchat_file_set_on_complete(
+      _fileCtx!,
+      _onFileComplete!.nativeFunction,
+      nullptr,
+    );
+
+    // Create native callback for file progress
+    _onFileProgress = NativeCallable<_FileProgressCallback>.listener(
+      _handleFileProgress,
+    );
+    _native.cyxchat_file_set_on_progress(
+      _fileCtx!,
+      _onFileProgress!.nativeFunction,
+      nullptr,
+    );
+
+    // Create native callback for file error
+    _onFileError = NativeCallable<_FileErrorCallback>.listener(
+      _handleFileError,
+    );
+    _native.cyxchat_file_set_on_error(
+      _fileCtx!,
+      _onFileError!.nativeFunction,
+      nullptr,
+    );
+  }
+
+  /// Handle incoming file request from C callback
+  void _handleFileRequest(
+    Pointer<Void> ctx,
+    Pointer<Uint8> from,
+    Pointer<_FileMetaNative> meta,
+    Pointer<Void> userData,
+  ) {
+    if (onFileRequest == null) return;
+
+    // Convert from node ID to hex string
+    final fromHex = _bytesToHex(from, 32);
+
+    // Extract file ID (8 bytes)
+    final fileIdBytes = <int>[];
+    for (int i = 0; i < 8; i++) {
+      fileIdBytes.add(meta.ref.fileId[i]);
+    }
+    final fileIdHex = fileIdBytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+
+    // Extract filename (null-terminated string from array)
+    final filenameChars = <int>[];
+    for (int i = 0; i < 128; i++) {
+      final c = meta.ref.filename[i];
+      if (c == 0) break;
+      filenameChars.add(c);
+    }
+    final filename = String.fromCharCodes(filenameChars);
+
+    // Extract mime type (null-terminated string from array)
+    final mimeChars = <int>[];
+    for (int i = 0; i < 64; i++) {
+      final c = meta.ref.mimeType[i];
+      if (c == 0) break;
+      mimeChars.add(c);
+    }
+    final mimeType = String.fromCharCodes(mimeChars);
+
+    final size = meta.ref.size;
+
+    onFileRequest!(fromHex, fileIdHex, filename, mimeType, size);
+  }
+
+  /// Handle file transfer complete from C callback
+  void _handleFileComplete(
+    Pointer<Void> ctx,
+    Pointer<Uint8> fileId,
+    Pointer<Uint8> data,
+    int dataLen,
+    Pointer<Void> userData,
+  ) {
+    if (onFileComplete == null) return;
+
+    final fileIdHex = fileIdToHex(fileId);
+
+    // Copy data to Dart list
+    final dataList = <int>[];
+    for (int i = 0; i < dataLen; i++) {
+      dataList.add(data[i]);
+    }
+
+    onFileComplete!(fileIdHex, dataList);
+  }
+
+  /// Handle file progress from C callback
+  void _handleFileProgress(
+    Pointer<Void> ctx,
+    Pointer<Uint8> fileId,
+    int chunksDone,
+    int chunksTotal,
+    Pointer<Void> userData,
+  ) {
+    if (onFileProgress == null) return;
+
+    final fileIdHex = fileIdToHex(fileId);
+    onFileProgress!(fileIdHex, chunksDone, chunksTotal);
+  }
+
+  /// Handle file error from C callback
+  void _handleFileError(
+    Pointer<Void> ctx,
+    Pointer<Uint8> fileId,
+    int error,
+    Pointer<Void> userData,
+  ) {
+    if (onFileError == null) return;
+
+    final fileIdHex = fileIdToHex(fileId);
+    onFileError!(fileIdHex, error);
+  }
+
+  /// Helper to convert bytes to hex string
+  String _bytesToHex(Pointer<Uint8> bytes, int len) {
+    final buffer = StringBuffer();
+    for (int i = 0; i < len; i++) {
+      buffer.write(bytes[i].toRadixString(16).padLeft(2, '0'));
+    }
+    return buffer.toString();
+  }
+
+  /// Poll file transfer events
+  int filePoll(int nowMs) {
+    if (_fileCtx == null) return 0;
+    return _native.cyxchat_file_poll(_fileCtx!, nowMs);
+  }
+
+  /// Send file to peer
+  /// Returns file ID hex string or null on failure
+  String? fileSend({
+    required Pointer<Uint8> to,
+    required String filename,
+    required String mimeType,
+    required List<int> data,
+  }) {
+    if (_fileCtx == null) return null;
+
+    final filenamePtr = filename.toNativeUtf8();
+    final mimePtr = mimeType.toNativeUtf8();
+    final dataPtr = calloc<Uint8>(data.length);
+    final fileIdOutPtr = calloc<Uint8>(8);
+
+    try {
+      // Copy data to native memory
+      for (int i = 0; i < data.length; i++) {
+        dataPtr[i] = data[i];
+      }
+
+      final result = _native.cyxchat_file_send(
+        _fileCtx!,
+        to,
+        filenamePtr.cast(),
+        mimePtr.cast(),
+        dataPtr,
+        data.length,
+        fileIdOutPtr,
+      );
+
+      if (result == 0) {
+        return fileIdToHex(fileIdOutPtr);
+      }
+      return null;
+    } finally {
+      calloc.free(filenamePtr);
+      calloc.free(mimePtr);
+      calloc.free(dataPtr);
+      calloc.free(fileIdOutPtr);
+    }
+  }
+
+  /// Accept incoming file transfer
+  int fileAccept(String fileIdHex) {
+    if (_fileCtx == null) return CyxChatError.errNull;
+    final fileIdPtr = calloc<Uint8>(8);
+    try {
+      final parseResult = fileIdFromHex(fileIdHex, fileIdPtr);
+      if (parseResult != 0) return parseResult;
+      return _native.cyxchat_file_accept(_fileCtx!, fileIdPtr);
+    } finally {
+      calloc.free(fileIdPtr);
+    }
+  }
+
+  /// Reject incoming file transfer
+  int fileReject(String fileIdHex) {
+    if (_fileCtx == null) return CyxChatError.errNull;
+    final fileIdPtr = calloc<Uint8>(8);
+    try {
+      final parseResult = fileIdFromHex(fileIdHex, fileIdPtr);
+      if (parseResult != 0) return parseResult;
+      return _native.cyxchat_file_reject(_fileCtx!, fileIdPtr);
+    } finally {
+      calloc.free(fileIdPtr);
+    }
+  }
+
+  /// Cancel ongoing file transfer
+  int fileCancel(String fileIdHex) {
+    if (_fileCtx == null) return CyxChatError.errNull;
+    final fileIdPtr = calloc<Uint8>(8);
+    try {
+      final parseResult = fileIdFromHex(fileIdHex, fileIdPtr);
+      if (parseResult != 0) return parseResult;
+      return _native.cyxchat_file_cancel(_fileCtx!, fileIdPtr);
+    } finally {
+      calloc.free(fileIdPtr);
+    }
+  }
+
+  /// Pause file transfer
+  int filePause(String fileIdHex) {
+    if (_fileCtx == null) return CyxChatError.errNull;
+    final fileIdPtr = calloc<Uint8>(8);
+    try {
+      final parseResult = fileIdFromHex(fileIdHex, fileIdPtr);
+      if (parseResult != 0) return parseResult;
+      return _native.cyxchat_file_pause(_fileCtx!, fileIdPtr);
+    } finally {
+      calloc.free(fileIdPtr);
+    }
+  }
+
+  /// Resume paused file transfer
+  int fileResume(String fileIdHex) {
+    if (_fileCtx == null) return CyxChatError.errNull;
+    final fileIdPtr = calloc<Uint8>(8);
+    try {
+      final parseResult = fileIdFromHex(fileIdHex, fileIdPtr);
+      if (parseResult != 0) return parseResult;
+      return _native.cyxchat_file_resume(_fileCtx!, fileIdPtr);
+    } finally {
+      calloc.free(fileIdPtr);
+    }
+  }
+
+  /// Get number of active file transfers
+  int fileActiveCount() {
+    if (_fileCtx == null) return 0;
+    return _native.cyxchat_file_active_count(_fileCtx!);
+  }
+
+  /// Convert file ID to hex string
+  String fileIdToHex(Pointer<Uint8> id) {
+    final hexOut = calloc<Int8>(17); // 16 hex chars + null
+    try {
+      _native.cyxchat_file_id_to_hex(id, hexOut);
+      return hexOut.cast<Utf8>().toDartString();
+    } finally {
+      calloc.free(hexOut);
+    }
+  }
+
+  /// Parse file ID from hex string
+  int fileIdFromHex(String hex, Pointer<Uint8> idOut) {
+    final hexPtr = hex.toNativeUtf8();
+    try {
+      return _native.cyxchat_file_id_from_hex(hexPtr.cast(), idOut);
+    } finally {
+      calloc.free(hexPtr);
+    }
+  }
+
+  /// Detect MIME type from filename
+  String fileDetectMime(String filename) {
+    final filenamePtr = filename.toNativeUtf8();
+    try {
+      final ptr = _native.cyxchat_file_detect_mime(filenamePtr.cast());
+      if (ptr == nullptr) return 'application/octet-stream';
+      return ptr.cast<Utf8>().toDartString();
+    } finally {
+      calloc.free(filenamePtr);
+    }
+  }
+
+  /// Format file size as human-readable string
+  String fileFormatSize(int sizeBytes) {
+    final outPtr = calloc<Int8>(32);
+    try {
+      _native.cyxchat_file_format_size(sizeBytes, outPtr, 32);
+      return outPtr.cast<Utf8>().toDartString();
+    } finally {
+      calloc.free(outPtr);
+    }
+  }
+
+  // ============================================================
+  // DHT-Based File Transfer
+  // ============================================================
+
+  /// Store file offer in DHT for offline recipient
+  int fileStoreOffer(String fileIdHex) {
+    if (_fileCtx == null) return CyxChatError.errNull;
+    final fileIdPtr = calloc<Uint8>(8);
+    try {
+      final parseResult = fileIdFromHex(fileIdHex, fileIdPtr);
+      if (parseResult != 0) return parseResult;
+      return _native.cyxchat_file_store_offer(_fileCtx!, fileIdPtr);
+    } finally {
+      calloc.free(fileIdPtr);
+    }
+  }
+
+  /// Store small file chunks in DHT (for files <= 1680 bytes)
+  int fileStoreDhtChunks(String fileIdHex) {
+    if (_fileCtx == null) return CyxChatError.errNull;
+    final fileIdPtr = calloc<Uint8>(8);
+    try {
+      final parseResult = fileIdFromHex(fileIdHex, fileIdPtr);
+      if (parseResult != 0) return parseResult;
+      return _native.cyxchat_file_store_dht_chunks(_fileCtx!, fileIdPtr);
+    } finally {
+      calloc.free(fileIdPtr);
+    }
+  }
+
+  /// Retrieve file chunks from DHT
+  int fileRetrieveDhtChunks(String fileIdHex) {
+    if (_fileCtx == null) return CyxChatError.errNull;
+    final fileIdPtr = calloc<Uint8>(8);
+    try {
+      final parseResult = fileIdFromHex(fileIdHex, fileIdPtr);
+      if (parseResult != 0) return parseResult;
+      return _native.cyxchat_file_retrieve_dht_chunks(_fileCtx!, fileIdPtr);
+    } finally {
+      calloc.free(fileIdPtr);
+    }
+  }
+
+  /// Check DHT for pending file offers addressed to us
+  int fileCheckDhtOffers() {
+    if (_fileCtx == null) return -1;
+    return _native.cyxchat_file_check_dht_offers(_fileCtx!);
+  }
+
+  /// Get the transfer mode for a file transfer
+  /// Returns: 1=DIRECT, 2=RELAY, 3=DHT_MICRO, 4=DHT_SIGNAL, or -1 on error
+  int fileGetTransferMode(String fileIdHex) {
+    if (_fileCtx == null) return -1;
+    final fileIdPtr = calloc<Uint8>(8);
+    try {
+      final parseResult = fileIdFromHex(fileIdHex, fileIdPtr);
+      if (parseResult != 0) return -1;
+      return _native.cyxchat_file_get_transfer_mode(_fileCtx!, fileIdPtr);
+    } finally {
+      calloc.free(fileIdPtr);
+    }
+  }
 }
 
 /// Native function signatures
@@ -1607,6 +2086,113 @@ class CyxChatNative {
   late final cyxchat_msg_id_from_hex = _lib.lookupFunction<
       Int32 Function(Pointer<Int8>, Pointer<Uint8>),
       int Function(Pointer<Int8>, Pointer<Uint8>)>('cyxchat_msg_id_from_hex');
+
+  // File transfer functions
+  late final cyxchat_file_ctx_create = _lib.lookupFunction<
+      Int32 Function(Pointer<Pointer<Void>>, Pointer<Void>),
+      int Function(Pointer<Pointer<Void>>, Pointer<Void>)>(
+      'cyxchat_file_ctx_create');
+
+  late final cyxchat_file_ctx_destroy = _lib.lookupFunction<
+      Void Function(Pointer<Void>),
+      void Function(Pointer<Void>)>('cyxchat_file_ctx_destroy');
+
+  late final cyxchat_set_file_ctx = _lib.lookupFunction<
+      Void Function(Pointer<Void>, Pointer<Void>),
+      void Function(Pointer<Void>, Pointer<Void>)>('cyxchat_set_file_ctx');
+
+  late final cyxchat_file_poll = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Uint64),
+      int Function(Pointer<Void>, int)>('cyxchat_file_poll');
+
+  late final cyxchat_file_send = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>, Pointer<Int8>,
+          Pointer<Int8>, Pointer<Uint8>, Size, Pointer<Uint8>),
+      int Function(Pointer<Void>, Pointer<Uint8>, Pointer<Int8>,
+          Pointer<Int8>, Pointer<Uint8>, int, Pointer<Uint8>)>(
+      'cyxchat_file_send');
+
+  late final cyxchat_file_accept = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>),
+      int Function(Pointer<Void>, Pointer<Uint8>)>('cyxchat_file_accept');
+
+  late final cyxchat_file_reject = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>),
+      int Function(Pointer<Void>, Pointer<Uint8>)>('cyxchat_file_reject');
+
+  late final cyxchat_file_cancel = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>),
+      int Function(Pointer<Void>, Pointer<Uint8>)>('cyxchat_file_cancel');
+
+  late final cyxchat_file_pause = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>),
+      int Function(Pointer<Void>, Pointer<Uint8>)>('cyxchat_file_pause');
+
+  late final cyxchat_file_resume = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>),
+      int Function(Pointer<Void>, Pointer<Uint8>)>('cyxchat_file_resume');
+
+  late final cyxchat_file_active_count = _lib.lookupFunction<
+      Size Function(Pointer<Void>),
+      int Function(Pointer<Void>)>('cyxchat_file_active_count');
+
+  late final cyxchat_file_id_to_hex = _lib.lookupFunction<
+      Void Function(Pointer<Uint8>, Pointer<Int8>),
+      void Function(Pointer<Uint8>, Pointer<Int8>)>('cyxchat_file_id_to_hex');
+
+  late final cyxchat_file_id_from_hex = _lib.lookupFunction<
+      Int32 Function(Pointer<Int8>, Pointer<Uint8>),
+      int Function(Pointer<Int8>, Pointer<Uint8>)>('cyxchat_file_id_from_hex');
+
+  late final cyxchat_file_detect_mime = _lib.lookupFunction<
+      Pointer<Int8> Function(Pointer<Int8>),
+      Pointer<Int8> Function(Pointer<Int8>)>('cyxchat_file_detect_mime');
+
+  late final cyxchat_file_format_size = _lib.lookupFunction<
+      Void Function(Uint32, Pointer<Int8>, Size),
+      void Function(int, Pointer<Int8>, int)>('cyxchat_file_format_size');
+
+  // File callback setters
+  late final cyxchat_file_set_on_request = _lib.lookupFunction<
+      Void Function(Pointer<Void>, Pointer<NativeFunction<_FileRequestCallback>>, Pointer<Void>),
+      void Function(Pointer<Void>, Pointer<NativeFunction<_FileRequestCallback>>, Pointer<Void>)>(
+      'cyxchat_file_set_on_request');
+
+  late final cyxchat_file_set_on_complete = _lib.lookupFunction<
+      Void Function(Pointer<Void>, Pointer<NativeFunction<_FileCompleteCallback>>, Pointer<Void>),
+      void Function(Pointer<Void>, Pointer<NativeFunction<_FileCompleteCallback>>, Pointer<Void>)>(
+      'cyxchat_file_set_on_complete');
+
+  late final cyxchat_file_set_on_progress = _lib.lookupFunction<
+      Void Function(Pointer<Void>, Pointer<NativeFunction<_FileProgressCallback>>, Pointer<Void>),
+      void Function(Pointer<Void>, Pointer<NativeFunction<_FileProgressCallback>>, Pointer<Void>)>(
+      'cyxchat_file_set_on_progress');
+
+  late final cyxchat_file_set_on_error = _lib.lookupFunction<
+      Void Function(Pointer<Void>, Pointer<NativeFunction<_FileErrorCallback>>, Pointer<Void>),
+      void Function(Pointer<Void>, Pointer<NativeFunction<_FileErrorCallback>>, Pointer<Void>)>(
+      'cyxchat_file_set_on_error');
+
+  // DHT-based file transfer functions
+  late final cyxchat_file_store_offer = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>),
+      int Function(Pointer<Void>, Pointer<Uint8>)>('cyxchat_file_store_offer');
+
+  late final cyxchat_file_store_dht_chunks = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>),
+      int Function(Pointer<Void>, Pointer<Uint8>)>('cyxchat_file_store_dht_chunks');
+
+  late final cyxchat_file_retrieve_dht_chunks = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>),
+      int Function(Pointer<Void>, Pointer<Uint8>)>('cyxchat_file_retrieve_dht_chunks');
+
+  late final cyxchat_file_check_dht_offers = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>),
+      int Function(Pointer<Void>)>('cyxchat_file_check_dht_offers');
+
+  late final cyxchat_file_get_transfer_mode = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>),
+      int Function(Pointer<Void>, Pointer<Uint8>)>('cyxchat_file_get_transfer_mode');
 }
 
 // Error codes
@@ -1694,6 +2280,13 @@ class CyxChatMsgType {
   static const groupAdmin = 0x27;
   static const presence = 0x30;
   static const presenceReq = 0x31;
+  // File transfer protocol v2 (hybrid with DHT support)
+  static const fileOffer = 0x40;
+  static const fileAccept = 0x41;
+  static const fileReject = 0x42;
+  static const fileComplete = 0x43;
+  static const fileCancel = 0x44;
+  static const fileDhtReady = 0x45;
   // Mail message types
   static const mailSend = 0xE0;
   static const mailAck = 0xE1;
@@ -1782,6 +2375,99 @@ class CyxChatMailBounce {
       case rejected: return 'Recipient rejected';
       case timeout: return 'Delivery timeout';
       case quota: return 'Mailbox full';
+      default: return 'Unknown';
+    }
+  }
+}
+
+// File transfer states
+class CyxChatFileState {
+  static const pending = 0;
+  static const sending = 1;
+  static const receiving = 2;
+  static const paused = 3;
+  static const completed = 4;
+  static const failed = 5;
+  static const cancelled = 6;
+
+  static String name(int state) {
+    switch (state) {
+      case pending: return 'Pending';
+      case sending: return 'Sending';
+      case receiving: return 'Receiving';
+      case paused: return 'Paused';
+      case completed: return 'Completed';
+      case failed: return 'Failed';
+      case cancelled: return 'Cancelled';
+      default: return 'Unknown';
+    }
+  }
+
+  static bool isActive(int state) {
+    return state == sending || state == receiving;
+  }
+
+  static bool isComplete(int state) {
+    return state == completed || state == failed || state == cancelled;
+  }
+}
+
+// File transfer constants
+class CyxChatFileConst {
+  static const maxFilename = 128;
+  static const chunkSize = 1024;
+  static const maxFileSize = 64 * 1024; // 64KB limit
+
+  // DHT-based file transfer constants
+  static const dhtChunkSize = 120;      // 160 - 40 bytes crypto overhead
+  static const dhtMaxChunks = 14;
+  static const dhtMaxFileSize = 1680;   // Max file size for full DHT storage
+  static const dhtTtlSeconds = 86400;   // 24 hour TTL
+  static const offerTimeoutMs = 30000;  // 30 second offer timeout
+}
+
+// File transfer mode (hybrid protocol)
+class CyxChatFileTransferMode {
+  /// Direct P2P transfer (online peer)
+  static const direct = 0x01;
+
+  /// Via relay server
+  static const relay = 0x02;
+
+  /// Small file stored entirely in DHT
+  static const dhtMicro = 0x03;
+
+  /// Offer stored in DHT, transfer when online
+  static const dhtSignal = 0x04;
+
+  static String name(int mode) {
+    switch (mode) {
+      case direct: return 'Direct';
+      case relay: return 'Relay';
+      case dhtMicro: return 'DHT (micro)';
+      case dhtSignal: return 'DHT (signal)';
+      default: return 'Unknown';
+    }
+  }
+
+  static bool isDht(int mode) {
+    return mode == dhtMicro || mode == dhtSignal;
+  }
+}
+
+// File rejection reasons
+class CyxChatFileRejectReason {
+  static const declined = 0;   // User declined
+  static const tooLarge = 1;   // File too large
+  static const busy = 2;       // Too many transfers
+  static const blocked = 3;    // Sender is blocked
+
+  static String name(int reason) {
+    switch (reason) {
+      case declined: return 'Declined';
+      case tooLarge: return 'File too large';
+      case busy: return 'Busy';
+      case blocked: return 'Blocked';
       default: return 'Unknown';
     }
   }

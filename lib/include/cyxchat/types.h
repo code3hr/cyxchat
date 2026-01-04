@@ -41,10 +41,22 @@ extern "C" {
 #define CYXCHAT_MAX_DISPLAY_NAME    64      /* Max display name */
 #define CYXCHAT_MAX_STATUS_LEN      128     /* Max status text */
 #define CYXCHAT_MAX_FILENAME        128     /* Max filename */
-#define CYXCHAT_CHUNK_SIZE          1024    /* File chunk size */
+/* File chunk size - must fit within onion routing payload limit
+ * 1-hop onion allows ~139 bytes max payload
+ * Wire format: 1 byte type + 16 bytes file_id + 2 bytes idx + 2 bytes len + data
+ * So max data = 139 - 21 = 118 bytes, use 100 for safety margin */
+#define CYXCHAT_CHUNK_SIZE          100
 #define CYXCHAT_MAX_GROUP_MEMBERS   50      /* Max group size */
 #define CYXCHAT_MAX_GROUP_ADMINS    5       /* Max admins per group */
 #define CYXCHAT_MAX_CONTACTS        256     /* Max contacts */
+
+/* DHT-based file transfer constants
+ * DHT max value is 160 bytes, minus 40 bytes crypto overhead = 120 bytes effective */
+#define CYXCHAT_DHT_CHUNK_SIZE      120     /* Max data per DHT entry */
+#define CYXCHAT_DHT_MAX_CHUNKS      14      /* Max micro-chunks for DHT storage */
+#define CYXCHAT_DHT_MAX_FILE_SIZE   1680    /* Max file size for full DHT storage */
+#define CYXCHAT_DHT_TTL_SECONDS     86400   /* 24 hour TTL for DHT entries */
+#define CYXCHAT_FILE_OFFER_TIMEOUT_MS 30000 /* 30 second offer timeout */
 
 /* ============================================================
  * Message Types (0x10-0x3F range)
@@ -75,6 +87,14 @@ extern "C" {
 /* Presence (0x30-0x3F) */
 #define CYXCHAT_MSG_PRESENCE        0x30    /* Presence update */
 #define CYXCHAT_MSG_PRESENCE_REQ    0x31    /* Request presence */
+
+/* File Transfer Protocol v2 (0x40-0x4F) - Hybrid transfer with DHT support */
+#define CYXCHAT_MSG_FILE_OFFER      0x40    /* File offer with crypto info */
+#define CYXCHAT_MSG_FILE_ACCEPT     0x41    /* Accept with transfer mode */
+#define CYXCHAT_MSG_FILE_REJECT     0x42    /* Reject transfer */
+#define CYXCHAT_MSG_FILE_COMPLETE   0x43    /* Transfer complete notification */
+#define CYXCHAT_MSG_FILE_CANCEL     0x44    /* Cancel in-progress transfer */
+#define CYXCHAT_MSG_FILE_DHT_READY  0x45    /* DHT chunks stored notification */
 
 /* DNS Messages (0xD0-0xD9) - CyxChat internal DNS */
 #define CYXCHAT_MSG_DNS_REGISTER      0xD0  /* Register name with signature */
@@ -179,6 +199,25 @@ typedef enum {
     CYXCHAT_PRESENCE_BUSY      = 3,
     CYXCHAT_PRESENCE_INVISIBLE = 4      /* Online but hidden */
 } cyxchat_presence_t;
+
+/* ============================================================
+ * File Transfer Mode
+ * ============================================================ */
+
+typedef enum {
+    CYXCHAT_FILE_MODE_DIRECT     = 0x01,  /* Direct P2P transfer (online peer) */
+    CYXCHAT_FILE_MODE_RELAY      = 0x02,  /* Via relay server */
+    CYXCHAT_FILE_MODE_DHT_MICRO  = 0x03,  /* Small file stored entirely in DHT */
+    CYXCHAT_FILE_MODE_DHT_SIGNAL = 0x04   /* Offer in DHT, transfer when online */
+} cyxchat_file_transfer_mode_t;
+
+/* File rejection reasons */
+typedef enum {
+    CYXCHAT_FILE_REJECT_DECLINED  = 0,    /* User declined */
+    CYXCHAT_FILE_REJECT_TOO_LARGE = 1,    /* File too large */
+    CYXCHAT_FILE_REJECT_BUSY      = 2,    /* Too many transfers */
+    CYXCHAT_FILE_REJECT_BLOCKED   = 3     /* Sender is blocked */
+} cyxchat_file_reject_reason_t;
 
 /* ============================================================
  * Error Codes
