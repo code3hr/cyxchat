@@ -7,10 +7,15 @@ class SettingsKeys {
   static const String relayServer = 'relay_server';
 }
 
+/// Check for dart-define override
+/// Set via --dart-define=BOOTSTRAP_SERVER=127.0.0.1:7777
+const String _bootstrapServerOverride = String.fromEnvironment('BOOTSTRAP_SERVER', defaultValue: '');
+
 /// Default values
 class SettingsDefaults {
   // Empty means use STUN only (no P2P discovery)
-  static const String bootstrapServer = '';
+  // Use dart-define override if set, otherwise empty
+  static String get bootstrapServer => _bootstrapServerOverride;
   static const String relayServer = '';
 }
 
@@ -47,9 +52,13 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
 
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
+    // If dart-define override is set, use it; otherwise use stored preference
+    final storedBootstrap = prefs.getString(SettingsKeys.bootstrapServer);
+    final bootstrap = _bootstrapServerOverride.isNotEmpty
+        ? _bootstrapServerOverride
+        : (storedBootstrap ?? SettingsDefaults.bootstrapServer);
     state = AppSettings(
-      bootstrapServer: prefs.getString(SettingsKeys.bootstrapServer) ??
-          SettingsDefaults.bootstrapServer,
+      bootstrapServer: bootstrap,
       relayServer: prefs.getString(SettingsKeys.relayServer) ??
           SettingsDefaults.relayServer,
     );

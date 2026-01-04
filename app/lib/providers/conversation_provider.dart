@@ -69,6 +69,27 @@ class ChatActions {
     _ref.invalidate(messagesProvider(conversationId));
   }
 
+  /// Send a file message to a conversation
+  Future<Message> sendFileMessage({
+    required String conversationId,
+    required String filename,
+    required String fileSize,
+    String? fileId,
+  }) async {
+    // Store file info as "filename|size|fileId" in content
+    final content = fileId != null
+        ? '$filename|$fileSize|$fileId'
+        : '$filename|$fileSize';
+    final message = await ChatService.instance.sendMessage(
+      conversationId: conversationId,
+      content: content,
+      type: MessageType.file,
+    );
+    _ref.invalidate(messagesProvider(conversationId));
+    _ref.invalidate(conversationsProvider);
+    return message;
+  }
+
   Future<void> togglePin(String conversationId) async {
     await ChatService.instance.togglePin(conversationId);
     _ref.invalidate(conversationsProvider);

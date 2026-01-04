@@ -4,6 +4,7 @@
  */
 
 #include <cyxchat/chat.h>
+#include <cyxchat/file.h>
 #include <cyxwiz/onion.h>
 #include <cyxwiz/crypto.h>
 #include <cyxwiz/memory.h>
@@ -91,6 +92,9 @@ struct cyxchat_ctx {
 
     /* Fragment reassembly buffer */
     cyxchat_frag_entry_t frag_buffer[FRAG_BUFFER_SIZE];
+
+    /* File module context (for message routing) */
+    cyxchat_file_ctx_t *file_ctx;
 
     /* Callbacks */
     cyxchat_on_message_t on_message;
@@ -684,6 +688,19 @@ static void on_onion_delivery(
             }
             break;
 
+        case CYXCHAT_MSG_FILE_META:
+        case CYXCHAT_MSG_FILE_CHUNK:
+        case CYXCHAT_MSG_FILE_ACK:
+            /* Route to file module if registered */
+            if (ctx->file_ctx) {
+                CYXWIZ_INFO("Routing file message (type=0x%02x) to file module", type);
+                /* Pass data after the type byte (offset already points past header) */
+                cyxchat_file_handle_message(ctx->file_ctx, from, type, data + 1, len - 1);
+            } else {
+                CYXWIZ_WARN("Received file message but no file context registered");
+            }
+            break;
+
         default:
             /* Unknown message type, just queued for FFI */
             break;
@@ -1226,4 +1243,28 @@ cyxchat_error_t cyxchat_node_id_from_hex(
     }
 
     return CYXCHAT_OK;
+}
+
+cyxchat_error_t cyxchat_send_raw(
+    cyxchat_ctx_t *ctx,
+    const cyxwiz_node_id_t *to,
+    const uint8_t *data,
+    size_t data_len
+) {
+    if (!ctx || !to || !data || data_len == 0) {
+        return CYXCHAT_ERR_NULL;
+    }
+
+    cyxwiz_error_t err = cyxwiz_onion_send_to(ctx->onion, to, data, data_len);
+    return (err == CYXWIZ_OK) ? CYXCHAT_OK : CYXCHAT_ERR_NETWORK;
+}
+
+cyxwiz_onion_ctx_t* cyxchat_get_onion(cyxchat_ctx_t *ctx) {
+    return ctx ? ctx->onion : NULL;
+}
+
+void cyxchat_set_file_ctx(cyxchat_ctx_t *ctx, cyxchat_file_ctx_t *file_ctx) {
+    if (ctx) {
+        ctx->file_ctx = file_ctx;
+    }
 }

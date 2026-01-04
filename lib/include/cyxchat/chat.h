@@ -352,6 +352,40 @@ CYXCHAT_API cyxchat_error_t cyxchat_node_id_from_hex(
     cyxwiz_node_id_t *id_out
 );
 
+/**
+ * Send raw data via onion routing (for internal use by file/other modules)
+ *
+ * @param ctx           Chat context
+ * @param to            Recipient node ID
+ * @param data          Data to send
+ * @param data_len      Data length
+ * @return              CYXCHAT_OK on success
+ */
+CYXCHAT_API cyxchat_error_t cyxchat_send_raw(
+    cyxchat_ctx_t *ctx,
+    const cyxwiz_node_id_t *to,
+    const uint8_t *data,
+    size_t data_len
+);
+
+/* Forward declaration for file context */
+struct cyxchat_file_ctx;
+typedef struct cyxchat_file_ctx cyxchat_file_ctx_t;
+
+/**
+ * Register file context for automatic message routing
+ * File messages (FILE_META, FILE_CHUNK, FILE_ACK) will be forwarded
+ */
+CYXCHAT_API void cyxchat_set_file_ctx(
+    cyxchat_ctx_t *ctx,
+    cyxchat_file_ctx_t *file_ctx
+);
+
+/**
+ * Get the onion context (for modules that need direct access)
+ */
+CYXCHAT_API cyxwiz_onion_ctx_t* cyxchat_get_onion(cyxchat_ctx_t *ctx);
+
 #ifdef __cplusplus
 }
 #endif

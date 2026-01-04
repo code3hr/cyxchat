@@ -147,11 +147,12 @@ class ChatService {
     return rows.map((row) => Message.fromMap(row)).toList().reversed.toList();
   }
 
-  /// Send text message
+  /// Send message (text or file)
   Future<Message> sendMessage({
     required String conversationId,
     required String content,
     String? replyToId,
+    MessageType type = MessageType.text,
   }) async {
     final db = await DatabaseService.instance.database;
     final identity = IdentityService.instance.currentIdentity;
@@ -174,6 +175,7 @@ class ChatService {
       id: _uuid.v4(),
       conversationId: conversationId,
       senderId: identity.nodeId,
+      type: type,
       content: content,
       timestamp: DateTime.now(),
       status: MessageStatus.sending,
@@ -194,9 +196,9 @@ class ChatService {
       whereArgs: [conversationId],
     );
 
-    // Try to send via native chat
+    // Try to send via native chat (only for text messages - files use FileProvider)
     Message resultMessage;
-    if (_chatProvider != null && conversation.peerId != null) {
+    if (_chatProvider != null && conversation.peerId != null && type == MessageType.text) {
       // Get native reply-to ID if replying
       String? nativeReplyToId;
       if (replyToId != null) {
@@ -233,19 +235,71 @@ class ChatService {
         debugPrint('ChatService: Send failed: ${result.error}');
       }
     } else {
-      // No native chat available - mark as pending
-      resultMessage = message.copyWith(status: MessageStatus.pending);
-      await db.update(
-        'messages',
-        {'status': MessageStatus.pending.index},
-        where: 'id = ?',
-        whereArgs: [message.id],
-      );
-      debugPrint('ChatService: No native chat available, message queued');
+      if (type == MessageType.file) {
+        // File messages are sent via FileProvider - mark as sending
+        resultMessage = message.copyWith(status: MessageStatus.sending);
+        debugPrint('ChatService: File message saved, transfer in progress');
+      } else {
+        // No native chat available for text - mark as pending
+        resultMessage = message.copyWith(status: MessageStatus.pending);
+        await db.update(
+          'messages',
+          {'status': MessageStatus.pending.index},
+          where: 'id = ?',
+          whereArgs: [message.id],
+        );
+        debugPrint('ChatService: No native chat available, message queued');
+      }
     }
 
     _messageController.add(resultMessage);
     return resultMessage;
+  }
+
+  /// Handle received file (creates file message in conversation)
+  Future<void> handleReceivedFile({
+    required String fromPeerId,
+    required String filename,
+    required String fileSize,
+    required String fileId,
+  }) async {
+    final db = await DatabaseService.instance.database;
+
+    // Get or create conversation with sender
+    final conversation = await getOrCreateDirectConversation(fromPeerId);
+
+    // Create file message (content is JSON with file metadata)
+    final fileContent = '{"fileId":"$fileId","filename":"$filename","size":"$fileSize"}';
+
+    final message = Message(
+      id: _uuid.v4(),
+      conversationId: conversation.id,
+      senderId: fromPeerId,
+      type: MessageType.file,
+      content: fileContent,
+      timestamp: DateTime.now(),
+      status: MessageStatus.delivered,
+      isOutgoing: false,
+    );
+
+    // Save to database
+    await db.insert('messages', message.toMap());
+
+    // Update conversation
+    await db.update(
+      'conversations',
+      {
+        'last_activity_at': message.timestamp.millisecondsSinceEpoch,
+        'unread_count': conversation.unreadCount + 1,
+      },
+      where: 'id = ?',
+      whereArgs: [conversation.id],
+    );
+
+    // Emit to stream
+    _messageController.add(message);
+
+    debugPrint('ChatService: Received file "$filename" from $fromPeerId');
   }
 
   /// Mark messages as read

@@ -4,6 +4,7 @@ import 'connection_provider.dart';
 import 'dns_provider.dart';
 import 'chat_provider.dart';
 import 'dht_provider.dart';
+import 'file_provider.dart';
 import 'settings_provider.dart';
 import '../services/identity_service.dart';
 import '../services/chat_service.dart';
@@ -81,11 +82,34 @@ class ConnectionActions {
       debugPrint('DHT initialized (no seed nodes yet)');
     }
 
+    // Initialize File provider for file transfers
+    final fileProvider = _ref.read(fileNotifierProvider);
+    final fileResult = await fileProvider.initialize();
+
+    if (!fileResult) {
+      debugPrint('File provider initialization failed (continuing anyway)');
+      // Don't fail - file transfer is optional
+    } else {
+      debugPrint('File provider initialized');
+      // Wire up file receive callback to create messages
+      fileProvider.onFileReceived = (fromPeerId, filename, fileSize, fileId) {
+        ChatService.instance.handleReceivedFile(
+          fromPeerId: fromPeerId,
+          filename: filename,
+          fileSize: fileSize,
+          fileId: fileId,
+        );
+      };
+    }
+
     return true;
   }
 
   void disconnect() {
     ChatService.instance.disconnectProvider();
+    final fileProvider = _ref.read(fileNotifierProvider);
+    fileProvider.onFileReceived = null;  // Clear callback before shutdown
+    fileProvider.shutdown();
     _ref.read(chatNotifierProvider).shutdown();
     _ref.read(dnsNotifierProvider).shutdown();
     _ref.read(connectionNotifierProvider).shutdown();

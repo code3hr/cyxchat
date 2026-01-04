@@ -1,8 +1,10 @@
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:file_picker/file_picker.dart';
 import '../providers/conversation_provider.dart';
+import '../providers/file_provider.dart';
 import '../models/models.dart';
 
 class ChatScreen extends ConsumerStatefulWidget {
@@ -110,6 +112,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           _MessageInput(
             controller: _textController,
             onSend: _sendMessage,
+            conversationId: widget.conversationId,
           ),
         ],
       ),
@@ -249,6 +252,12 @@ class _MessageBubbleState extends ConsumerState<_MessageBubble> {
                               ? colorScheme.onPrimary.withOpacity(0.7)
                               : colorScheme.onSurface.withOpacity(0.7),
                         ),
+                      )
+                    else if (widget.message.type == MessageType.file)
+                      _FileMessageContent(
+                        message: widget.message,
+                        isOutgoing: isOutgoing,
+                        colorScheme: colorScheme,
                       )
                     else
                       Text(
@@ -414,6 +423,64 @@ class _MessageBubbleState extends ConsumerState<_MessageBubble> {
   }
 }
 
+/// File message content widget
+class _FileMessageContent extends StatelessWidget {
+  final Message message;
+  final bool isOutgoing;
+  final ColorScheme colorScheme;
+
+  const _FileMessageContent({
+    required this.message,
+    required this.isOutgoing,
+    required this.colorScheme,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // Parse file info from content (format: "filename|size|fileId" or just filename)
+    final parts = message.content.split('|');
+    final filename = parts.isNotEmpty ? parts[0] : 'Unknown file';
+    final sizeStr = parts.length > 1 ? parts[1] : '';
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(
+          Icons.insert_drive_file,
+          size: 32,
+          color: isOutgoing ? colorScheme.onPrimary : colorScheme.onSurface,
+        ),
+        const SizedBox(width: 8),
+        Flexible(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                filename,
+                style: TextStyle(
+                  color: isOutgoing ? colorScheme.onPrimary : colorScheme.onSurface,
+                  fontWeight: FontWeight.w500,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+              if (sizeStr.isNotEmpty)
+                Text(
+                  sizeStr,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: isOutgoing
+                        ? colorScheme.onPrimary.withOpacity(0.7)
+                        : colorScheme.onSurface.withOpacity(0.7),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class _ReplyIndicator extends StatelessWidget {
   final VoidCallback onCancel;
 
@@ -454,14 +521,23 @@ class _ReplyIndicator extends StatelessWidget {
   }
 }
 
-class _MessageInput extends StatelessWidget {
+class _MessageInput extends ConsumerStatefulWidget {
   final TextEditingController controller;
   final VoidCallback onSend;
+  final String conversationId;
 
   const _MessageInput({
     required this.controller,
     required this.onSend,
+    required this.conversationId,
   });
+
+  @override
+  ConsumerState<_MessageInput> createState() => _MessageInputState();
+}
+
+class _MessageInputState extends ConsumerState<_MessageInput> {
+  bool _isSendingFile = false;
 
   Future<void> _pickFile(BuildContext context) async {
     try {
@@ -492,23 +568,74 @@ class _MessageInput extends StatelessWidget {
         return;
       }
 
-      // File selected and within size limit
-      // TODO: Implement file transfer FFI bindings
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Selected: ${file.name} (${(fileSize / 1024).toStringAsFixed(1)} KB)\n'
-              'File transfer coming in next update!',
-            ),
-            duration: const Duration(seconds: 3),
-          ),
+      // Get peer ID from conversation
+      final conversationAsync = ref.read(conversationProvider(widget.conversationId));
+      final conversation = conversationAsync.value;
+      if (conversation == null || conversation.peerId == null) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Cannot send file: peer not found')),
+          );
+        }
+        return;
+      }
+
+      // Get file data
+      final fileBytes = file.bytes;
+      if (fileBytes == null) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Cannot read file data')),
+          );
+        }
+        return;
+      }
+
+      setState(() => _isSendingFile = true);
+
+      // Send file via FileProvider
+      final sendResult = await ref.read(fileActionsProvider).sendFile(
+        toPeerId: conversation.peerId!,
+        filename: file.name,
+        data: Uint8List.fromList(fileBytes),
+      );
+
+      setState(() => _isSendingFile = false);
+
+      if (sendResult.success) {
+        // Save file message to conversation
+        final sizeStr = fileSize < 1024
+            ? '$fileSize B'
+            : '${(fileSize / 1024).toStringAsFixed(1)} KB';
+        await ref.read(chatActionsProvider).sendFileMessage(
+          conversationId: widget.conversationId,
+          filename: file.name,
+          fileSize: sizeStr,
+          fileId: sendResult.fileId,
         );
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Sending ${file.name}...'),
+              duration: const Duration(seconds: 2),
+            ),
+          );
+        }
+      } else {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(sendResult.error ?? 'Failed to send file'),
+              duration: const Duration(seconds: 3),
+            ),
+          );
+        }
       }
     } catch (e) {
+      setState(() => _isSendingFile = false);
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error picking file: $e')),
+          SnackBar(content: Text('Error: $e')),
         );
       }
     }
@@ -529,28 +656,37 @@ class _MessageInput extends StatelessWidget {
       child: SafeArea(
         child: Row(
           children: [
-            IconButton(
-              icon: const Icon(Icons.attach_file),
-              onPressed: () => _pickFile(context),
-            ),
+            _isSendingFile
+                ? const Padding(
+                    padding: EdgeInsets.all(12),
+                    child: SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  )
+                : IconButton(
+                    icon: const Icon(Icons.attach_file),
+                    onPressed: () => _pickFile(context),
+                  ),
             Expanded(
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxHeight: 120),
                 child: TextField(
-                  controller: controller,
+                  controller: widget.controller,
                   decoration: const InputDecoration(
                     hintText: 'Message',
                     border: InputBorder.none,
                   ),
                   textCapitalization: TextCapitalization.sentences,
                   maxLines: null,
-                  onSubmitted: (_) => onSend(),
+                  onSubmitted: (_) => widget.onSend(),
                 ),
               ),
             ),
             IconButton(
               icon: const Icon(Icons.send),
-              onPressed: onSend,
+              onPressed: widget.onSend,
             ),
           ],
         ),
