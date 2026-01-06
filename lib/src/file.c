@@ -4,6 +4,7 @@
 
 #include <cyxchat/file.h>
 #include <cyxchat/chat.h>
+#include <cyxwiz/routing.h>
 #include <cyxwiz/crypto.h>
 #include <cyxwiz/dht.h>
 #include <cyxwiz/memory.h>
@@ -47,6 +48,10 @@ struct cyxchat_file_ctx {
     /* DHT for offline storage */
     cyxwiz_dht_t *dht;
     cyxwiz_node_id_t local_id;
+
+    /* Direct P2P mode */
+    int use_direct_mode;            /* 0 = onion (default), 1 = direct P2P */
+    cyxwiz_router_t *router;        /* Router for direct P2P sending */
 
     /* Transfers */
     file_transfer_slot_t transfers[CYXCHAT_MAX_TRANSFERS];
@@ -133,7 +138,7 @@ static int is_chunk_received(file_transfer_slot_t *slot, uint16_t idx) {
     return (slot->chunk_bitmap[idx / 8] >> (idx % 8)) & 1;
 }
 
-static uint16_t count_received_chunks(file_transfer_slot_t *slot) {
+CYXWIZ_MAYBE_UNUSED static uint16_t count_received_chunks(file_transfer_slot_t *slot) {
     if (!slot->chunk_bitmap) return 0;
     uint16_t count = 0;
     for (uint16_t i = 0; i < slot->transfer.meta.chunk_count; i++) {
@@ -142,7 +147,7 @@ static uint16_t count_received_chunks(file_transfer_slot_t *slot) {
     return count;
 }
 
-static uint16_t find_next_missing_chunk(file_transfer_slot_t *slot, uint16_t start) {
+CYXWIZ_MAYBE_UNUSED static uint16_t find_next_missing_chunk(file_transfer_slot_t *slot, uint16_t start) {
     if (!slot->chunk_bitmap) return start;
     for (uint16_t i = start; i < slot->transfer.meta.chunk_count; i++) {
         if (!is_chunk_received(slot, i)) return i;
@@ -158,7 +163,7 @@ static uint16_t find_next_missing_chunk(file_transfer_slot_t *slot, uint16_t sta
  * Encrypt file data using XChaCha20-Poly1305
  * Returns encrypted data with 40 bytes of overhead (24 nonce + 16 tag)
  */
-static uint8_t* encrypt_file_data(
+CYXWIZ_MAYBE_UNUSED static uint8_t* encrypt_file_data(
     const uint8_t *plaintext,
     size_t plaintext_len,
     const uint8_t key[32],
@@ -192,7 +197,7 @@ static uint8_t* encrypt_file_data(
 /**
  * Decrypt file data using XChaCha20-Poly1305
  */
-static uint8_t* decrypt_file_data(
+CYXWIZ_MAYBE_UNUSED static uint8_t* decrypt_file_data(
     const uint8_t *ciphertext,
     size_t ciphertext_len,
     const uint8_t key[32],
@@ -229,7 +234,7 @@ static uint8_t* decrypt_file_data(
 /**
  * Select appropriate transfer mode based on peer connectivity and file size
  */
-static cyxchat_file_transfer_mode_t select_transfer_mode(
+CYXWIZ_MAYBE_UNUSED static cyxchat_file_transfer_mode_t select_transfer_mode(
     cyxchat_file_ctx_t *ctx,
     const cyxwiz_node_id_t *recipient,
     size_t file_size
@@ -358,7 +363,15 @@ static void send_next_chunk(cyxchat_file_ctx_t *ctx, file_transfer_slot_t *slot)
     memcpy(chunk_buf + chunk_wire_len, slot->data + offset, chunk_len);
     chunk_wire_len += chunk_len;
 
-    cyxchat_error_t err = cyxchat_send_raw(ctx->chat_ctx, &slot->transfer.peer, chunk_buf, chunk_wire_len);
+    cyxchat_error_t err;
+    if (ctx->use_direct_mode && ctx->router) {
+        /* Direct P2P: send via router (faster, larger chunks possible) */
+        cyxwiz_error_t werr = cyxwiz_router_send(ctx->router, &slot->transfer.peer, chunk_buf, chunk_wire_len);
+        err = (werr == CYXWIZ_OK) ? CYXCHAT_OK : CYXCHAT_ERR_NETWORK;
+    } else {
+        /* Onion routing: send via chat layer (slower, anonymous) */
+        err = cyxchat_send_raw(ctx->chat_ctx, &slot->transfer.peer, chunk_buf, chunk_wire_len);
+    }
     slot->transfer.chunks_done++;
     slot->transfer.updated_at = cyxchat_timestamp_ms();
     slot->last_chunk_sent_ms = slot->transfer.updated_at;
@@ -1158,6 +1171,7 @@ static cyxchat_error_t handle_file_chunk(
     const uint8_t *data,
     size_t data_len
 ) {
+    (void)from;  /* Currently unused, reserved for future sender verification */
     CYXWIZ_INFO("handle_file_chunk: received %zu bytes", data_len);
 
     /* Parse wire format: file_id(8) + chunk_idx(2) + chunk_len(2) + data(N) */
@@ -1670,6 +1684,25 @@ void cyxchat_file_set_local_id(cyxchat_file_ctx_t *ctx, const cyxwiz_node_id_t *
     if (ctx && local_id) {
         memcpy(&ctx->local_id, local_id, sizeof(cyxwiz_node_id_t));
     }
+}
+
+void cyxchat_file_set_router(cyxchat_file_ctx_t *ctx, cyxwiz_router_t *router) {
+    if (ctx) {
+        ctx->router = router;
+    }
+}
+
+cyxchat_error_t cyxchat_file_set_direct_mode(cyxchat_file_ctx_t *ctx, int direct) {
+    if (!ctx) {
+        return CYXCHAT_ERR_NULL;
+    }
+    ctx->use_direct_mode = direct ? 1 : 0;
+    CYXWIZ_INFO("file: direct mode %s", direct ? "enabled" : "disabled");
+    return CYXCHAT_OK;
+}
+
+int cyxchat_file_get_direct_mode(cyxchat_file_ctx_t *ctx) {
+    return ctx ? ctx->use_direct_mode : 0;
 }
 
 /* ============================================================
