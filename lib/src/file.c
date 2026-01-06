@@ -5,6 +5,7 @@
 #include <cyxchat/file.h>
 #include <cyxchat/chat.h>
 #include <cyxwiz/crypto.h>
+#include <cyxwiz/dht.h>
 #include <cyxwiz/memory.h>
 #include <cyxwiz/log.h>
 #include <string.h>
@@ -42,6 +43,10 @@ typedef struct {
 
 struct cyxchat_file_ctx {
     cyxchat_ctx_t *chat_ctx;
+
+    /* DHT for offline storage */
+    cyxwiz_dht_t *dht;
+    cyxwiz_node_id_t local_id;
 
     /* Transfers */
     file_transfer_slot_t transfers[CYXCHAT_MAX_TRANSFERS];
@@ -675,7 +680,25 @@ cyxchat_error_t cyxchat_file_accept(
     slot->transfer.state = CYXCHAT_FILE_RECEIVING;
     slot->transfer.updated_at = cyxchat_timestamp_ms();
 
-    /* TODO: Send accept message to sender */
+    /* Send accept message to sender */
+    {
+        uint8_t wire_buf[12];
+        size_t wire_len = 0;
+
+        wire_buf[wire_len++] = CYXCHAT_MSG_FILE_ACCEPT;
+        memcpy(wire_buf + wire_len, file_id->bytes, CYXCHAT_FILE_ID_SIZE);
+        wire_len += CYXCHAT_FILE_ID_SIZE;
+        wire_buf[wire_len++] = (uint8_t)slot->transfer.mode;
+        uint16_t start_chunk = slot->transfer.chunks_done;
+        wire_buf[wire_len++] = (uint8_t)(start_chunk & 0xFF);
+        wire_buf[wire_len++] = (uint8_t)((start_chunk >> 8) & 0xFF);
+
+        cyxchat_error_t send_err = cyxchat_send_raw(ctx->chat_ctx, &slot->transfer.peer, wire_buf, wire_len);
+        if (send_err != CYXCHAT_OK) {
+            CYXWIZ_WARN("cyxchat_file_accept: failed to send FILE_ACCEPT, error %d", send_err);
+            /* Don't fail - transfer may still work via poll */
+        }
+    }
 
     return CYXCHAT_OK;
 }
@@ -693,7 +716,22 @@ cyxchat_error_t cyxchat_file_reject(
         return CYXCHAT_ERR_NOT_FOUND;
     }
 
-    /* TODO: Send reject message */
+    /* Send reject message to sender */
+    {
+        uint8_t wire_buf[10];
+        size_t wire_len = 0;
+
+        wire_buf[wire_len++] = CYXCHAT_MSG_FILE_REJECT;
+        memcpy(wire_buf + wire_len, file_id->bytes, CYXCHAT_FILE_ID_SIZE);
+        wire_len += CYXCHAT_FILE_ID_SIZE;
+        wire_buf[wire_len++] = 0; /* CYXCHAT_FILE_REJECT_DECLINED */
+
+        cyxchat_error_t send_err = cyxchat_send_raw(ctx->chat_ctx, &slot->transfer.peer, wire_buf, wire_len);
+        if (send_err != CYXCHAT_OK) {
+            CYXWIZ_WARN("cyxchat_file_reject: failed to send FILE_REJECT, error %d", send_err);
+            /* Continue with cleanup even if send fails */
+        }
+    }
 
     free_transfer(ctx, slot);
     return CYXCHAT_OK;
@@ -718,7 +756,21 @@ cyxchat_error_t cyxchat_file_cancel(
 
     slot->transfer.state = CYXCHAT_FILE_CANCELLED;
 
-    /* TODO: Send cancel message to peer */
+    /* Send cancel message to peer */
+    {
+        uint8_t wire_buf[9];
+        size_t wire_len = 0;
+
+        wire_buf[wire_len++] = CYXCHAT_MSG_FILE_CANCEL;
+        memcpy(wire_buf + wire_len, file_id->bytes, CYXCHAT_FILE_ID_SIZE);
+        wire_len += CYXCHAT_FILE_ID_SIZE;
+
+        cyxchat_error_t send_err = cyxchat_send_raw(ctx->chat_ctx, &slot->transfer.peer, wire_buf, wire_len);
+        if (send_err != CYXCHAT_OK) {
+            CYXWIZ_WARN("cyxchat_file_cancel: failed to send FILE_CANCEL, error %d", send_err);
+            /* Continue with cleanup even if send fails */
+        }
+    }
 
     free_transfer(ctx, slot);
     return CYXCHAT_OK;
@@ -1598,6 +1650,22 @@ cyxchat_error_t cyxchat_file_handle_message(
 }
 
 /* ============================================================
+ * DHT Configuration
+ * ============================================================ */
+
+void cyxchat_file_set_dht(cyxchat_file_ctx_t *ctx, cyxwiz_dht_t *dht) {
+    if (ctx) {
+        ctx->dht = dht;
+    }
+}
+
+void cyxchat_file_set_local_id(cyxchat_file_ctx_t *ctx, const cyxwiz_node_id_t *local_id) {
+    if (ctx && local_id) {
+        memcpy(&ctx->local_id, local_id, sizeof(cyxwiz_node_id_t));
+    }
+}
+
+/* ============================================================
  * DHT-Based Transfer API
  * ============================================================ */
 
@@ -1619,16 +1687,56 @@ cyxchat_error_t cyxchat_file_store_offer(
         return CYXCHAT_ERR_INVALID;
     }
 
+    /* Check if DHT is available */
+    if (!ctx->dht) {
+        CYXWIZ_WARN("cyxchat_file_store_offer: DHT not available");
+        return CYXCHAT_ERR_NETWORK;
+    }
+
     /* Compute DHT key for offer */
     uint8_t dht_key[32];
     compute_offer_dht_key(&slot->transfer.peer, file_id, dht_key);
 
-    /* TODO: Store offer in DHT using cyxwiz_dht_put() */
-    /* This requires access to the DHT context from the chat layer */
-    /* For now, just mark the mode */
-    slot->transfer.mode = CYXCHAT_FILE_MODE_DHT_SIGNAL;
+    /* Serialize offer metadata (must fit in 160 bytes) */
+    /* Format: file_id(8) + file_hash(32) + size(4) + chunk_count(2) + filename_len(1) + filename(N) */
+    uint8_t offer_value[160];
+    size_t offset = 0;
 
-    (void)dht_key;  /* Will be used when DHT integration is complete */
+    /* File ID */
+    memcpy(offer_value + offset, file_id->bytes, CYXCHAT_FILE_ID_SIZE);
+    offset += CYXCHAT_FILE_ID_SIZE;
+
+    /* File hash */
+    memcpy(offer_value + offset, slot->transfer.meta.file_hash, 32);
+    offset += 32;
+
+    /* Size (4 bytes little-endian) */
+    uint32_t size = (uint32_t)slot->transfer.meta.size;
+    offer_value[offset++] = (uint8_t)(size & 0xFF);
+    offer_value[offset++] = (uint8_t)((size >> 8) & 0xFF);
+    offer_value[offset++] = (uint8_t)((size >> 16) & 0xFF);
+    offer_value[offset++] = (uint8_t)((size >> 24) & 0xFF);
+
+    /* Chunk count (2 bytes little-endian) */
+    offer_value[offset++] = (uint8_t)(slot->transfer.meta.chunk_count & 0xFF);
+    offer_value[offset++] = (uint8_t)((slot->transfer.meta.chunk_count >> 8) & 0xFF);
+
+    /* Filename (length-prefixed, max 64 bytes) */
+    size_t fname_len = strlen(slot->transfer.meta.filename);
+    if (fname_len > 64) fname_len = 64;
+    offer_value[offset++] = (uint8_t)fname_len;
+    memcpy(offer_value + offset, slot->transfer.meta.filename, fname_len);
+    offset += fname_len;
+
+    /* Store in DHT with 24-hour TTL */
+    cyxwiz_error_t err = cyxwiz_dht_put(ctx->dht, dht_key, offer_value, offset, CYXCHAT_DHT_TTL_SECONDS);
+    if (err != CYXWIZ_OK) {
+        CYXWIZ_ERROR("cyxchat_file_store_offer: DHT put failed with %d", err);
+        return CYXCHAT_ERR_NETWORK;
+    }
+
+    slot->transfer.mode = CYXCHAT_FILE_MODE_DHT_SIGNAL;
+    CYXWIZ_INFO("Stored file offer in DHT for offline recipient");
 
     return CYXCHAT_OK;
 }
@@ -1651,33 +1759,125 @@ cyxchat_error_t cyxchat_file_store_dht_chunks(
         return CYXCHAT_ERR_INVALID;
     }
 
+    /* Check if DHT is available */
+    if (!ctx->dht) {
+        CYXWIZ_WARN("cyxchat_file_store_dht_chunks: DHT not available");
+        return CYXCHAT_ERR_NETWORK;
+    }
+
     /* Check size limit for DHT storage */
     if (slot->transfer.meta.size > CYXCHAT_DHT_MAX_FILE_SIZE) {
         return CYXCHAT_ERR_FILE_TOO_LARGE;
+    }
+
+    /* Need file data to store */
+    if (!slot->data) {
+        return CYXCHAT_ERR_INVALID;
     }
 
     /* Store each chunk in DHT */
     uint16_t dht_chunk_count = (uint16_t)((slot->transfer.meta.size + CYXCHAT_DHT_CHUNK_SIZE - 1)
                                            / CYXCHAT_DHT_CHUNK_SIZE);
 
+    int stored_count = 0;
     for (uint16_t i = 0; i < dht_chunk_count; i++) {
         uint8_t dht_key[32];
         compute_chunk_dht_key(slot->transfer.meta.file_hash, i, dht_key);
 
-        size_t offset = (size_t)i * CYXCHAT_DHT_CHUNK_SIZE;
-        size_t remaining = slot->transfer.meta.size - offset;
+        size_t chunk_offset = (size_t)i * CYXCHAT_DHT_CHUNK_SIZE;
+        size_t remaining = slot->transfer.meta.size - chunk_offset;
         size_t len = (remaining > CYXCHAT_DHT_CHUNK_SIZE) ? CYXCHAT_DHT_CHUNK_SIZE : remaining;
 
-        /* TODO: Store chunk in DHT using cyxwiz_dht_put() */
-        /* cyxwiz_dht_put(dht, dht_key, slot->data + offset, len, CYXCHAT_DHT_TTL_SECONDS); */
-
-        (void)dht_key;
-        (void)len;
+        /* Store chunk in DHT */
+        cyxwiz_error_t err = cyxwiz_dht_put(ctx->dht, dht_key, slot->data + chunk_offset, len, CYXCHAT_DHT_TTL_SECONDS);
+        if (err == CYXWIZ_OK) {
+            stored_count++;
+        } else {
+            CYXWIZ_WARN("Failed to store DHT chunk %u/%u, error %d", i, dht_chunk_count, err);
+        }
     }
 
-    slot->transfer.mode = CYXCHAT_FILE_MODE_DHT_MICRO;
+    if (stored_count == dht_chunk_count) {
+        slot->transfer.mode = CYXCHAT_FILE_MODE_DHT_MICRO;
+        CYXWIZ_INFO("Stored all %u file chunks in DHT", dht_chunk_count);
+        return CYXCHAT_OK;
+    }
 
-    return CYXCHAT_OK;
+    CYXWIZ_WARN("Only stored %d/%u chunks in DHT", stored_count, dht_chunk_count);
+    return CYXCHAT_ERR_NETWORK;  /* Partial failure */
+}
+
+/* Callback context for DHT chunk retrieval */
+typedef struct {
+    cyxchat_file_ctx_t *file_ctx;
+    cyxchat_file_id_t file_id;
+    uint16_t chunk_idx;
+    uint16_t total_chunks;
+} dht_chunk_get_ctx_t;
+
+/* Callback for DHT chunk retrieval */
+static void on_dht_chunk_received(
+    const uint8_t *key,
+    bool found,
+    const uint8_t *value,
+    size_t value_len,
+    void *user_data
+) {
+    (void)key;  /* Unused */
+
+    dht_chunk_get_ctx_t *get_ctx = (dht_chunk_get_ctx_t *)user_data;
+    if (!get_ctx) return;
+
+    cyxchat_file_ctx_t *ctx = get_ctx->file_ctx;
+    if (!ctx) {
+        free(get_ctx);
+        return;
+    }
+
+    file_transfer_slot_t *slot = find_transfer(ctx, &get_ctx->file_id);
+    if (!slot || !slot->data) {
+        CYXWIZ_WARN("DHT chunk callback: transfer not found");
+        free(get_ctx);
+        return;
+    }
+
+    if (found && value && value_len > 0) {
+        /* Copy chunk data to buffer */
+        size_t chunk_offset = (size_t)get_ctx->chunk_idx * CYXCHAT_DHT_CHUNK_SIZE;
+        if (chunk_offset + value_len <= slot->data_capacity) {
+            memcpy(slot->data + chunk_offset, value, value_len);
+            set_chunk_received(slot, get_ctx->chunk_idx);
+            slot->transfer.chunks_done++;
+            slot->transfer.updated_at = cyxchat_timestamp_ms();
+
+            CYXWIZ_DEBUG("DHT chunk %u/%u received (%zu bytes)",
+                        get_ctx->chunk_idx, get_ctx->total_chunks, value_len);
+
+            /* Notify progress */
+            if (ctx->on_progress) {
+                ctx->on_progress(ctx, &get_ctx->file_id,
+                                slot->transfer.chunks_done,
+                                get_ctx->total_chunks,
+                                ctx->on_progress_data);
+            }
+
+            /* Check completion */
+            if (slot->transfer.chunks_done >= get_ctx->total_chunks) {
+                slot->transfer.state = CYXCHAT_FILE_COMPLETED;
+                CYXWIZ_INFO("DHT file transfer complete");
+                if (ctx->on_complete) {
+                    ctx->on_complete(ctx, &get_ctx->file_id, slot->data,
+                                    slot->transfer.meta.size, ctx->on_complete_data);
+                }
+            }
+        } else {
+            CYXWIZ_WARN("DHT chunk %u: buffer overflow", get_ctx->chunk_idx);
+        }
+    } else {
+        CYXWIZ_WARN("DHT chunk %u not found in DHT", get_ctx->chunk_idx);
+    }
+
+    free(get_ctx);
 }
 
 cyxchat_error_t cyxchat_file_retrieve_dht_chunks(
@@ -1686,6 +1886,12 @@ cyxchat_error_t cyxchat_file_retrieve_dht_chunks(
 ) {
     if (!ctx || !file_id) {
         return CYXCHAT_ERR_NULL;
+    }
+
+    /* Check if DHT is available */
+    if (!ctx->dht) {
+        CYXWIZ_WARN("cyxchat_file_retrieve_dht_chunks: DHT not available");
+        return CYXCHAT_ERR_NETWORK;
     }
 
     file_transfer_slot_t *slot = find_transfer(ctx, file_id);
@@ -1707,25 +1913,60 @@ cyxchat_error_t cyxchat_file_retrieve_dht_chunks(
         slot->data_capacity = slot->transfer.meta.size;
     }
 
-    /* Retrieve each chunk from DHT */
+    /* Allocate chunk bitmap if needed */
     uint16_t dht_chunk_count = (uint16_t)((slot->transfer.meta.size + CYXCHAT_DHT_CHUNK_SIZE - 1)
                                            / CYXCHAT_DHT_CHUNK_SIZE);
 
+    if (!slot->chunk_bitmap) {
+        size_t bitmap_bytes = (dht_chunk_count + 7) / 8;
+        slot->chunk_bitmap = calloc(1, bitmap_bytes);
+        if (!slot->chunk_bitmap) {
+            return CYXCHAT_ERR_MEMORY;
+        }
+        slot->bitmap_size = bitmap_bytes;
+    }
+
+    /* Start async retrieval for each missing chunk */
+    int requests_started = 0;
     for (uint16_t i = 0; i < dht_chunk_count; i++) {
         if (is_chunk_received(slot, i)) continue;  /* Already have this chunk */
 
         uint8_t dht_key[32];
         compute_chunk_dht_key(slot->transfer.meta.file_hash, i, dht_key);
 
-        /* TODO: Retrieve chunk from DHT using cyxwiz_dht_get() */
-        /* This is async, so we'd need callbacks to handle the response */
+        /* Allocate callback context */
+        dht_chunk_get_ctx_t *get_ctx = malloc(sizeof(dht_chunk_get_ctx_t));
+        if (!get_ctx) continue;
 
-        (void)dht_key;
+        get_ctx->file_ctx = ctx;
+        memcpy(&get_ctx->file_id, file_id, sizeof(cyxchat_file_id_t));
+        get_ctx->chunk_idx = i;
+        get_ctx->total_chunks = dht_chunk_count;
+
+        /* Start async DHT get */
+        cyxwiz_error_t err = cyxwiz_dht_get(ctx->dht, dht_key, on_dht_chunk_received, get_ctx);
+        if (err == CYXWIZ_OK) {
+            requests_started++;
+        } else {
+            CYXWIZ_WARN("Failed to start DHT get for chunk %u", i);
+            free(get_ctx);
+        }
     }
 
-    slot->transfer.state = CYXCHAT_FILE_RECEIVING;
+    if (requests_started > 0) {
+        slot->transfer.state = CYXCHAT_FILE_RECEIVING;
+        slot->transfer.mode = CYXCHAT_FILE_MODE_DHT_MICRO;
+        CYXWIZ_INFO("Started DHT retrieval for %d chunks", requests_started);
+        return CYXCHAT_OK;
+    }
 
-    return CYXCHAT_OK;
+    /* No requests started - either all chunks received or all failed */
+    if (slot->transfer.chunks_done >= dht_chunk_count) {
+        slot->transfer.state = CYXCHAT_FILE_COMPLETED;
+        return CYXCHAT_OK;
+    }
+
+    return CYXCHAT_ERR_NETWORK;
 }
 
 int cyxchat_file_check_dht_offers(cyxchat_file_ctx_t *ctx) {
@@ -1733,8 +1974,25 @@ int cyxchat_file_check_dht_offers(cyxchat_file_ctx_t *ctx) {
         return -1;
     }
 
-    /* TODO: Query DHT for pending offers addressed to us */
-    /* This requires knowing our own node ID and querying with our offer DHT key */
+    if (!ctx->dht) {
+        CYXWIZ_DEBUG("cyxchat_file_check_dht_offers: DHT not available");
+        return 0;
+    }
+
+    /*
+     * DHT offer lookup requires knowing the file_id of pending offers.
+     * Key format: BLAKE2b(our_node_id || "CYXCHAT_FILE_OFFER" || file_id)
+     *
+     * Since DHT doesn't support prefix queries, we cannot enumerate all
+     * offers addressed to us. Instead, the sender must notify us through
+     * an alternative channel (e.g., a text message with the file_id hint)
+     * or we must already know the file_id from a previous FILE_DHT_READY
+     * notification.
+     *
+     * For now, this function returns 0 (no automatic discovery).
+     * Use cyxchat_file_retrieve_dht_chunks() with a known file_id instead.
+     */
+    CYXWIZ_DEBUG("DHT offer check called - requires file_id hint for lookup");
 
     return 0;
 }

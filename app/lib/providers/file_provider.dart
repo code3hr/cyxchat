@@ -565,4 +565,14 @@ class FileActions {
   Future<bool> cancelTransfer(String fileId) {
     return _ref.read(fileNotifierProvider).cancelTransfer(fileId);
   }
+
+  /// Pause transfer
+  Future<bool> pauseTransfer(String fileId) {
+    return _ref.read(fileNotifierProvider).pauseTransfer(fileId);
+  }
+
+  /// Resume transfer
+  Future<bool> resumeTransfer(String fileId) {
+    return _ref.read(fileNotifierProvider).resumeTransfer(fileId);
+  }
 }

@@ -12,8 +12,9 @@
 extern "C" {
 #endif
 
-/* Forward declaration */
+/* Forward declarations */
 typedef struct cyxchat_ctx cyxchat_ctx_t;
+typedef struct cyxwiz_dht cyxwiz_dht_t;
 
 /* ============================================================
  * File Transfer State
@@ -404,6 +405,33 @@ CYXCHAT_API void cyxchat_file_format_size(
     uint32_t size_bytes,
     char *out,
     size_t out_len
+);
+
+/* ============================================================
+ * DHT Configuration
+ * ============================================================ */
+
+/**
+ * Set DHT context for offline file storage
+ * Must be called after cyxchat_file_ctx_create() and before using DHT functions.
+ *
+ * @param ctx   File context
+ * @param dht   DHT context (from connection module)
+ */
+CYXCHAT_API void cyxchat_file_set_dht(
+    cyxchat_file_ctx_t *ctx,
+    cyxwiz_dht_t *dht
+);
+
+/**
+ * Set local node ID (needed for checking offers addressed to us)
+ *
+ * @param ctx       File context
+ * @param local_id  Our node ID
+ */
+CYXCHAT_API void cyxchat_file_set_local_id(
+    cyxchat_file_ctx_t *ctx,
+    const cyxwiz_node_id_t *local_id
 );
 
 /* ============================================================

@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:file_picker/file_picker.dart';
 import '../providers/conversation_provider.dart';
 import '../providers/file_provider.dart';
+import '../ffi/bindings.dart' show CyxChatFileState;
 import '../models/models.dart';
 
 class ChatScreen extends ConsumerStatefulWidget {
@@ -425,7 +426,7 @@ class _MessageBubbleState extends ConsumerState<_MessageBubble> {
   }
 }
 
-/// File message content widget
+/// File message content widget with transfer progress and controls
 class _FileMessageContent extends ConsumerWidget {
   final Message message;
   final bool isOutgoing;
@@ -465,68 +466,263 @@ class _FileMessageContent extends ConsumerWidget {
       fileId = parts.length > 2 ? parts[2] : null;
     }
 
-    // Check if file data is available for download
+    // Watch file provider for transfer state and received files
     final fileProvider = ref.watch(fileNotifierProvider);
     final hasFileData = fileId != null && fileProvider.getReceivedFile(fileId) != null;
+    final transfer = fileId != null ? fileProvider.transfers[fileId] : null;
+
+    // Determine transfer state
+    final isTransferring = transfer != null &&
+        (transfer.state == CyxChatFileState.sending || transfer.state == CyxChatFileState.receiving);
+    final isPaused = transfer?.state == CyxChatFileState.paused;
+    final isFailed = transfer?.state == CyxChatFileState.failed;
+    final isCompleted = hasFileData || transfer?.state == CyxChatFileState.completed;
 
     return InkWell(
-      onTap: hasFileData ? () => _saveFile(context, ref, fileId!, filename) : null,
+      onTap: hasFileData && !isTransferring && !isPaused
+          ? () => _saveFile(context, ref, fileId!, filename)
+          : null,
       borderRadius: BorderRadius.circular(8),
-      child: Row(
+      child: Column(
         mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(
-            Icons.insert_drive_file,
-            size: 32,
-            color: isOutgoing ? colorScheme.onPrimary : colorScheme.onSurface,
-          ),
-          const SizedBox(width: 8),
-          Flexible(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  filename,
-                  style: TextStyle(
-                    color: isOutgoing ? colorScheme.onPrimary : colorScheme.onSurface,
-                    fontWeight: FontWeight.w500,
-                  ),
-                  overflow: TextOverflow.ellipsis,
+          // Main row: icon, filename, size
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildFileIcon(isTransferring, isPaused, isFailed, isCompleted),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      filename,
+                      style: TextStyle(
+                        color: isOutgoing ? colorScheme.onPrimary : colorScheme.onSurface,
+                        fontWeight: FontWeight.w500,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    if (sizeStr.isNotEmpty)
+                      Text(
+                        sizeStr,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: isOutgoing
+                              ? colorScheme.onPrimary.withOpacity(0.7)
+                              : colorScheme.onSurface.withOpacity(0.7),
+                        ),
+                      ),
+                    // Status text
+                    _buildStatusText(
+                      transfer: transfer,
+                      hasFileData: hasFileData,
+                    ),
+                  ],
                 ),
-                if (sizeStr.isNotEmpty)
-                  Text(
-                    sizeStr,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: isOutgoing
-                          ? colorScheme.onPrimary.withOpacity(0.7)
-                          : colorScheme.onSurface.withOpacity(0.7),
-                    ),
-                  ),
-                if (hasFileData)
-                  Text(
-                    'Tap to save',
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: isOutgoing
-                          ? colorScheme.onPrimary.withOpacity(0.6)
-                          : colorScheme.primary,
-                    ),
-                  ),
+              ),
+              // Download icon for completed files
+              if (hasFileData && !isTransferring && !isPaused) ...[
+                const SizedBox(width: 8),
+                Icon(
+                  Icons.download,
+                  size: 20,
+                  color: isOutgoing ? colorScheme.onPrimary : colorScheme.primary,
+                ),
               ],
-            ),
+            ],
           ),
-          if (hasFileData) ...[
-            const SizedBox(width: 8),
-            Icon(
-              Icons.download,
-              size: 20,
-              color: isOutgoing ? colorScheme.onPrimary : colorScheme.primary,
+
+          // Progress bar and controls (only during active transfer or paused)
+          if ((isTransferring || isPaused) && transfer != null && fileId != null) ...[
+            const SizedBox(height: 8),
+            _buildProgressSection(
+              context: context,
+              ref: ref,
+              transfer: transfer,
+              fileId: fileId,
+              isPaused: isPaused,
             ),
           ],
         ],
       ),
     );
+  }
+
+  Widget _buildFileIcon(bool isTransferring, bool isPaused, bool isFailed, bool isCompleted) {
+    IconData icon;
+    Color? iconColor;
+
+    if (isFailed) {
+      icon = Icons.error_outline;
+      iconColor = Colors.red;
+    } else if (isPaused) {
+      icon = Icons.pause_circle_outline;
+      iconColor = Colors.orange;
+    } else if (isTransferring) {
+      icon = Icons.sync;
+      iconColor = Colors.cyan;
+    } else if (isCompleted) {
+      icon = Icons.check_circle_outline;
+      iconColor = Colors.green;
+    } else {
+      icon = Icons.insert_drive_file;
+      iconColor = isOutgoing ? colorScheme.onPrimary : colorScheme.onSurface;
+    }
+
+    return Icon(icon, size: 32, color: iconColor);
+  }
+
+  Widget _buildStatusText({
+    required FileTransferInfo? transfer,
+    required bool hasFileData,
+  }) {
+    if (transfer == null) {
+      if (hasFileData) {
+        return Text(
+          'Tap to save',
+          style: TextStyle(
+            fontSize: 11,
+            color: isOutgoing ? colorScheme.onPrimary.withOpacity(0.6) : colorScheme.primary,
+          ),
+        );
+      }
+      return const SizedBox.shrink();
+    }
+
+    String statusText;
+    Color statusColor;
+
+    switch (transfer.state) {
+      case CyxChatFileState.sending:
+        statusText = 'Sending... ${(transfer.progress * 100).toInt()}%';
+        statusColor = Colors.cyan;
+        break;
+      case CyxChatFileState.receiving:
+        statusText = 'Receiving... ${(transfer.progress * 100).toInt()}%';
+        statusColor = Colors.cyan;
+        break;
+      case CyxChatFileState.paused:
+        statusText = 'Paused - ${(transfer.progress * 100).toInt()}%';
+        statusColor = Colors.orange;
+        break;
+      case CyxChatFileState.failed:
+        statusText = 'Failed';
+        statusColor = Colors.red;
+        break;
+      case CyxChatFileState.cancelled:
+        statusText = 'Cancelled';
+        statusColor = Colors.grey;
+        break;
+      case CyxChatFileState.completed:
+        statusText = hasFileData ? 'Tap to save' : 'Completed';
+        statusColor = hasFileData
+            ? (isOutgoing ? colorScheme.onPrimary.withOpacity(0.6) : colorScheme.primary)
+            : Colors.green;
+        break;
+      default:
+        statusText = transfer.stateName;
+        statusColor = isOutgoing
+            ? colorScheme.onPrimary.withOpacity(0.6)
+            : colorScheme.onSurface.withOpacity(0.6);
+    }
+
+    return Text(
+      statusText,
+      style: TextStyle(fontSize: 11, color: statusColor),
+    );
+  }
+
+  Widget _buildProgressSection({
+    required BuildContext context,
+    required WidgetRef ref,
+    required FileTransferInfo transfer,
+    required String fileId,
+    required bool isPaused,
+  }) {
+    return Column(
+      children: [
+        // Progress bar
+        ClipRRect(
+          borderRadius: BorderRadius.circular(4),
+          child: LinearProgressIndicator(
+            value: transfer.progress,
+            minHeight: 4,
+            backgroundColor: isOutgoing
+                ? colorScheme.onPrimary.withOpacity(0.2)
+                : colorScheme.surfaceContainerHighest,
+            valueColor: AlwaysStoppedAnimation(
+              isPaused ? Colors.orange : Colors.cyan,
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+
+        // Control buttons row
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Pause/Resume button
+            _TransferControlButton(
+              icon: isPaused ? Icons.play_arrow : Icons.pause,
+              tooltip: isPaused ? 'Resume' : 'Pause',
+              onPressed: () async {
+                if (isPaused) {
+                  await ref.read(fileNotifierProvider).resumeTransfer(fileId);
+                } else {
+                  await ref.read(fileNotifierProvider).pauseTransfer(fileId);
+                }
+              },
+              isOutgoing: isOutgoing,
+              colorScheme: colorScheme,
+            ),
+            const SizedBox(width: 8),
+
+            // Cancel button
+            _TransferControlButton(
+              icon: Icons.close,
+              tooltip: 'Cancel',
+              onPressed: () => _showCancelConfirmation(context, ref, fileId, transfer.filename),
+              isOutgoing: isOutgoing,
+              colorScheme: colorScheme,
+              isDestructive: true,
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Future<void> _showCancelConfirmation(
+    BuildContext context,
+    WidgetRef ref,
+    String fileId,
+    String filename,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Cancel Transfer'),
+        content: Text('Cancel transfer of "$filename"?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('No'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Yes, Cancel'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && context.mounted) {
+      await ref.read(fileActionsProvider).cancelTransfer(fileId);
+    }
   }
 
   Future<void> _saveFile(BuildContext context, WidgetRef ref, String fileId, String filename) async {
@@ -567,6 +763,48 @@ class _FileMessageContent extends ConsumerWidget {
         );
       }
     }
+  }
+}
+
+/// Small icon button for transfer controls
+class _TransferControlButton extends StatelessWidget {
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onPressed;
+  final bool isOutgoing;
+  final ColorScheme colorScheme;
+  final bool isDestructive;
+
+  const _TransferControlButton({
+    required this.icon,
+    required this.tooltip,
+    required this.onPressed,
+    required this.isOutgoing,
+    required this.colorScheme,
+    this.isDestructive = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final color = isDestructive
+        ? Colors.red
+        : (isOutgoing ? colorScheme.onPrimary : colorScheme.primary);
+
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(16),
+        child: Container(
+          padding: const EdgeInsets.all(6),
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: color.withOpacity(0.15),
+          ),
+          child: Icon(icon, size: 18, color: color),
+        ),
+      ),
+    );
   }
 }
 
