@@ -1255,7 +1255,12 @@ cyxchat_error_t cyxchat_send_raw(
         return CYXCHAT_ERR_NULL;
     }
 
+    CYXWIZ_DEBUG("cyxchat_send_raw: sending %zu bytes (type=0x%02x)", data_len, data[0]);
     cyxwiz_error_t err = cyxwiz_onion_send_to(ctx->onion, to, data, data_len);
+    if (err != CYXWIZ_OK) {
+        CYXWIZ_ERROR("cyxchat_send_raw: cyxwiz_onion_send_to failed with %d (%s), payload=%zu",
+                     err, cyxwiz_strerror(err), data_len);
+    }
     return (err == CYXWIZ_OK) ? CYXCHAT_OK : CYXCHAT_ERR_NETWORK;
 }
 

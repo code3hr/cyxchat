@@ -1,3 +1,5 @@
+import 'dart:convert';
+import 'dart:io' as io;
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -424,7 +426,7 @@ class _MessageBubbleState extends ConsumerState<_MessageBubble> {
 }
 
 /// File message content widget
-class _FileMessageContent extends StatelessWidget {
+class _FileMessageContent extends ConsumerWidget {
   final Message message;
   final bool isOutgoing;
   final ColorScheme colorScheme;
@@ -436,48 +438,135 @@ class _FileMessageContent extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
-    // Parse file info from content (format: "filename|size|fileId" or just filename)
-    final parts = message.content.split('|');
-    final filename = parts.isNotEmpty ? parts[0] : 'Unknown file';
-    final sizeStr = parts.length > 1 ? parts[1] : '';
+  Widget build(BuildContext context, WidgetRef ref) {
+    // Parse file info - supports both formats:
+    // 1. Pipe-separated (sent files): "filename|size|fileId"
+    // 2. JSON (received files): {"fileId":"xxx","filename":"xxx","size":"xxx"}
+    String filename = 'Unknown file';
+    String sizeStr = '';
+    String? fileId;
 
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(
-          Icons.insert_drive_file,
-          size: 32,
-          color: isOutgoing ? colorScheme.onPrimary : colorScheme.onSurface,
-        ),
-        const SizedBox(width: 8),
-        Flexible(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                filename,
-                style: TextStyle(
-                  color: isOutgoing ? colorScheme.onPrimary : colorScheme.onSurface,
-                  fontWeight: FontWeight.w500,
-                ),
-                overflow: TextOverflow.ellipsis,
-              ),
-              if (sizeStr.isNotEmpty)
-                Text(
-                  sizeStr,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: isOutgoing
-                        ? colorScheme.onPrimary.withOpacity(0.7)
-                        : colorScheme.onSurface.withOpacity(0.7),
-                  ),
-                ),
-            ],
+    final content = message.content;
+    if (content.startsWith('{')) {
+      // JSON format (received files)
+      try {
+        final json = jsonDecode(content) as Map<String, dynamic>;
+        filename = json['filename'] as String? ?? 'Unknown file';
+        sizeStr = json['size'] as String? ?? '';
+        fileId = json['fileId'] as String?;
+      } catch (e) {
+        debugPrint('Failed to parse file message JSON: $e');
+      }
+    } else {
+      // Pipe-separated format (sent files)
+      final parts = content.split('|');
+      filename = parts.isNotEmpty ? parts[0] : 'Unknown file';
+      sizeStr = parts.length > 1 ? parts[1] : '';
+      fileId = parts.length > 2 ? parts[2] : null;
+    }
+
+    // Check if file data is available for download
+    final fileProvider = ref.watch(fileNotifierProvider);
+    final hasFileData = fileId != null && fileProvider.getReceivedFile(fileId) != null;
+
+    return InkWell(
+      onTap: hasFileData ? () => _saveFile(context, ref, fileId!, filename) : null,
+      borderRadius: BorderRadius.circular(8),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.insert_drive_file,
+            size: 32,
+            color: isOutgoing ? colorScheme.onPrimary : colorScheme.onSurface,
           ),
-        ),
-      ],
+          const SizedBox(width: 8),
+          Flexible(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  filename,
+                  style: TextStyle(
+                    color: isOutgoing ? colorScheme.onPrimary : colorScheme.onSurface,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+                if (sizeStr.isNotEmpty)
+                  Text(
+                    sizeStr,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: isOutgoing
+                          ? colorScheme.onPrimary.withOpacity(0.7)
+                          : colorScheme.onSurface.withOpacity(0.7),
+                    ),
+                  ),
+                if (hasFileData)
+                  Text(
+                    'Tap to save',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: isOutgoing
+                          ? colorScheme.onPrimary.withOpacity(0.6)
+                          : colorScheme.primary,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          if (hasFileData) ...[
+            const SizedBox(width: 8),
+            Icon(
+              Icons.download,
+              size: 20,
+              color: isOutgoing ? colorScheme.onPrimary : colorScheme.primary,
+            ),
+          ],
+        ],
+      ),
     );
+  }
+
+  Future<void> _saveFile(BuildContext context, WidgetRef ref, String fileId, String filename) async {
+    try {
+      final fileData = ref.read(fileNotifierProvider).getReceivedFile(fileId);
+      if (fileData == null) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('File data not available')),
+          );
+        }
+        return;
+      }
+
+      // Use file_picker to get save location
+      final outputPath = await FilePicker.platform.saveFile(
+        dialogTitle: 'Save file',
+        fileName: filename,
+      );
+
+      if (outputPath == null) return; // User cancelled
+
+      // Write file to disk
+      final file = await io.File(outputPath).writeAsBytes(fileData);
+
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Saved to ${file.path}'),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to save: $e')),
+        );
+      }
+    }
   }
 }
 

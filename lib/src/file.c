@@ -6,6 +6,7 @@
 #include <cyxchat/chat.h>
 #include <cyxwiz/crypto.h>
 #include <cyxwiz/memory.h>
+#include <cyxwiz/log.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -352,10 +353,16 @@ static void send_next_chunk(cyxchat_file_ctx_t *ctx, file_transfer_slot_t *slot)
     memcpy(chunk_buf + chunk_wire_len, slot->data + offset, chunk_len);
     chunk_wire_len += chunk_len;
 
-    cyxchat_send_raw(ctx->chat_ctx, &slot->transfer.peer, chunk_buf, chunk_wire_len);
+    cyxchat_error_t err = cyxchat_send_raw(ctx->chat_ctx, &slot->transfer.peer, chunk_buf, chunk_wire_len);
     slot->transfer.chunks_done++;
     slot->transfer.updated_at = cyxchat_timestamp_ms();
     slot->last_chunk_sent_ms = slot->transfer.updated_at;
+    if (err != CYXCHAT_OK) {
+        CYXWIZ_ERROR("send_next_chunk: FAILED to send chunk %u/%u, error=%d",
+                     slot->transfer.chunks_done, slot->transfer.meta.chunk_count, err);
+    } else {
+        CYXWIZ_INFO("send_next_chunk: sent chunk %u/%u", slot->transfer.chunks_done, slot->transfer.meta.chunk_count);
+    }
 }
 
 int cyxchat_file_poll(cyxchat_file_ctx_t *ctx, uint64_t now_ms) {
@@ -372,7 +379,7 @@ int cyxchat_file_poll(cyxchat_file_ctx_t *ctx, uint64_t now_ms) {
         if (slot->transfer.is_outgoing && slot->transfer.state == CYXCHAT_FILE_SENDING) {
             /* Send one chunk per poll if enough time has passed */
             if (slot->transfer.chunks_done < slot->transfer.meta.chunk_count) {
-                uint64_t delay_ms = (slot->transfer.chunks_done == 0) ? 0 : 500;  /* 500ms between chunks */
+                uint64_t delay_ms = (slot->transfer.chunks_done == 0) ? 0 : 1000;  /* 1s between chunks to avoid rate limiting */
                 if (now_ms - slot->last_chunk_sent_ms >= delay_ms) {
                     send_next_chunk(ctx, slot);
                     events++;
@@ -392,14 +399,19 @@ int cyxchat_file_poll(cyxchat_file_ctx_t *ctx, uint64_t now_ms) {
         /* Check for stalled transfers (no update in 60 seconds for file transfers) */
         if (slot->transfer.state == CYXCHAT_FILE_SENDING ||
             slot->transfer.state == CYXCHAT_FILE_RECEIVING) {
-            if (now_ms - slot->transfer.updated_at > 60000) {
-                slot->transfer.state = CYXCHAT_FILE_FAILED;
+            /* Guard against clock skew: if updated_at is in the future, skip timeout check */
+            if (now_ms > slot->transfer.updated_at) {
+                uint64_t elapsed = now_ms - slot->transfer.updated_at;
+                if (elapsed > 60000) {
+                    CYXWIZ_WARN("file_poll: Transfer timeout after %llu ms", (unsigned long long)elapsed);
+                    slot->transfer.state = CYXCHAT_FILE_FAILED;
 
-                if (ctx->on_error) {
-                    ctx->on_error(ctx, &slot->transfer.meta.file_id,
-                                 CYXCHAT_ERR_TIMEOUT, ctx->on_error_data);
+                    if (ctx->on_error) {
+                        ctx->on_error(ctx, &slot->transfer.meta.file_id,
+                                     CYXCHAT_ERR_TIMEOUT, ctx->on_error_data);
+                    }
+                    events++;
                 }
-                events++;
             }
         }
     }
@@ -420,7 +432,16 @@ cyxchat_error_t cyxchat_file_send(
     size_t data_len,
     cyxchat_file_id_t *file_id_out
 ) {
+    CYXWIZ_INFO("cyxchat_file_send: filename=%s, data_len=%zu", filename, data_len);
+
     if (!ctx || !to || !filename || !data || data_len == 0) {
+        CYXWIZ_ERROR("cyxchat_file_send: invalid parameters (ctx=%p, to=%p, filename=%p, data=%p, data_len=%zu)",
+                     (void*)ctx, (void*)to, (void*)filename, (void*)data, data_len);
+        return CYXCHAT_ERR_NULL;
+    }
+
+    if (!ctx->chat_ctx) {
+        CYXWIZ_ERROR("cyxchat_file_send: chat_ctx is NULL!");
         return CYXCHAT_ERR_NULL;
     }
 
@@ -507,11 +528,14 @@ cyxchat_error_t cyxchat_file_send(
     wire_len += 32;
 
     /* Send metadata via chat layer */
+    CYXWIZ_INFO("cyxchat_file_send: sending FILE_META (%zu bytes)", wire_len);
     cyxchat_error_t send_err = cyxchat_send_raw(ctx->chat_ctx, to, wire_buf, wire_len);
     if (send_err != CYXCHAT_OK) {
+        CYXWIZ_ERROR("cyxchat_file_send: failed to send FILE_META, error %d", send_err);
         free_transfer(ctx, slot);
         return send_err;
     }
+    CYXWIZ_INFO("cyxchat_file_send: FILE_META sent successfully");
 
     slot->transfer.state = CYXCHAT_FILE_SENDING;
 
@@ -543,44 +567,10 @@ cyxchat_error_t cyxchat_file_send(
             slot->transfer.chunks_done = 1;
         }
     } else {
-        /* Multi-chunk: send all chunks */
-        for (uint16_t i = 0; i < chunk_count; i++) {
-            uint8_t chunk_buf[250];
-            size_t chunk_wire_len = 0;
-
-            chunk_buf[chunk_wire_len++] = CYXCHAT_MSG_FILE_CHUNK;
-            memcpy(chunk_buf + chunk_wire_len, slot->transfer.meta.file_id.bytes, CYXCHAT_FILE_ID_SIZE);
-            chunk_wire_len += CYXCHAT_FILE_ID_SIZE;
-
-            /* Chunk index (2 bytes little-endian) */
-            chunk_buf[chunk_wire_len++] = (uint8_t)(i & 0xFF);
-            chunk_buf[chunk_wire_len++] = (uint8_t)((i >> 8) & 0xFF);
-
-            /* Calculate chunk data offset and length */
-            size_t offset = (size_t)i * CYXCHAT_CHUNK_SIZE;
-            size_t remaining = data_len - offset;
-            uint16_t chunk_len = (remaining > CYXCHAT_CHUNK_SIZE) ? CYXCHAT_CHUNK_SIZE : (uint16_t)remaining;
-
-            /* Chunk length (2 bytes) */
-            chunk_buf[chunk_wire_len++] = (uint8_t)(chunk_len & 0xFF);
-            chunk_buf[chunk_wire_len++] = (uint8_t)((chunk_len >> 8) & 0xFF);
-
-            /* Chunk data - limit to fit in wire buffer */
-            if (chunk_wire_len + chunk_len > sizeof(chunk_buf)) {
-                chunk_len = (uint16_t)(sizeof(chunk_buf) - chunk_wire_len);
-            }
-            memcpy(chunk_buf + chunk_wire_len, data + offset, chunk_len);
-            chunk_wire_len += chunk_len;
-
-            cyxchat_send_raw(ctx->chat_ctx, to, chunk_buf, chunk_wire_len);
-            slot->transfer.chunks_done = i + 1;
-            slot->transfer.updated_at = cyxchat_timestamp_ms();
-
-            /* Small delay between chunks to avoid rate limiting */
-            if (i < chunk_count - 1) {
-                CHUNK_DELAY_MS(100);  /* 100ms delay between chunks */
-            }
-        }
+        /* Multi-chunk: let cyxchat_file_poll() send chunks with proper delays */
+        slot->transfer.chunks_done = 0;
+        slot->last_chunk_sent_ms = 0;  /* Poll will send first chunk immediately */
+        CYXWIZ_INFO("cyxchat_file_send: multi-chunk transfer (%u chunks), polling will send", chunk_count);
     }
 
     if (file_id_out) {
@@ -1005,12 +995,17 @@ static cyxchat_error_t handle_file_meta(
     const uint8_t *data,
     size_t data_len
 ) {
+    CYXWIZ_INFO("handle_file_meta: received %zu bytes", data_len);
+
     /* Parse wire format:
      * file_id(8) + filename_len(1) + filename(N) + mime_len(1) + mime(N) +
      * size(4) + chunk_count(2) + file_hash(32) */
     size_t offset = 0;
 
-    if (data_len < 8 + 1) return CYXCHAT_ERR_INVALID;
+    if (data_len < 8 + 1) {
+        CYXWIZ_ERROR("handle_file_meta: data too short (%zu bytes)", data_len);
+        return CYXCHAT_ERR_INVALID;
+    }
 
     /* File ID */
     cyxchat_file_id_t file_id;
@@ -1085,9 +1080,14 @@ static cyxchat_error_t handle_file_meta(
         slot->transfer.state = CYXCHAT_FILE_RECEIVING;
     }
 
+    CYXWIZ_INFO("handle_file_meta: file '%s', size=%u, chunks=%u", filename, size, chunk_count);
+
     /* Notify callback */
     if (ctx->on_request) {
+        CYXWIZ_INFO("handle_file_meta: calling on_request callback");
         ctx->on_request(ctx, from, &slot->transfer.meta, ctx->on_request_data);
+    } else {
+        CYXWIZ_WARN("handle_file_meta: no on_request callback registered");
     }
 
     return CYXCHAT_OK;
@@ -1099,8 +1099,13 @@ static cyxchat_error_t handle_file_chunk(
     const uint8_t *data,
     size_t data_len
 ) {
+    CYXWIZ_INFO("handle_file_chunk: received %zu bytes", data_len);
+
     /* Parse wire format: file_id(8) + chunk_idx(2) + chunk_len(2) + data(N) */
-    if (data_len < 8 + 2 + 2) return CYXCHAT_ERR_INVALID;
+    if (data_len < 8 + 2 + 2) {
+        CYXWIZ_ERROR("handle_file_chunk: data too short (%zu bytes)", data_len);
+        return CYXCHAT_ERR_INVALID;
+    }
 
     size_t offset = 0;
 

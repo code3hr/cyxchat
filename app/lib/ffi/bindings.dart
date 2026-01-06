@@ -1356,7 +1356,8 @@ class CyxChatBindings {
   ) {
     if (onFileComplete == null) return;
 
-    final fileIdHex = fileIdToHex(fileId);
+    // Copy file ID bytes immediately (pointer may be stale by async callback time)
+    final fileIdHex = _bytesToHex(fileId, 8);
 
     // Copy data to Dart list
     final dataList = <int>[];
@@ -1377,7 +1378,8 @@ class CyxChatBindings {
   ) {
     if (onFileProgress == null) return;
 
-    final fileIdHex = fileIdToHex(fileId);
+    // Copy file ID bytes immediately (pointer may be stale by async callback time)
+    final fileIdHex = _bytesToHex(fileId, 8);
     onFileProgress!(fileIdHex, chunksDone, chunksTotal);
   }
 
@@ -1390,7 +1392,8 @@ class CyxChatBindings {
   ) {
     if (onFileError == null) return;
 
-    final fileIdHex = fileIdToHex(fileId);
+    // Copy file ID bytes immediately (pointer may be stale by async callback time)
+    final fileIdHex = _bytesToHex(fileId, 8);
     onFileError!(fileIdHex, error);
   }
 

@@ -23,6 +23,7 @@ CyxChat is a decentralized, privacy-first messaging application built on the Cyx
 | FFI Bindings | Complete | Full Dart-to-C bridge |
 | Bootstrap Server | Complete | Docker-ready, handles registration + relay |
 | Flutter UI | Complete | Auto-connect, real-time message updates |
+| File Transfer | Complete | Chunked transfer via onion routing, max 64KB |
 
 ## Message Flow
 
@@ -252,10 +253,44 @@ CYXCHAT_ERR_BLOCKED     = -10  // User is blocked
 
 | Range | Category | Examples |
 |-------|----------|----------|
-| 0x10-0x1F | Direct Messages | TEXT, ACK, READ, TYPING |
+| 0x10-0x1F | Direct Messages | TEXT, ACK, READ, TYPING, FILE_META, FILE_CHUNK |
 | 0x20-0x2F | Group Messages | GROUP_TEXT, INVITE, JOIN, LEAVE |
 | 0x30-0x3F | Presence | PRESENCE, PRESENCE_REQ |
+| 0x40-0x4F | File Transfer v2 | FILE_OFFER, FILE_ACCEPT, FILE_REJECT, FILE_COMPLETE |
 | 0xD0-0xD9 | DNS (Internal) | DNS_REGISTER, DNS_LOOKUP, DNS_RESPONSE |
+
+## File Transfer
+
+Files are transferred via chunked protocol over onion routing:
+
+### Flow
+```
+SENDING:
+UI (attach button) → FilePicker → FileProvider.sendFile()
+    → FFI bindings → cyxchat_file_send() → FILE_META + FILE_CHUNKs → Network
+
+RECEIVING:
+Network → FILE_META triggers onFileRequest callback (auto-accepted <64KB)
+    → FILE_CHUNKs → onFileProgress callback
+    → Final chunk → onFileComplete callback with data
+    → FileProvider._receivedFiles[fileId] stores data in memory
+    → ChatService.handleReceivedFile() creates message in DB
+```
+
+### Constraints
+- Max file size: 64KB (fits onion routing payload limits)
+- Chunk size: 80 bytes (fits 1-hop onion with crypto overhead)
+- Files stored in memory until saved to disk
+
+### File Message Format
+- **Sent files** (pipe-separated): `filename|size|fileId`
+- **Received files** (JSON): `{"fileId":"...","filename":"...","size":"..."}`
+
+### Download/Save
+Received files show "Tap to save" with download icon. Tapping opens a save dialog via `FilePicker.platform.saveFile()`.
+
+### FFI Callback Note
+File callbacks use `NativeCallable.listener()` which creates async callbacks. The C pointers may become stale before Dart processes them. Solution: copy data immediately in the callback handler using `_bytesToHex(fileId, 8)` before any async operations.
 
 ## FFI Patterns
 
@@ -353,6 +388,8 @@ To test P2P messaging locally:
 | `messagesProvider(id)` | Messages for a conversation |
 | `messageStreamProvider` | Stream of incoming messages |
 | `chatActionsProvider` | Send message, mark read, etc. |
+| `fileNotifierProvider` | File transfer state + received file data |
+| `fileActionsProvider` | Send file, accept/reject transfers |
 
 ## Startup Flow
 

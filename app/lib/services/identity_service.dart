@@ -4,11 +4,17 @@ import 'package:uuid/uuid.dart';
 import '../models/identity.dart';
 import 'database_service.dart';
 
+/// Instance ID for running multiple test instances
+const String _instanceId = String.fromEnvironment('INSTANCE_ID', defaultValue: '');
+
 /// Service for managing user identity
 class IdentityService {
   static final IdentityService instance = IdentityService._();
 
   final _secureStorage = const FlutterSecureStorage();
+
+  /// Get instance-specific key for secure storage
+  String _storageKey(String key) => _instanceId.isEmpty ? key : '${key}_$_instanceId';
   Identity? _currentIdentity;
 
   IdentityService._();
@@ -55,7 +61,7 @@ class IdentityService {
 
     // Store private key securely
     await _secureStorage.write(
-      key: 'private_key',
+      key: _storageKey('private_key'),
       value: String.fromCharCodes(privateKey),
     );
 
@@ -94,14 +100,14 @@ class IdentityService {
 
   /// Get private key (for signing/encryption)
   Future<Uint8List?> getPrivateKey() async {
-    final keyStr = await _secureStorage.read(key: 'private_key');
+    final keyStr = await _secureStorage.read(key: _storageKey('private_key'));
     if (keyStr == null) return null;
     return Uint8List.fromList(keyStr.codeUnits);
   }
 
   /// Delete identity (logout/reset)
   Future<void> deleteIdentity() async {
-    await _secureStorage.delete(key: 'private_key');
+    await _secureStorage.delete(key: _storageKey('private_key'));
     await DatabaseService.instance.clearAllData();
     _currentIdentity = null;
   }
