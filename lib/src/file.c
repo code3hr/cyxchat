@@ -367,6 +367,13 @@ static void send_next_chunk(cyxchat_file_ctx_t *ctx, file_transfer_slot_t *slot)
                      slot->transfer.chunks_done, slot->transfer.meta.chunk_count, err);
     } else {
         CYXWIZ_INFO("send_next_chunk: sent chunk %u/%u", slot->transfer.chunks_done, slot->transfer.meta.chunk_count);
+        /* Notify progress for outgoing transfers */
+        if (ctx->on_progress) {
+            ctx->on_progress(ctx, &slot->transfer.meta.file_id,
+                            slot->transfer.chunks_done,
+                            slot->transfer.meta.chunk_count,
+                            ctx->on_progress_data);
+        }
     }
 }
 
