@@ -2419,7 +2419,7 @@ class CyxChatFileState {
 class CyxChatFileConst {
   static const maxFilename = 128;
   static const chunkSize = 1024;
-  static const maxFileSize = 64 * 1024; // 64KB limit
+  static const maxFileSize = 1024 * 1024; // 1MB limit
 
   // DHT-based file transfer constants
   static const dhtChunkSize = 120;      // 160 - 40 bytes crypto overhead

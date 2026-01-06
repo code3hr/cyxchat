@@ -44,8 +44,8 @@ extern "C" {
 /* File chunk size - must fit within onion routing payload limit
  * 1-hop onion allows ~100 bytes effective payload due to crypto overhead
  * Wire format: 1 byte type + 8 bytes file_id + 2 bytes idx + 2 bytes len + data = 13 bytes overhead
- * Testing shows 93 bytes works, 113 fails - use 80 bytes data for safety */
-#define CYXCHAT_CHUNK_SIZE          80
+ * Testing shows 93 bytes works, 113 fails - use 90 bytes (tested safe limit) */
+#define CYXCHAT_CHUNK_SIZE          90
 #define CYXCHAT_MAX_GROUP_MEMBERS   50      /* Max group size */
 #define CYXCHAT_MAX_GROUP_ADMINS    5       /* Max admins per group */
 #define CYXCHAT_MAX_CONTACTS        256     /* Max contacts */

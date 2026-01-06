@@ -158,7 +158,7 @@ class FileProvider extends ChangeNotifier {
         startedAt: DateTime.now(),
       );
 
-      // Auto-accept small files (under 64KB)
+      // Auto-accept small files (under 1MB)
       if (size <= CyxChatFileConst.maxFileSize) {
         debugPrint('FileProvider: Auto-accepting file $filename');
         _bindings.fileAccept(fileId);

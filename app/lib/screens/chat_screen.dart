@@ -878,7 +878,7 @@ class _MessageInputState extends ConsumerState<_MessageInput> {
 
       final file = result.files.first;
       final fileSize = file.size;
-      final maxSize = 64 * 1024; // 64KB limit as per COMPARISON.md
+      final maxSize = 1024 * 1024; // 1MB limit
 
       if (fileSize > maxSize) {
         if (context.mounted) {
@@ -886,7 +886,7 @@ class _MessageInputState extends ConsumerState<_MessageInput> {
             SnackBar(
               content: Text(
                 'File too large (${(fileSize / 1024).toStringAsFixed(1)} KB). '
-                'Maximum size is 64 KB.',
+                'Maximum size is 1 MB.',
               ),
               duration: const Duration(seconds: 3),
             ),

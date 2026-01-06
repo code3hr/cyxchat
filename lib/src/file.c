@@ -391,7 +391,7 @@ int cyxchat_file_poll(cyxchat_file_ctx_t *ctx, uint64_t now_ms) {
         if (slot->transfer.is_outgoing && slot->transfer.state == CYXCHAT_FILE_SENDING) {
             /* Send one chunk per poll if enough time has passed */
             if (slot->transfer.chunks_done < slot->transfer.meta.chunk_count) {
-                uint64_t delay_ms = (slot->transfer.chunks_done == 0) ? 0 : 1000;  /* 1s between chunks to avoid rate limiting */
+                uint64_t delay_ms = (slot->transfer.chunks_done == 0) ? 0 : 250;  /* 250ms between chunks (4 chunks/sec, within rate limit) */
                 if (now_ms - slot->last_chunk_sent_ms >= delay_ms) {
                     send_next_chunk(ctx, slot);
                     events++;
