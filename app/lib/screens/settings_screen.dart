@@ -133,6 +133,8 @@ class SettingsScreen extends ConsumerWidget {
                     ),
                     // Fast file transfer toggle
                     const _FastFileTransferTile(),
+                    // Video calls toggle
+                    const _VideoCallsTile(),
                     _SettingsSwitch(
                       icon: Icons.lock_outline_rounded,
                       title: 'Screen Lock',
@@ -1651,6 +1653,126 @@ class _FastFileTransferTile extends ConsumerWidget {
                         fontSize: 12,
                         color: AppColors.textDarkSecondary.withOpacity(0.8),
                       ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// Video calls settings widget with privacy warning
+class _VideoCallsTile extends ConsumerWidget {
+  const _VideoCallsTile();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final settings = ref.watch(settingsProvider);
+    final isEnabled = settings.videoCallsEnabled;
+
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: isEnabled
+                      ? AppColors.accentOrange.withOpacity(0.15)
+                      : AppColors.bgDarkTertiary,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  Icons.videocam_rounded,
+                  size: 20,
+                  color: isEnabled ? AppColors.accentOrange : AppColors.textDark,
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Video Calls',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w500,
+                        color: AppColors.textDark,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Enable video call functionality',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: AppColors.textDarkSecondary.withOpacity(0.7),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Switch(
+                value: isEnabled,
+                onChanged: (value) {
+                  ref.read(settingsProvider.notifier).setVideoCallsEnabled(value);
+                },
+                activeColor: AppColors.accentOrange,
+                activeTrackColor: AppColors.accentOrange.withOpacity(0.3),
+                inactiveThumbColor: AppColors.textDarkSecondary,
+                inactiveTrackColor: AppColors.bgDarkTertiary,
+              ),
+            ],
+          ),
+        ),
+        // Warning when enabled
+        if (isEnabled)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.accentOrange.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: AppColors.accentOrange.withOpacity(0.3),
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.warning_amber_rounded,
+                        size: 16,
+                        color: AppColors.accentOrange.withOpacity(0.9),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'Direct P2P Connection Required',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.accentOrange.withOpacity(0.9),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Video calls are end-to-end encrypted but the peer can see your IP address. This is necessary for real-time communication.',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: AppColors.textDarkSecondary.withOpacity(0.8),
                     ),
                   ),
                 ],

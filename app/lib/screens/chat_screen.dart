@@ -7,8 +7,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:file_picker/file_picker.dart';
 import '../providers/conversation_provider.dart';
 import '../providers/file_provider.dart';
+import '../providers/voice_provider.dart';
+import '../providers/call_provider.dart';
+import '../providers/settings_provider.dart';
 import '../ffi/bindings.dart' show CyxChatFileState, CyxChatFileConst;
 import '../models/models.dart';
+import 'active_call_screen.dart';
 
 class ChatScreen extends ConsumerStatefulWidget {
   final String conversationId;
@@ -70,6 +74,18 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           error: (_, __) => const Text('Error'),
         ),
         actions: [
+          // Voice call button
+          IconButton(
+            icon: const Icon(Icons.phone),
+            tooltip: 'Voice call',
+            onPressed: () => _startCall(context, ref, video: false),
+          ),
+          // Video call button
+          IconButton(
+            icon: const Icon(Icons.videocam),
+            tooltip: 'Video call',
+            onPressed: () => _startCall(context, ref, video: true),
+          ),
           IconButton(
             icon: const Icon(Icons.more_vert),
             onPressed: () {
@@ -147,6 +163,127 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           content: text,
           replyToId: replyTo,
         );
+  }
+
+  Future<void> _startCall(BuildContext context, WidgetRef ref, {required bool video}) async {
+    // Check if video calls are enabled in settings
+    final settings = ref.read(settingsNotifierProvider);
+    if (video && !settings.videoCallsEnabled) {
+      _showVideoCallDisabledDialog(context);
+      return;
+    }
+
+    // Get peer info from conversation
+    final conversationAsync = ref.read(conversationProvider(widget.conversationId));
+    final conversation = conversationAsync.value;
+    if (conversation == null || conversation.peerId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Cannot call: peer not found')),
+      );
+      return;
+    }
+
+    // Show privacy warning for first call
+    final hasSeenWarning = settings.hasSeenCallPrivacyWarning;
+    if (!hasSeenWarning) {
+      final proceed = await _showCallPrivacyWarning(context, video);
+      if (!proceed) return;
+      ref.read(settingsNotifierProvider.notifier).setHasSeenCallPrivacyWarning(true);
+    }
+
+    // Start the call
+    final success = await ref.read(callActionsProvider).startCall(
+      peerId: conversation.peerId!,
+      peerName: conversation.title,
+      video: video,
+    );
+
+    if (success && context.mounted) {
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (context) => ActiveCallScreen(
+            peerId: conversation.peerId!,
+            peerName: conversation.title,
+            isVideo: video,
+          ),
+        ),
+      );
+    }
+  }
+
+  void _showVideoCallDisabledDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Video Calls Disabled'),
+        content: const Text(
+          'Video calls are disabled in settings. Enable them in Settings > Privacy > Video Calls to make video calls.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<bool> _showCallPrivacyWarning(BuildContext context, bool video) async {
+    return await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Row(
+          children: [
+            const Icon(Icons.warning_amber, color: Colors.amber),
+            const SizedBox(width: 8),
+            Text(video ? 'Video Call Privacy' : 'Voice Call Privacy'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Calls use direct P2P connections for real-time communication.',
+              style: TextStyle(fontWeight: FontWeight.w500),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.amber.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.amber.withOpacity(0.3)),
+              ),
+              child: const Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('The peer you call can see your IP address.'),
+                  SizedBox(height: 4),
+                  Text('Calls are still end-to-end encrypted.'),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              'This is necessary for low-latency real-time communication.',
+              style: TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('I Understand, Continue'),
+          ),
+        ],
+      ),
+    ) ?? false;
   }
 }
 
@@ -255,6 +392,12 @@ class _MessageBubbleState extends ConsumerState<_MessageBubble> {
                               ? colorScheme.onPrimary.withOpacity(0.7)
                               : colorScheme.onSurface.withOpacity(0.7),
                         ),
+                      )
+                    else if (widget.message.type == MessageType.audio)
+                      _VoiceMessageContent(
+                        message: widget.message,
+                        isOutgoing: isOutgoing,
+                        colorScheme: colorScheme,
                       )
                     else if (widget.message.type == MessageType.file)
                       _FileMessageContent(
@@ -808,6 +951,162 @@ class _TransferControlButton extends StatelessWidget {
   }
 }
 
+/// Voice message content widget with playback controls
+class _VoiceMessageContent extends ConsumerWidget {
+  final Message message;
+  final bool isOutgoing;
+  final ColorScheme colorScheme;
+
+  const _VoiceMessageContent({
+    required this.message,
+    required this.isOutgoing,
+    required this.colorScheme,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    // Parse voice message info from content JSON
+    // Format: {"fileId":"xxx","duration":30,"filename":"voice.m4a"}
+    String? fileId;
+    int durationSecs = 0;
+
+    try {
+      final json = jsonDecode(message.content) as Map<String, dynamic>;
+      fileId = json['fileId'] as String?;
+      durationSecs = json['duration'] as int? ?? 0;
+    } catch (e) {
+      debugPrint('Failed to parse voice message: $e');
+    }
+
+    final player = ref.watch(voicePlayerProvider);
+    final fileProvider = ref.watch(fileNotifierProvider);
+    final isThisPlaying = player.currentFileId == fileId;
+    final isPlaying = isThisPlaying && player.isPlaying;
+    final isPaused = isThisPlaying && player.state == VoicePlaybackState.paused;
+    final hasFileData = fileId != null && fileProvider.getReceivedFile(fileId) != null;
+
+    // Format duration
+    final duration = Duration(seconds: durationSecs);
+    final durationStr = VoiceRecorderProvider.formatDuration(duration);
+
+    // Progress for playback
+    final progress = isThisPlaying ? player.progress : 0.0;
+    final currentPosition = isThisPlaying
+        ? VoiceRecorderProvider.formatDuration(player.position)
+        : durationStr;
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // Play/pause button
+        GestureDetector(
+          onTap: hasFileData ? () => _togglePlayback(ref, fileId!, fileProvider) : null,
+          child: Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: isOutgoing
+                  ? colorScheme.onPrimary.withOpacity(0.2)
+                  : colorScheme.primary.withOpacity(0.1),
+            ),
+            child: Icon(
+              isPlaying
+                  ? Icons.pause
+                  : (isPaused ? Icons.play_arrow : Icons.play_arrow),
+              color: isOutgoing ? colorScheme.onPrimary : colorScheme.primary,
+              size: 24,
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+
+        // Waveform / progress bar
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Simple progress bar (waveform could be added later)
+              ClipRRect(
+                borderRadius: BorderRadius.circular(2),
+                child: LinearProgressIndicator(
+                  value: progress,
+                  minHeight: 4,
+                  backgroundColor: isOutgoing
+                      ? colorScheme.onPrimary.withOpacity(0.2)
+                      : colorScheme.surfaceContainerHighest,
+                  valueColor: AlwaysStoppedAnimation(
+                    isOutgoing ? colorScheme.onPrimary : colorScheme.primary,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 4),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    currentPosition,
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: isOutgoing
+                          ? colorScheme.onPrimary.withOpacity(0.7)
+                          : colorScheme.onSurface.withOpacity(0.6),
+                    ),
+                  ),
+                  // Playback speed button (only while playing)
+                  if (isThisPlaying)
+                    GestureDetector(
+                      onTap: () => ref.read(voicePlayerProvider).cycleSpeed(),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(4),
+                          color: isOutgoing
+                              ? colorScheme.onPrimary.withOpacity(0.2)
+                              : colorScheme.primary.withOpacity(0.1),
+                        ),
+                        child: Text(
+                          '${player.playbackSpeed}x',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w500,
+                            color: isOutgoing
+                                ? colorScheme.onPrimary
+                                : colorScheme.primary,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _togglePlayback(WidgetRef ref, String fileId, FileProvider fileProvider) {
+    final player = ref.read(voicePlayerProvider);
+    final fileData = fileProvider.getReceivedFile(fileId);
+
+    if (fileData == null) return;
+
+    if (player.currentFileId == fileId) {
+      // Toggle current playback
+      if (player.isPlaying) {
+        player.pause();
+      } else {
+        player.resume();
+      }
+    } else {
+      // Play new file
+      player.playFromBytes(fileId, fileData);
+    }
+  }
+}
+
 class _ReplyIndicator extends StatelessWidget {
   final VoidCallback onCancel;
 
@@ -865,6 +1164,28 @@ class _MessageInput extends ConsumerStatefulWidget {
 
 class _MessageInputState extends ConsumerState<_MessageInput> {
   bool _isSendingFile = false;
+  bool _hasText = false;
+  double _dragOffset = 0;
+  static const _cancelThreshold = -100.0;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.addListener(_onTextChanged);
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_onTextChanged);
+    super.dispose();
+  }
+
+  void _onTextChanged() {
+    final hasText = widget.controller.text.trim().isNotEmpty;
+    if (hasText != _hasText) {
+      setState(() => _hasText = hasText);
+    }
+  }
 
   Future<void> _pickFile(BuildContext context) async {
     try {
@@ -980,8 +1301,192 @@ class _MessageInputState extends ConsumerState<_MessageInput> {
     }
   }
 
+  Future<void> _startRecording() async {
+    final recorder = ref.read(voiceRecorderProvider);
+    final started = await recorder.startRecording();
+    if (!started && mounted) {
+      final error = recorder.errorMessage ?? 'Failed to start recording';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error)),
+      );
+    }
+  }
+
+  Future<void> _stopRecordingAndSend() async {
+    final recorder = ref.read(voiceRecorderProvider);
+    final voiceMessage = await recorder.stopRecording();
+
+    if (voiceMessage == null || !mounted) return;
+
+    // Get peer ID from conversation
+    final conversationAsync = ref.read(conversationProvider(widget.conversationId));
+    final conversation = conversationAsync.value;
+    if (conversation == null || conversation.peerId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Cannot send voice message: peer not found')),
+      );
+      return;
+    }
+
+    // Send voice message via file transfer
+    final sendResult = await ref.read(fileActionsProvider).sendFile(
+      toPeerId: conversation.peerId!,
+      filename: voiceMessage.filename,
+      data: voiceMessage.data,
+      mimeType: 'audio/mp4',
+    );
+
+    if (sendResult.success && sendResult.fileId != null) {
+      // Save audio message to conversation
+      await ref.read(chatActionsProvider).sendAudioMessage(
+        conversationId: widget.conversationId,
+        fileId: sendResult.fileId!,
+        duration: voiceMessage.duration.inSeconds,
+        filename: voiceMessage.filename,
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Sending voice message...'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    } else if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(sendResult.error ?? 'Failed to send voice message'),
+        ),
+      );
+    }
+  }
+
+  void _cancelRecording() {
+    ref.read(voiceRecorderProvider).cancelRecording();
+    setState(() => _dragOffset = 0);
+  }
+
   @override
   Widget build(BuildContext context) {
+    final recorder = ref.watch(voiceRecorderProvider);
+    final isRecording = recorder.isRecording;
+    final colorScheme = Theme.of(context).colorScheme;
+
+    // Recording UI
+    if (isRecording) {
+      return Container(
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: colorScheme.surface,
+          border: Border(
+            top: BorderSide(color: Theme.of(context).dividerColor),
+          ),
+        ),
+        child: SafeArea(
+          child: Row(
+            children: [
+              // Cancel indicator
+              AnimatedOpacity(
+                opacity: _dragOffset < _cancelThreshold ? 1.0 : 0.5,
+                duration: const Duration(milliseconds: 100),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.arrow_back,
+                      size: 16,
+                      color: _dragOffset < _cancelThreshold
+                          ? Colors.red
+                          : colorScheme.onSurface.withOpacity(0.5),
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      'Slide to cancel',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: _dragOffset < _cancelThreshold
+                            ? Colors.red
+                            : colorScheme.onSurface.withOpacity(0.5),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              const Spacer(),
+
+              // Recording indicator
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.red.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: const BoxDecoration(
+                        color: Colors.red,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      VoiceRecorderProvider.formatDuration(recorder.recordingDuration),
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w500,
+                        color: Colors.red,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(width: 8),
+
+              // Mic button (draggable to cancel)
+              GestureDetector(
+                onHorizontalDragUpdate: (details) {
+                  setState(() {
+                    _dragOffset += details.delta.dx;
+                    if (_dragOffset > 0) _dragOffset = 0;
+                  });
+                },
+                onHorizontalDragEnd: (details) {
+                  if (_dragOffset < _cancelThreshold) {
+                    _cancelRecording();
+                  }
+                  setState(() => _dragOffset = 0);
+                },
+                onTapUp: (_) => _stopRecordingAndSend(),
+                child: Transform.translate(
+                  offset: Offset(_dragOffset.clamp(-150.0, 0.0), 0),
+                  child: Container(
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      color: _dragOffset < _cancelThreshold
+                          ? Colors.red
+                          : colorScheme.primary,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      _dragOffset < _cancelThreshold ? Icons.close : Icons.mic,
+                      color: colorScheme.onPrimary,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // Normal input UI
     return Container(
       padding: const EdgeInsets.all(8),
       decoration: BoxDecoration(
@@ -1023,10 +1528,32 @@ class _MessageInputState extends ConsumerState<_MessageInput> {
                 ),
               ),
             ),
-            IconButton(
-              icon: const Icon(Icons.send),
-              onPressed: widget.onSend,
-            ),
+            // Send button when text, mic button when empty
+            _hasText
+                ? IconButton(
+                    icon: const Icon(Icons.send),
+                    onPressed: widget.onSend,
+                  )
+                : GestureDetector(
+                    onLongPressStart: (_) => _startRecording(),
+                    onLongPressEnd: (_) {
+                      if (ref.read(voiceRecorderProvider).isRecording) {
+                        _stopRecordingAndSend();
+                      }
+                    },
+                    child: Container(
+                      width: 48,
+                      height: 48,
+                      decoration: BoxDecoration(
+                        color: colorScheme.primary.withOpacity(0.1),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(
+                        Icons.mic,
+                        color: colorScheme.primary,
+                      ),
+                    ),
+                  ),
           ],
         ),
       ),

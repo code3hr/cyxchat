@@ -90,6 +90,25 @@ class ChatActions {
     return message;
   }
 
+  /// Send an audio (voice) message to a conversation
+  Future<Message> sendAudioMessage({
+    required String conversationId,
+    required String fileId,
+    required int duration,
+    required String filename,
+  }) async {
+    // Store audio info as JSON: {"fileId":"xxx","duration":30,"filename":"voice.m4a"}
+    final content = '{"fileId":"$fileId","duration":$duration,"filename":"$filename"}';
+    final message = await ChatService.instance.sendMessage(
+      conversationId: conversationId,
+      content: content,
+      type: MessageType.audio,
+    );
+    _ref.invalidate(messagesProvider(conversationId));
+    _ref.invalidate(conversationsProvider);
+    return message;
+  }
+
   Future<void> togglePin(String conversationId) async {
     await ChatService.instance.togglePin(conversationId);
     _ref.invalidate(conversationsProvider);

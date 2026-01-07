@@ -101,6 +101,14 @@ extern "C" {
 #define CYXCHAT_MSG_FILE_CANCEL     0x44    /* Cancel in-progress transfer */
 #define CYXCHAT_MSG_FILE_DHT_READY  0x45    /* DHT chunks stored notification */
 
+/* Video/Voice Call Signaling (0x50-0x5F) - WebRTC via onion routing */
+#define CYXCHAT_MSG_CALL_OFFER      0x50    /* SDP offer (call initiation) */
+#define CYXCHAT_MSG_CALL_ANSWER     0x51    /* SDP answer (call accepted) */
+#define CYXCHAT_MSG_CALL_ICE        0x52    /* ICE candidate */
+#define CYXCHAT_MSG_CALL_END        0x53    /* End call */
+#define CYXCHAT_MSG_CALL_REJECT     0x54    /* Reject incoming call */
+#define CYXCHAT_MSG_CALL_BUSY       0x55    /* Busy signal */
+
 /* DNS Messages (0xD0-0xD9) - CyxChat internal DNS */
 #define CYXCHAT_MSG_DNS_REGISTER      0xD0  /* Register name with signature */
 #define CYXCHAT_MSG_DNS_REGISTER_ACK  0xD1  /* Registration confirmed */

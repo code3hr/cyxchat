@@ -407,7 +407,7 @@ class _SplashScreen extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // Logo
+            // Logo with glow effect
             Container(
               width: 120,
               height: 120,
@@ -425,16 +425,29 @@ class _SplashScreen extends StatelessWidget {
                 fit: BoxFit.contain,
               ),
             ),
-            const SizedBox(height: 8),
-            Text(
-              'Private. Secure. Decentralized.',
+            const SizedBox(height: 24),
+            // App name
+            const Text(
+              'CyxChat',
               style: TextStyle(
-                fontSize: 12,
+                fontSize: 32,
+                fontWeight: FontWeight.bold,
+                color: AppColors.textDark,
+                letterSpacing: 1.5,
+              ),
+            ),
+            const SizedBox(height: 8),
+            // Tagline
+            Text(
+              'Private by Default',
+              style: TextStyle(
+                fontSize: 14,
                 color: AppColors.textDarkSecondary.withOpacity(0.7),
                 letterSpacing: 0.5,
               ),
             ),
-            const SizedBox(height: 32),
+            const SizedBox(height: 48),
+            // Loading indicator
             SizedBox(
               width: 24,
               height: 24,

@@ -42,6 +42,16 @@ dependencies:
   # File picker (for attachments)
   file_picker: ^6.1.1
 
+  # Audio recording & playback (voice messages)
+  record: ^5.0.4
+  just_audio: ^0.9.36
+
+  # Video calls (WebRTC)
+  flutter_webrtc: ^0.9.47
+
+  # Permissions (microphone, camera)
+  permission_handler: ^11.0.1
+
   # UI components
   cupertino_icons: ^1.0.6
 
@@ -51,6 +61,18 @@ dev_dependencies:
   flutter_lints: ^3.0.0
   build_runner: ^2.4.0
   riverpod_generator: ^2.3.0
+  flutter_launcher_icons: ^0.13.1
+
+# App icon configuration
+flutter_launcher_icons:
+  android: true
+  ios: true
+  windows:
+    generate: true
+    icon_size: 48
+  image_path: "assets/logo.png"
+  adaptive_icon_background: "#0D0D1A"
+  adaptive_icon_foreground: "assets/logo.png"
 
 flutter:
   uses-material-design: true

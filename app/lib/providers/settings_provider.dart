@@ -6,6 +6,8 @@ class SettingsKeys {
   static const String bootstrapServer = 'bootstrap_server';
   static const String relayServer = 'relay_server';
   static const String directFileTransfer = 'direct_file_transfer';
+  static const String videoCallsEnabled = 'video_calls_enabled';
+  static const String hasSeenCallPrivacyWarning = 'has_seen_call_privacy_warning';
 }
 
 /// Check for dart-define override
@@ -21,6 +23,8 @@ class SettingsDefaults {
       : '127.0.0.1:7777';
   static const String relayServer = '';
   static const bool directFileTransfer = false;
+  static const bool videoCallsEnabled = false; // Off by default for privacy
+  static const bool hasSeenCallPrivacyWarning = false;
 }
 
 /// Settings state
@@ -28,22 +32,30 @@ class AppSettings {
   final String bootstrapServer;
   final String relayServer;
   final bool directFileTransfer;
+  final bool videoCallsEnabled;
+  final bool hasSeenCallPrivacyWarning;
 
   const AppSettings({
     this.bootstrapServer = '',
     this.relayServer = '',
     this.directFileTransfer = false,
+    this.videoCallsEnabled = false,
+    this.hasSeenCallPrivacyWarning = false,
   });
 
   AppSettings copyWith({
     String? bootstrapServer,
     String? relayServer,
     bool? directFileTransfer,
+    bool? videoCallsEnabled,
+    bool? hasSeenCallPrivacyWarning,
   }) {
     return AppSettings(
       bootstrapServer: bootstrapServer ?? this.bootstrapServer,
       relayServer: relayServer ?? this.relayServer,
       directFileTransfer: directFileTransfer ?? this.directFileTransfer,
+      videoCallsEnabled: videoCallsEnabled ?? this.videoCallsEnabled,
+      hasSeenCallPrivacyWarning: hasSeenCallPrivacyWarning ?? this.hasSeenCallPrivacyWarning,
     );
   }
 
@@ -71,6 +83,10 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
           SettingsDefaults.relayServer,
       directFileTransfer: prefs.getBool(SettingsKeys.directFileTransfer) ??
           SettingsDefaults.directFileTransfer,
+      videoCallsEnabled: prefs.getBool(SettingsKeys.videoCallsEnabled) ??
+          SettingsDefaults.videoCallsEnabled,
+      hasSeenCallPrivacyWarning: prefs.getBool(SettingsKeys.hasSeenCallPrivacyWarning) ??
+          SettingsDefaults.hasSeenCallPrivacyWarning,
     );
   }
 
@@ -98,9 +114,26 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
     await prefs.setBool(SettingsKeys.directFileTransfer, value);
     state = state.copyWith(directFileTransfer: value);
   }
+
+  /// Set video calls enabled
+  Future<void> setVideoCallsEnabled(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(SettingsKeys.videoCallsEnabled, value);
+    state = state.copyWith(videoCallsEnabled: value);
+  }
+
+  /// Set has seen call privacy warning
+  Future<void> setHasSeenCallPrivacyWarning(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(SettingsKeys.hasSeenCallPrivacyWarning, value);
+    state = state.copyWith(hasSeenCallPrivacyWarning: value);
+  }
 }
 
 /// Provider
 final settingsProvider = StateNotifierProvider<SettingsNotifier, AppSettings>((ref) {
   return SettingsNotifier();
 });
+
+/// Alias for consistency with other providers
+final settingsNotifierProvider = settingsProvider;
