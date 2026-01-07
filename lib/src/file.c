@@ -4,7 +4,9 @@
 
 #include <cyxchat/file.h>
 #include <cyxchat/chat.h>
+#include <cyxchat/connection.h>
 #include <cyxwiz/routing.h>
+#include <cyxwiz/transport.h>
 #include <cyxwiz/crypto.h>
 #include <cyxwiz/dht.h>
 #include <cyxwiz/memory.h>
@@ -40,6 +42,7 @@ typedef struct {
     uint64_t offer_sent_at;                 /* Timestamp when offer was sent */
     int active;
     uint64_t last_chunk_sent_ms;            /* Timestamp of last chunk sent */
+    size_t chunk_size;                      /* Chunk size used for this transfer */
 } file_transfer_slot_t;
 
 struct cyxchat_file_ctx {
@@ -52,6 +55,8 @@ struct cyxchat_file_ctx {
     /* Direct P2P mode */
     int use_direct_mode;            /* 0 = onion (default), 1 = direct P2P */
     cyxwiz_router_t *router;        /* Router for direct P2P sending */
+    cyxwiz_transport_t *transport;  /* Transport for direct P2P (bypasses router) */
+    cyxchat_conn_ctx_t *conn_ctx;   /* Connection context for raw UDP sends */
 
     /* Transfers */
     file_transfer_slot_t transfers[CYXCHAT_MAX_TRANSFERS];
@@ -339,7 +344,25 @@ static void send_next_chunk(cyxchat_file_ctx_t *ctx, file_transfer_slot_t *slot)
     }
 
     uint16_t chunk_idx = slot->transfer.chunks_done;
-    uint8_t chunk_buf[150];  /* Fits in onion payload */
+
+    /* Use the chunk_size stored when transfer was created */
+    size_t chunk_size = slot->chunk_size;
+    if (chunk_size == 0) {
+        /* Fallback if not set (shouldn't happen) */
+        chunk_size = (ctx->use_direct_mode && ctx->conn_ctx)
+            ? CYXCHAT_DIRECT_CHUNK_SIZE
+            : CYXCHAT_CHUNK_SIZE;
+    }
+
+    /* Allocate buffer for chunk - always use heap for portability */
+    size_t max_wire_len = 13 + chunk_size;  /* header(13) + data */
+    uint8_t *chunk_buf = malloc(max_wire_len);
+
+    if (!chunk_buf) {
+        CYXWIZ_ERROR("send_next_chunk: failed to allocate chunk buffer");
+        return;
+    }
+
     size_t chunk_wire_len = 0;
 
     chunk_buf[chunk_wire_len++] = CYXCHAT_MSG_FILE_CHUNK;
@@ -350,10 +373,10 @@ static void send_next_chunk(cyxchat_file_ctx_t *ctx, file_transfer_slot_t *slot)
     chunk_buf[chunk_wire_len++] = (uint8_t)(chunk_idx & 0xFF);
     chunk_buf[chunk_wire_len++] = (uint8_t)((chunk_idx >> 8) & 0xFF);
 
-    /* Calculate chunk data offset and length */
-    size_t offset = (size_t)chunk_idx * CYXCHAT_CHUNK_SIZE;
+    /* Calculate chunk data offset and length based on mode */
+    size_t offset = (size_t)chunk_idx * chunk_size;
     size_t remaining = slot->transfer.meta.size - offset;
-    uint16_t chunk_len = (remaining > CYXCHAT_CHUNK_SIZE) ? CYXCHAT_CHUNK_SIZE : (uint16_t)remaining;
+    uint16_t chunk_len = (remaining > chunk_size) ? (uint16_t)chunk_size : (uint16_t)remaining;
 
     /* Chunk length (2 bytes) */
     chunk_buf[chunk_wire_len++] = (uint8_t)(chunk_len & 0xFF);
@@ -364,14 +387,17 @@ static void send_next_chunk(cyxchat_file_ctx_t *ctx, file_transfer_slot_t *slot)
     chunk_wire_len += chunk_len;
 
     cyxchat_error_t err;
-    if (ctx->use_direct_mode && ctx->router) {
-        /* Direct P2P: send via router (faster, larger chunks possible) */
-        cyxwiz_error_t werr = cyxwiz_router_send(ctx->router, &slot->transfer.peer, chunk_buf, chunk_wire_len);
-        err = (werr == CYXWIZ_OK) ? CYXCHAT_OK : CYXCHAT_ERR_NETWORK;
+    if (ctx->use_direct_mode && ctx->conn_ctx) {
+        /* Direct P2P: send via raw UDP (bypasses 250-byte MTU limit) */
+        err = cyxchat_conn_send_raw(ctx->conn_ctx, &slot->transfer.peer,
+                                    chunk_buf, chunk_wire_len);
     } else {
         /* Onion routing: send via chat layer (slower, anonymous) */
         err = cyxchat_send_raw(ctx->chat_ctx, &slot->transfer.peer, chunk_buf, chunk_wire_len);
     }
+
+    /* Free buffer */
+    free(chunk_buf);
     slot->transfer.chunks_done++;
     slot->transfer.updated_at = cyxchat_timestamp_ms();
     slot->last_chunk_sent_ms = slot->transfer.updated_at;
@@ -379,7 +405,9 @@ static void send_next_chunk(cyxchat_file_ctx_t *ctx, file_transfer_slot_t *slot)
         CYXWIZ_ERROR("send_next_chunk: FAILED to send chunk %u/%u, error=%d",
                      slot->transfer.chunks_done, slot->transfer.meta.chunk_count, err);
     } else {
-        CYXWIZ_INFO("send_next_chunk: sent chunk %u/%u", slot->transfer.chunks_done, slot->transfer.meta.chunk_count);
+        CYXWIZ_INFO("send_next_chunk: sent chunk %u/%u (%u bytes, %s mode)",
+                    slot->transfer.chunks_done, slot->transfer.meta.chunk_count, chunk_len,
+                    (ctx->use_direct_mode && ctx->conn_ctx) ? "direct" : "onion");
         /* Notify progress for outgoing transfers */
         if (ctx->on_progress) {
             ctx->on_progress(ctx, &slot->transfer.meta.file_id,
@@ -400,14 +428,26 @@ int cyxchat_file_poll(cyxchat_file_ctx_t *ctx, uint64_t now_ms) {
         file_transfer_slot_t *slot = &ctx->transfers[i];
         if (!slot->active) continue;
 
-        /* For outgoing transfers, send chunks with delay */
+        /* For outgoing transfers, send chunks */
         if (slot->transfer.is_outgoing && slot->transfer.state == CYXCHAT_FILE_SENDING) {
-            /* Send one chunk per poll if enough time has passed */
             if (slot->transfer.chunks_done < slot->transfer.meta.chunk_count) {
-                uint64_t delay_ms = (slot->transfer.chunks_done == 0) ? 0 : 250;  /* 250ms between chunks (4 chunks/sec, within rate limit) */
-                if (now_ms - slot->last_chunk_sent_ms >= delay_ms) {
-                    send_next_chunk(ctx, slot);
-                    events++;
+                if (ctx->use_direct_mode && ctx->conn_ctx) {
+                    /* Direct P2P mode: send multiple chunks per poll, no rate limiting
+                     * Send up to 10 chunks per poll for fast transfer */
+                    int chunks_this_poll = 0;
+                    while (slot->transfer.chunks_done < slot->transfer.meta.chunk_count &&
+                           chunks_this_poll < 10) {
+                        send_next_chunk(ctx, slot);
+                        chunks_this_poll++;
+                        events++;
+                    }
+                } else {
+                    /* Onion routing mode: rate limited (4 chunks/sec for LoRa compatibility) */
+                    uint64_t delay_ms = (slot->transfer.chunks_done == 0) ? 0 : 250;
+                    if (now_ms - slot->last_chunk_sent_ms >= delay_ms) {
+                        send_next_chunk(ctx, slot);
+                        events++;
+                    }
                 }
             } else {
                 /* All chunks sent, mark as completed */
@@ -421,13 +461,16 @@ int cyxchat_file_poll(cyxchat_file_ctx_t *ctx, uint64_t now_ms) {
             }
         }
 
-        /* Check for stalled transfers (no update in 60 seconds for file transfers) */
+        /* Check for stalled transfers (timeout depends on mode) */
         if (slot->transfer.state == CYXCHAT_FILE_SENDING ||
             slot->transfer.state == CYXCHAT_FILE_RECEIVING) {
             /* Guard against clock skew: if updated_at is in the future, skip timeout check */
             if (now_ms > slot->transfer.updated_at) {
                 uint64_t elapsed = now_ms - slot->transfer.updated_at;
-                if (elapsed > 60000) {
+                /* Direct mode: 5 minute timeout (large files take time)
+                 * Onion mode: 60 second timeout (smaller files) */
+                uint64_t timeout_ms = (ctx->use_direct_mode && ctx->conn_ctx) ? 300000 : 60000;
+                if (elapsed > timeout_ms) {
                     CYXWIZ_WARN("file_poll: Transfer timeout after %llu ms", (unsigned long long)elapsed);
                     slot->transfer.state = CYXCHAT_FILE_FAILED;
 
@@ -457,7 +500,8 @@ cyxchat_error_t cyxchat_file_send(
     size_t data_len,
     cyxchat_file_id_t *file_id_out
 ) {
-    CYXWIZ_INFO("cyxchat_file_send: filename=%s, data_len=%zu", filename, data_len);
+    CYXWIZ_INFO("cyxchat_file_send: filename=%s, data_len=%zu, direct_mode=%d, conn_ctx=%p",
+                filename, data_len, ctx ? ctx->use_direct_mode : 0, ctx ? (void*)ctx->conn_ctx : NULL);
 
     if (!ctx || !to || !filename || !data || data_len == 0) {
         CYXWIZ_ERROR("cyxchat_file_send: invalid parameters (ctx=%p, to=%p, filename=%p, data=%p, data_len=%zu)",
@@ -470,8 +514,31 @@ cyxchat_error_t cyxchat_file_send(
         return CYXCHAT_ERR_NULL;
     }
 
-    /* Calculate chunk count */
-    uint16_t chunk_count = (uint16_t)((data_len + CYXCHAT_CHUNK_SIZE - 1) / CYXCHAT_CHUNK_SIZE);
+    /* Check file size limit based on mode */
+    size_t max_file_size = (ctx->use_direct_mode && ctx->conn_ctx)
+        ? CYXCHAT_DIRECT_MAX_FILE
+        : (65536);  /* 64KB limit for onion routing */
+
+    if (data_len > max_file_size) {
+        CYXWIZ_ERROR("cyxchat_file_send: file too large (%zu > %zu)", data_len, max_file_size);
+        return CYXCHAT_ERR_FILE_TOO_LARGE;
+    }
+
+    /* Calculate chunk count based on mode */
+    size_t chunk_size = (ctx->use_direct_mode && ctx->conn_ctx)
+        ? CYXCHAT_DIRECT_CHUNK_SIZE
+        : CYXCHAT_CHUNK_SIZE;
+
+    /* For direct mode with large files, we need more than uint16_t can hold
+     * Use uint32_t for calculation, but cap at uint16_t max for protocol */
+    uint32_t chunk_count_32 = (uint32_t)((data_len + chunk_size - 1) / chunk_size);
+    if (chunk_count_32 > 65535) {
+        CYXWIZ_ERROR("cyxchat_file_send: too many chunks (%u)", chunk_count_32);
+        return CYXCHAT_ERR_FILE_TOO_LARGE;
+    }
+    uint16_t chunk_count = (uint16_t)chunk_count_32;
+
+    CYXWIZ_INFO("cyxchat_file_send: using chunk_size=%zu, chunk_count=%u", chunk_size, chunk_count);
 
     /* Allocate transfer slot */
     file_transfer_slot_t *slot = alloc_transfer(ctx);
@@ -485,6 +552,7 @@ cyxchat_error_t cyxchat_file_send(
 
     /* Set metadata */
     strncpy(slot->transfer.meta.filename, filename, CYXCHAT_MAX_FILENAME - 1);
+    slot->transfer.meta.filename[CYXCHAT_MAX_FILENAME - 1] = '\0';
     if (mime_type) {
         strncpy(slot->transfer.meta.mime_type, mime_type, 63);
     } else {
@@ -492,8 +560,10 @@ cyxchat_error_t cyxchat_file_send(
         const char *detected = cyxchat_file_detect_mime(filename);
         strncpy(slot->transfer.meta.mime_type, detected, 63);
     }
+    slot->transfer.meta.mime_type[63] = '\0';
     slot->transfer.meta.size = (uint32_t)data_len;
     slot->transfer.meta.chunk_count = chunk_count;
+    slot->chunk_size = chunk_size;  /* Store for send_next_chunk */
 
     /* Hash file */
     cyxwiz_crypto_hash(data, data_len, slot->transfer.meta.file_hash, 32);
@@ -1132,7 +1202,9 @@ static cyxchat_error_t handle_file_meta(
     /* Fill in metadata */
     memcpy(&slot->transfer.meta.file_id, &file_id, sizeof(cyxchat_file_id_t));
     strncpy(slot->transfer.meta.filename, filename, CYXCHAT_MAX_FILENAME - 1);
+    slot->transfer.meta.filename[CYXCHAT_MAX_FILENAME - 1] = '\0';
     strncpy(slot->transfer.meta.mime_type, mime_type, 63);
+    slot->transfer.meta.mime_type[63] = '\0';
     slot->transfer.meta.size = size;
     slot->transfer.meta.chunk_count = chunk_count;
     memcpy(slot->transfer.meta.file_hash, file_hash, 32);
@@ -1145,6 +1217,14 @@ static cyxchat_error_t handle_file_meta(
     slot->transfer.updated_at = slot->transfer.started_at;
     slot->transfer.chunks_done = 0;
 
+    /* Calculate chunk_size from metadata (sender may use different chunk size)
+     * chunk_size = ceil(size / chunk_count), handle div by zero */
+    if (chunk_count > 0) {
+        slot->chunk_size = (size + chunk_count - 1) / chunk_count;
+    } else {
+        slot->chunk_size = CYXCHAT_CHUNK_SIZE;  /* Fallback */
+    }
+
     /* Pre-allocate receive buffer for auto-accept */
     slot->data = calloc(1, size);
     if (slot->data) {
@@ -1152,7 +1232,8 @@ static cyxchat_error_t handle_file_meta(
         slot->transfer.state = CYXCHAT_FILE_RECEIVING;
     }
 
-    CYXWIZ_INFO("handle_file_meta: file '%s', size=%u, chunks=%u", filename, size, chunk_count);
+    CYXWIZ_INFO("handle_file_meta: file '%s', size=%u, chunks=%u, chunk_size=%zu",
+                filename, size, chunk_count, slot->chunk_size);
 
     /* Notify callback */
     if (ctx->on_request) {
@@ -1224,8 +1305,8 @@ static cyxchat_error_t handle_file_chunk(
         slot->transfer.state = CYXCHAT_FILE_RECEIVING;
     }
 
-    /* Copy chunk data to buffer */
-    size_t data_offset = (size_t)chunk_idx * CYXCHAT_CHUNK_SIZE;
+    /* Copy chunk data to buffer using the calculated chunk_size */
+    size_t data_offset = (size_t)chunk_idx * slot->chunk_size;
     if (data_offset + chunk_len <= slot->data_capacity) {
         memcpy(slot->data + data_offset, data + offset, chunk_len);
         slot->transfer.chunks_done++;
@@ -1331,6 +1412,7 @@ static cyxchat_error_t handle_file_offer(
     /* Fill in metadata */
     memcpy(&slot->transfer.meta.file_id, &file_id, sizeof(cyxchat_file_id_t));
     strncpy(slot->transfer.meta.filename, filename, CYXCHAT_MAX_FILENAME - 1);
+    slot->transfer.meta.filename[CYXCHAT_MAX_FILENAME - 1] = '\0';
     slot->transfer.meta.size = encrypted_size;
     slot->transfer.meta.chunk_count = chunk_count;
     memcpy(slot->transfer.meta.file_hash, file_hash, 32);
@@ -1692,12 +1774,29 @@ void cyxchat_file_set_router(cyxchat_file_ctx_t *ctx, cyxwiz_router_t *router) {
     }
 }
 
+void cyxchat_file_set_transport(cyxchat_file_ctx_t *ctx, cyxwiz_transport_t *transport) {
+    if (ctx) {
+        ctx->transport = transport;
+        CYXWIZ_INFO("file: transport set for direct P2P transfers");
+    }
+}
+
+void cyxchat_file_set_conn_ctx(cyxchat_file_ctx_t *ctx, cyxchat_conn_ctx_t *conn_ctx) {
+    if (ctx) {
+        ctx->conn_ctx = conn_ctx;
+        CYXWIZ_INFO("file: connection context set for raw UDP sends (ctx=%p, conn_ctx=%p)", (void*)ctx, (void*)conn_ctx);
+    } else {
+        CYXWIZ_WARN("file: cyxchat_file_set_conn_ctx called with NULL ctx!");
+    }
+}
+
 cyxchat_error_t cyxchat_file_set_direct_mode(cyxchat_file_ctx_t *ctx, int direct) {
     if (!ctx) {
         return CYXCHAT_ERR_NULL;
     }
     ctx->use_direct_mode = direct ? 1 : 0;
-    CYXWIZ_INFO("file: direct mode %s", direct ? "enabled" : "disabled");
+    CYXWIZ_INFO("FileProvider: Direct mode %s (conn_ctx=%p)",
+                direct ? "enabled" : "disabled", (void*)ctx->conn_ctx);
     return CYXCHAT_OK;
 }
 
