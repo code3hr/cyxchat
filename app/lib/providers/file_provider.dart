@@ -125,6 +125,32 @@ class FileProvider extends ChangeNotifier {
     return true;
   }
 
+  /// Set direct mode for file transfers
+  /// When enabled, files are sent via direct P2P (faster but less anonymous)
+  /// When disabled, files go through onion routing (slower but anonymous)
+  void setDirectMode(bool enabled) {
+    if (!_initialized) return;
+
+    // Get router from connection context and set it on file context
+    final router = _bindings.connGetRouter();
+    if (router != null) {
+      _bindings.fileSetRouter(router);
+    }
+
+    final result = _bindings.fileSetDirectMode(enabled ? 1 : 0);
+    if (result == 0) {
+      debugPrint('FileProvider: Direct mode ${enabled ? "enabled" : "disabled"}');
+    } else {
+      debugPrint('FileProvider: Failed to set direct mode: $result');
+    }
+  }
+
+  /// Get current direct mode setting
+  bool get isDirectMode {
+    if (!_initialized) return false;
+    return _bindings.fileGetDirectMode() == 1;
+  }
+
   /// Set up Dart callbacks for file events
   void _setupCallbacks() {
     // Handle incoming file request
@@ -144,6 +170,11 @@ class FileProvider extends ChangeNotifier {
       _pendingRequestsById[fileId] = request;  // Also store by ID for lookup
       _requestController.add(request);
 
+      // Calculate chunk size based on mode (for progress estimation)
+      final chunkSize = isDirectMode
+          ? CyxChatFileConst.directChunkSize
+          : CyxChatFileConst.chunkSize;
+
       // Create transfer entry for tracking
       _transfers[fileId] = FileTransferInfo(
         fileId: fileId,
@@ -152,14 +183,20 @@ class FileProvider extends ChangeNotifier {
         size: size,
         state: CyxChatFileState.pending,
         chunksDone: 0,
-        chunksTotal: (size / CyxChatFileConst.chunkSize).ceil(),
+        chunksTotal: (size / chunkSize).ceil(),
         peerId: fromPeerId,
         isOutgoing: false,  // Incoming file
         startedAt: DateTime.now(),
       );
 
-      // Auto-accept small files (under 1MB)
-      if (size <= CyxChatFileConst.maxFileSize) {
+      // Auto-accept based on mode
+      // In direct mode: accept files up to 100MB automatically
+      // In onion mode: accept files up to 64KB automatically
+      final autoAcceptLimit = isDirectMode
+          ? 100 * 1024 * 1024  // 100MB in direct mode
+          : CyxChatFileConst.maxFileSize;
+
+      if (size <= autoAcceptLimit) {
         debugPrint('FileProvider: Auto-accepting file $filename');
         _bindings.fileAccept(fileId);
         // Update state to receiving
@@ -324,12 +361,23 @@ class FileProvider extends ChangeNotifier {
       return FileSendResult(success: false, error: 'File provider not initialized');
     }
 
-    // Check file size limit
-    if (data.length > CyxChatFileConst.maxFileSize) {
-      return FileSendResult(
-        success: false,
-        error: 'File too large. Maximum size is ${CyxChatFileConst.maxFileSize ~/ 1024} KB',
-      );
+    // Check file size limit based on mode
+    final maxSize = isDirectMode
+        ? CyxChatFileConst.directMaxFileSize
+        : CyxChatFileConst.maxFileSize;
+
+    if (data.length > maxSize) {
+      if (isDirectMode) {
+        return FileSendResult(
+          success: false,
+          error: 'File too large. Maximum size is ${maxSize ~/ (1024 * 1024)} GB',
+        );
+      } else {
+        return FileSendResult(
+          success: false,
+          error: 'File too large. Maximum size is ${maxSize ~/ 1024} KB. Enable "Fast File Transfer" in settings for larger files.',
+        );
+      }
     }
 
     // Convert peer ID to native pointer
@@ -356,7 +404,12 @@ class FileProvider extends ChangeNotifier {
       );
 
       if (fileId != null) {
-        debugPrint('FileProvider: Sending file $filename (${data.length} bytes) to $toPeerId');
+        debugPrint('FileProvider: Sending file $filename (${data.length} bytes) to $toPeerId, direct=$isDirectMode');
+
+        // Calculate chunk count based on mode
+        final chunkSize = isDirectMode
+            ? CyxChatFileConst.directChunkSize
+            : CyxChatFileConst.chunkSize;
 
         // Track the transfer
         _transfers[fileId] = FileTransferInfo(
@@ -366,7 +419,7 @@ class FileProvider extends ChangeNotifier {
           size: data.length,
           state: CyxChatFileState.sending,
           chunksDone: 0,
-          chunksTotal: (data.length / CyxChatFileConst.chunkSize).ceil(),
+          chunksTotal: (data.length / chunkSize).ceil(),
           peerId: toPeerId,
           isOutgoing: true,
           startedAt: DateTime.now(),
@@ -575,4 +628,12 @@ class FileActions {
   Future<bool> resumeTransfer(String fileId) {
     return _ref.read(fileNotifierProvider).resumeTransfer(fileId);
   }
+
+  /// Set direct mode for file transfers
+  void setDirectMode(bool enabled) {
+    _ref.read(fileNotifierProvider).setDirectMode(enabled);
+  }
+
+  /// Get current direct mode status
+  bool get isDirectMode => _ref.read(fileNotifierProvider).isDirectMode;
 }

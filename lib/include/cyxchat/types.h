@@ -46,6 +46,11 @@ extern "C" {
  * Wire format: 1 byte type + 8 bytes file_id + 2 bytes idx + 2 bytes len + data = 13 bytes overhead
  * Testing shows 93 bytes works, 113 fails - use 90 bytes (tested safe limit) */
 #define CYXCHAT_CHUNK_SIZE          90
+
+/* Direct P2P mode constants - bypass onion/LoRa constraints for fast transfers
+ * Direct mode sends via UDP directly, no rate limiting, much larger chunks */
+#define CYXCHAT_DIRECT_CHUNK_SIZE   32768       /* 32KB chunks for direct P2P */
+#define CYXCHAT_DIRECT_MAX_FILE     1073741824  /* 1GB max file size in direct mode */
 #define CYXCHAT_MAX_GROUP_MEMBERS   50      /* Max group size */
 #define CYXCHAT_MAX_GROUP_ADMINS    5       /* Max admins per group */
 #define CYXCHAT_MAX_CONTACTS        256     /* Max contacts */

@@ -7,7 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:file_picker/file_picker.dart';
 import '../providers/conversation_provider.dart';
 import '../providers/file_provider.dart';
-import '../ffi/bindings.dart' show CyxChatFileState;
+import '../ffi/bindings.dart' show CyxChatFileState, CyxChatFileConst;
 import '../models/models.dart';
 
 class ChatScreen extends ConsumerStatefulWidget {
@@ -878,17 +878,29 @@ class _MessageInputState extends ConsumerState<_MessageInput> {
 
       final file = result.files.first;
       final fileSize = file.size;
-      final maxSize = 1024 * 1024; // 1MB limit
+
+      // Check file size limit based on direct mode
+      final fileProvider = ref.read(fileNotifierProvider);
+      final isDirectMode = fileProvider.isDirectMode;
+      final maxSize = isDirectMode
+          ? CyxChatFileConst.directMaxFileSize
+          : CyxChatFileConst.maxFileSize;
 
       if (fileSize > maxSize) {
         if (context.mounted) {
+          final sizeStr = isDirectMode
+              ? '${(maxSize / (1024 * 1024 * 1024)).toStringAsFixed(0)} GB'
+              : '${(maxSize / 1024).toStringAsFixed(0)} KB';
+          final fileSizeStr = fileSize >= 1024 * 1024
+              ? '${(fileSize / (1024 * 1024)).toStringAsFixed(1)} MB'
+              : '${(fileSize / 1024).toStringAsFixed(1)} KB';
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
-                'File too large (${(fileSize / 1024).toStringAsFixed(1)} KB). '
-                'Maximum size is 1 MB.',
+                'File too large ($fileSizeStr). Maximum size is $sizeStr.'
+                '${!isDirectMode ? ' Enable "Fast File Transfer" in settings for larger files.' : ''}',
               ),
-              duration: const Duration(seconds: 3),
+              duration: const Duration(seconds: 4),
             ),
           );
         }

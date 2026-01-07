@@ -844,4 +844,4 @@ CyxChat:     "We never see your data"
 
 ---
 
-*Generated for educational purposes. CyxChat is open source at [repository URL].*
+*Generated for educational purposes. CyxChat is open source.*

@@ -1632,6 +1632,50 @@ class CyxChatBindings {
       calloc.free(fileIdPtr);
     }
   }
+
+  /// Set direct mode for file transfers
+  /// direct: 1 = use direct P2P (faster, less anonymous), 0 = use onion routing (default)
+  int fileSetDirectMode(int direct) {
+    if (_fileCtx == null) return -1;
+    return _native.cyxchat_file_set_direct_mode(_fileCtx!, direct);
+  }
+
+  /// Get current direct mode setting
+  /// Returns: 1 if direct mode enabled, 0 if using onion routing, -1 on error
+  int fileGetDirectMode() {
+    if (_fileCtx == null) return -1;
+    return _native.cyxchat_file_get_direct_mode(_fileCtx!);
+  }
+
+  /// Set router for direct P2P file transfers
+  void fileSetRouter(Pointer<Void> router) {
+    if (_fileCtx == null) return;
+    _native.cyxchat_file_set_router(_fileCtx!, router);
+  }
+
+  /// Set transport for direct P2P file transfers (bypasses router peer check)
+  void fileSetTransport(Pointer<Void> transport) {
+    if (_fileCtx == null) return;
+    _native.cyxchat_file_set_transport(_fileCtx!, transport);
+  }
+
+  /// Get router from connection context for direct file transfers
+  Pointer<Void>? connGetRouter() {
+    if (_connCtx == null) return null;
+    return _native.cyxchat_conn_get_router(_connCtx!);
+  }
+
+  /// Get transport from connection context for direct file transfers
+  Pointer<Void>? connGetTransport() {
+    if (_connCtx == null) return null;
+    return _native.cyxchat_conn_get_transport(_connCtx!);
+  }
+
+  /// Set file context on connection for direct file message routing
+  void connSetFileCtx() {
+    if (_connCtx == null || _fileCtx == null) return;
+    _native.cyxchat_conn_set_file_ctx(_connCtx!, _fileCtx!);
+  }
 }
 
 /// Native function signatures
@@ -1830,6 +1874,14 @@ class CyxChatNative {
   late final cyxchat_conn_get_dht = _lib.lookupFunction<
       Pointer<Void> Function(Pointer<Void>),
       Pointer<Void> Function(Pointer<Void>)>('cyxchat_conn_get_dht');
+
+  late final cyxchat_conn_get_router = _lib.lookupFunction<
+      Pointer<Void> Function(Pointer<Void>),
+      Pointer<Void> Function(Pointer<Void>)>('cyxchat_conn_get_router');
+
+  late final cyxchat_conn_set_file_ctx = _lib.lookupFunction<
+      Void Function(Pointer<Void>, Pointer<Void>),
+      void Function(Pointer<Void>, Pointer<Void>)>('cyxchat_conn_set_file_ctx');
 
   // DHT functions
   late final cyxchat_conn_dht_bootstrap = _lib.lookupFunction<
@@ -2196,6 +2248,22 @@ class CyxChatNative {
   late final cyxchat_file_get_transfer_mode = _lib.lookupFunction<
       Int32 Function(Pointer<Void>, Pointer<Uint8>),
       int Function(Pointer<Void>, Pointer<Uint8>)>('cyxchat_file_get_transfer_mode');
+
+  late final cyxchat_file_set_direct_mode = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Int32),
+      int Function(Pointer<Void>, int)>('cyxchat_file_set_direct_mode');
+
+  late final cyxchat_file_get_direct_mode = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>),
+      int Function(Pointer<Void>)>('cyxchat_file_get_direct_mode');
+
+  late final cyxchat_file_set_router = _lib.lookupFunction<
+      Void Function(Pointer<Void>, Pointer<Void>),
+      void Function(Pointer<Void>, Pointer<Void>)>('cyxchat_file_set_router');
+
+  late final cyxchat_file_set_transport = _lib.lookupFunction<
+      Void Function(Pointer<Void>, Pointer<Void>),
+      void Function(Pointer<Void>, Pointer<Void>)>('cyxchat_file_set_transport');
 }
 
 // Error codes
@@ -2418,8 +2486,12 @@ class CyxChatFileState {
 // File transfer constants
 class CyxChatFileConst {
   static const maxFilename = 128;
-  static const chunkSize = 1024;
-  static const maxFileSize = 1024 * 1024; // 1MB limit
+  static const chunkSize = 90;  // Onion routing chunk size (LoRa compatible)
+  static const maxFileSize = 64 * 1024; // 64KB limit for onion routing
+
+  // Direct P2P mode constants - bypass onion/LoRa constraints
+  static const directChunkSize = 32768;  // 32KB chunks for direct P2P
+  static const directMaxFileSize = 1024 * 1024 * 1024; // 1GB max in direct mode
 
   // DHT-based file transfer constants
   static const dhtChunkSize = 120;      // 160 - 40 bytes crypto overhead

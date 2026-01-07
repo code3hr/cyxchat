@@ -7,6 +7,7 @@ import '../providers/identity_provider.dart';
 import '../providers/dns_provider.dart';
 import '../providers/settings_provider.dart';
 import '../providers/network_provider.dart';
+import '../providers/file_provider.dart';
 import '../services/identity_service.dart';
 import '../models/identity.dart';
 import 'onboarding_screen.dart';
@@ -89,6 +90,49 @@ class SettingsScreen extends ConsumerWidget {
                   icon: Icons.shield_rounded,
                   iconGradient: const [AppColors.primary, AppColors.primaryLight],
                   children: [
+                    // Onion routing info tile (informational only)
+                    _SettingsTile(
+                      icon: Icons.security_rounded,
+                      title: 'Onion Routing',
+                      subtitle: 'Multi-hop encrypted messaging',
+                      trailing: const _StatusChip(label: 'Always On', isActive: true),
+                      onTap: null,
+                    ),
+                    // Info box about onion routing
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                      child: Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: AppColors.primary.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: AppColors.primary.withOpacity(0.2),
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.info_outline_rounded,
+                              size: 16,
+                              color: AppColors.primary.withOpacity(0.8),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                'All messages encrypted via multi-hop routing. Speed limit: ~360 B/s',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: AppColors.textDarkSecondary.withOpacity(0.8),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    // Fast file transfer toggle
+                    const _FastFileTransferTile(),
                     _SettingsSwitch(
                       icon: Icons.lock_outline_rounded,
                       title: 'Screen Lock',
@@ -1506,6 +1550,114 @@ class _ServerConfigTileState extends ConsumerState<_ServerConfigTile> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Fast file transfer toggle tile
+class _FastFileTransferTile extends ConsumerWidget {
+  const _FastFileTransferTile();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final settings = ref.watch(settingsProvider);
+    final isEnabled = settings.directFileTransfer;
+
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: isEnabled
+                      ? AppColors.accentOrange.withOpacity(0.15)
+                      : AppColors.bgDarkTertiary,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  Icons.bolt_rounded,
+                  size: 20,
+                  color: isEnabled ? AppColors.accentOrange : AppColors.textDark,
+                ),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Fast File Transfer',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w500,
+                        color: AppColors.textDark,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Bypass onion for file transfers',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: AppColors.textDarkSecondary.withOpacity(0.7),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Switch(
+                value: isEnabled,
+                onChanged: (value) {
+                  ref.read(settingsProvider.notifier).setDirectFileTransfer(value);
+                  // Apply to file provider immediately
+                  ref.read(fileActionsProvider).setDirectMode(value);
+                },
+                activeColor: AppColors.accentOrange,
+                activeTrackColor: AppColors.accentOrange.withOpacity(0.3),
+                inactiveThumbColor: AppColors.textDarkSecondary,
+                inactiveTrackColor: AppColors.bgDarkTertiary,
+              ),
+            ],
+          ),
+        ),
+        // Warning when enabled
+        if (isEnabled)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.accentOrange.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: AppColors.accentOrange.withOpacity(0.3),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.warning_amber_rounded,
+                    size: 16,
+                    color: AppColors.accentOrange.withOpacity(0.9),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Direct P2P - peer can see your IP during file transfers',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: AppColors.textDarkSecondary.withOpacity(0.8),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+      ],
     );
   }
 }

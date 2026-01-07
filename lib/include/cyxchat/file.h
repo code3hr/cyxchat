@@ -303,6 +303,28 @@ CYXCHAT_API cyxchat_error_t cyxchat_file_resume(
     const cyxchat_file_id_t *file_id
 );
 
+/**
+ * Enable/disable direct P2P mode for file transfers
+ * When enabled, file chunks are sent directly via router (faster)
+ * instead of through onion routing (slower but anonymous).
+ *
+ * @param ctx       File context
+ * @param direct    1 = use direct P2P, 0 = use onion routing (default)
+ * @return          CYXCHAT_OK on success
+ */
+CYXCHAT_API cyxchat_error_t cyxchat_file_set_direct_mode(
+    cyxchat_file_ctx_t *ctx,
+    int direct
+);
+
+/**
+ * Get current direct mode setting
+ *
+ * @param ctx       File context
+ * @return          1 if direct mode, 0 if onion mode
+ */
+CYXCHAT_API int cyxchat_file_get_direct_mode(cyxchat_file_ctx_t *ctx);
+
 /* ============================================================
  * Queries
  * ============================================================ */
@@ -432,6 +454,39 @@ CYXCHAT_API void cyxchat_file_set_dht(
 CYXCHAT_API void cyxchat_file_set_local_id(
     cyxchat_file_ctx_t *ctx,
     const cyxwiz_node_id_t *local_id
+);
+
+/* Forward declaration for router */
+typedef struct cyxwiz_router cyxwiz_router_t;
+
+/**
+ * Set router for direct P2P file transfers
+ * When direct mode is enabled, file chunks are sent via router instead of onion.
+ *
+ * @param ctx       File context
+ * @param router    Router context (from connection module)
+ */
+CYXCHAT_API void cyxchat_file_set_router(
+    cyxchat_file_ctx_t *ctx,
+    cyxwiz_router_t *router
+);
+
+/* Forward declare transport type */
+typedef struct cyxwiz_transport cyxwiz_transport_t;
+
+/**
+ * Set transport for direct P2P file transfers
+ *
+ * When direct mode is enabled, file chunks are sent directly via transport,
+ * bypassing the router's peer connection check. This is needed for UDP hole
+ * punching where peers may not be in CONNECTED state in the router's peer table.
+ *
+ * @param ctx         File context
+ * @param transport   Transport context (from connection module)
+ */
+CYXCHAT_API void cyxchat_file_set_transport(
+    cyxchat_file_ctx_t *ctx,
+    cyxwiz_transport_t *transport
 );
 
 /* ============================================================

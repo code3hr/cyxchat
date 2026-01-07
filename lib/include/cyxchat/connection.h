@@ -267,6 +267,28 @@ CYXCHAT_API const char* cyxchat_conn_nat_type_name(cyxwiz_nat_type_t nat_type);
  */
 CYXCHAT_API const char* cyxchat_conn_state_name(cyxchat_conn_state_t state);
 
+/**
+ * Get router for direct P2P file transfers
+ * Use this to pass router to file context for direct mode.
+ *
+ * @param ctx   Connection context
+ * @return      Router pointer, or NULL if not initialized
+ */
+CYXCHAT_API void* cyxchat_conn_get_router(cyxchat_conn_ctx_t *ctx);
+
+/**
+ * Set file context for direct file message routing
+ * When direct mode file messages arrive (bypassing onion),
+ * they will be forwarded to this file context.
+ *
+ * @param ctx       Connection context
+ * @param file_ctx  File context (from cyxchat_file_ctx_create)
+ */
+CYXCHAT_API void cyxchat_conn_set_file_ctx(
+    cyxchat_conn_ctx_t *ctx,
+    void *file_ctx
+);
+
 /* ============================================================
  * Callbacks
  * ============================================================ */

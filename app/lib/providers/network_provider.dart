@@ -8,6 +8,7 @@ import 'file_provider.dart';
 import 'settings_provider.dart';
 import '../services/identity_service.dart';
 import '../services/chat_service.dart';
+import '../ffi/bindings.dart';
 
 /// Global connection provider instance
 final connectionNotifierProvider = ChangeNotifierProvider<ConnectionProvider>((ref) {
@@ -100,6 +101,20 @@ class ConnectionActions {
           fileId: fileId,
         );
       };
+      // Apply direct file transfer setting
+      fileProvider.setDirectMode(settings.directFileTransfer);
+
+      // Wire up file context to connection for direct mode file routing
+      // This allows direct P2P file messages to bypass onion and reach file module
+      CyxChatBindings.instance.connSetFileCtx();
+
+      // Set transport on file context for direct P2P transfers
+      // This bypasses the router's is_direct_peer check for 32KB chunks
+      final transport = CyxChatBindings.instance.connGetTransport();
+      if (transport != null) {
+        CyxChatBindings.instance.fileSetTransport(transport);
+        debugPrint('File transport set for direct P2P transfers');
+      }
     }
 
     return true;

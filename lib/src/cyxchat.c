@@ -104,6 +104,12 @@ const char* cyxchat_error_string(cyxchat_error_t error) {
     return "Unknown error";
 }
 
+void cyxchat_log_debug(const char* message) {
+    if (message) {
+        CYXWIZ_INFO("FFI_DEBUG: %s", message);
+    }
+}
+
 cyxchat_error_t cyxchat_last_error(void) {
     return g_last_error;
 }

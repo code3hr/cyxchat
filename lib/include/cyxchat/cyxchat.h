@@ -94,6 +94,11 @@ CYXCHAT_API int cyxchat_is_initialized(void);
 CYXCHAT_API const char* cyxchat_error_string(cyxchat_error_t error);
 
 /**
+ * Log a debug message (for FFI debugging)
+ */
+CYXCHAT_API void cyxchat_log_debug(const char* message);
+
+/**
  * Get last error code
  */
 CYXCHAT_API cyxchat_error_t cyxchat_last_error(void);

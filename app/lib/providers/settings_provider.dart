@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 class SettingsKeys {
   static const String bootstrapServer = 'bootstrap_server';
   static const String relayServer = 'relay_server';
+  static const String directFileTransfer = 'direct_file_transfer';
 }
 
 /// Check for dart-define override
@@ -19,25 +20,30 @@ class SettingsDefaults {
       ? _bootstrapServerOverride
       : '127.0.0.1:7777';
   static const String relayServer = '';
+  static const bool directFileTransfer = false;
 }
 
 /// Settings state
 class AppSettings {
   final String bootstrapServer;
   final String relayServer;
+  final bool directFileTransfer;
 
   const AppSettings({
     this.bootstrapServer = '',
     this.relayServer = '',
+    this.directFileTransfer = false,
   });
 
   AppSettings copyWith({
     String? bootstrapServer,
     String? relayServer,
+    bool? directFileTransfer,
   }) {
     return AppSettings(
       bootstrapServer: bootstrapServer ?? this.bootstrapServer,
       relayServer: relayServer ?? this.relayServer,
+      directFileTransfer: directFileTransfer ?? this.directFileTransfer,
     );
   }
 
@@ -63,6 +69,8 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
       bootstrapServer: bootstrap,
       relayServer: prefs.getString(SettingsKeys.relayServer) ??
           SettingsDefaults.relayServer,
+      directFileTransfer: prefs.getBool(SettingsKeys.directFileTransfer) ??
+          SettingsDefaults.directFileTransfer,
     );
   }
 
@@ -82,6 +90,13 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
   Future<void> setServer(String value) async {
     await setBootstrapServer(value);
     await setRelayServer(value);
+  }
+
+  /// Set direct file transfer mode (bypasses onion routing for files)
+  Future<void> setDirectFileTransfer(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(SettingsKeys.directFileTransfer, value);
+    state = state.copyWith(directFileTransfer: value);
   }
 }
 

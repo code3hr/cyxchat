@@ -8,6 +8,7 @@
 
 #include "cyxchat/connection.h"
 #include "cyxchat/relay.h"
+#include "cyxchat/file.h"
 #include <cyxwiz/memory.h>
 #include <cyxwiz/log.h>
 #include <cyxwiz/routing.h>
@@ -113,6 +114,9 @@ struct cyxchat_conn_ctx {
     /* DHT callbacks */
     cyxchat_dht_node_callback_t on_dht_node;
     void *dht_node_user_data;
+
+    /* File context for direct mode routing */
+    void *file_ctx;
 
     /* Timing */
     uint64_t last_stun_time;
@@ -234,6 +238,30 @@ static void on_relay_data(cyxchat_relay_ctx_t *relay_ctx,
     }
 }
 
+/* Router data callback - forwards direct P2P data to application
+ * This handles data sent via cyxwiz_router_send() (direct mode) */
+static void on_router_data(const cyxwiz_node_id_t *from,
+                           const uint8_t *data, size_t len,
+                           void *user_data)
+{
+    cyxchat_conn_ctx_t *ctx = (cyxchat_conn_ctx_t*)user_data;
+
+    if (!ctx || len == 0) return;
+
+    /* Update peer connection state */
+    cyxchat_peer_conn_t *peer = find_peer_conn(ctx, from);
+    if (peer) {
+        peer->last_activity = get_time_ms();
+        peer->bytes_received += (uint32_t)len;
+    }
+
+    /* Forward to application callback (same as relay/onion data) */
+    if (ctx->on_data) {
+        CYXWIZ_INFO("Router received direct data: type=0x%02x, len=%zu", data[0], len);
+        ctx->on_data(ctx, from, data, len, ctx->data_user_data);
+    }
+}
+
 /* Discovery message types (0x01-0x05) */
 #define CYXCHAT_DISC_ANNOUNCE     0x01
 #define CYXCHAT_DISC_ANNOUNCE_ACK 0x02
@@ -284,6 +312,24 @@ static void on_transport_recv(cyxwiz_transport_t *transport,
             CYXWIZ_DEBUG("Onion message handling failed: %d", err);
         }
         return;  /* Onion messages are fully handled by onion layer */
+    }
+
+    /* Route direct file messages to file handler (bypasses onion) */
+    if (len > 0 && ctx->file_ctx) {
+        uint8_t msg_type = data[0];
+        /* File messages: 0x14-0x19 (v1) and 0x40-0x45 (v2) */
+        if ((msg_type >= 0x14 && msg_type <= 0x19) ||
+            (msg_type >= 0x40 && msg_type <= 0x45)) {
+            CYXWIZ_INFO("Routing direct file message (type=0x%02x) to file module", msg_type);
+            cyxchat_file_handle_message(
+                (cyxchat_file_ctx_t *)ctx->file_ctx,
+                from,
+                msg_type,
+                data + 1,
+                len - 1
+            );
+            return;  /* File messages fully handled */
+        }
     }
 
     /* Update peer connection state */
@@ -599,6 +645,9 @@ cyxchat_error_t cyxchat_conn_create(cyxchat_conn_ctx_t **ctx,
         free(c);
         return CYXCHAT_ERR_NETWORK;
     }
+
+    /* Set router callback for direct P2P data (bypasses onion) */
+    cyxwiz_router_set_callback(c->router, on_router_data, c);
 
     /* Create onion routing context */
     err = cyxwiz_onion_create(&c->onion, c->router, local_id);
@@ -1086,6 +1135,11 @@ const char* cyxchat_conn_state_name(cyxchat_conn_state_t state)
     }
 }
 
+void* cyxchat_conn_get_router(cyxchat_conn_ctx_t *ctx)
+{
+    return ctx ? ctx->router : NULL;
+}
+
 /* ============================================================
  * Callbacks
  * ============================================================ */
@@ -1106,6 +1160,13 @@ void cyxchat_conn_set_on_data(cyxchat_conn_ctx_t *ctx,
     if (!ctx) return;
     ctx->on_data = callback;
     ctx->data_user_data = user_data;
+}
+
+void cyxchat_conn_set_file_ctx(cyxchat_conn_ctx_t *ctx, void *file_ctx)
+{
+    if (!ctx) return;
+    ctx->file_ctx = file_ctx;
+    CYXWIZ_INFO("Connection: file context set for direct mode routing");
 }
 
 /* ============================================================
