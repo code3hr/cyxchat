@@ -1,7 +1,8 @@
 import 'dart:typed_data';
+import 'dart:math';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:uuid/uuid.dart';
 import '../models/identity.dart';
+import '../utils/node_id_utils.dart';
 import 'database_service.dart';
 
 /// Instance ID for running multiple test instances
@@ -44,19 +45,16 @@ class IdentityService {
   Future<Identity> createIdentity({String? displayName}) async {
     final db = await DatabaseService.instance.database;
 
-    // Generate node ID (32 random bytes as hex)
-    final nodeIdBytes = Uint8List(32);
-    for (var i = 0; i < 32; i++) {
-      nodeIdBytes[i] = DateTime.now().microsecond % 256;
-    }
-    final nodeId = nodeIdBytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+    // Generate node ID as UUID v4 (cryptographically secure random)
+    final nodeId = NodeIdUtils.generate();
 
-    // Generate key pair (placeholder - real implementation uses libcyxchat)
+    // Generate key pair using secure random (placeholder - real implementation uses libcyxchat)
+    final random = Random.secure();
     final publicKey = Uint8List(32);
     final privateKey = Uint8List(32);
     for (var i = 0; i < 32; i++) {
-      publicKey[i] = DateTime.now().microsecond % 256;
-      privateKey[i] = DateTime.now().millisecond % 256;
+      publicKey[i] = random.nextInt(256);
+      privateKey[i] = random.nextInt(256);
     }
 
     // Store private key securely

@@ -10,6 +10,7 @@ import 'file_provider.dart';
 import 'settings_provider.dart';
 import '../services/identity_service.dart';
 import '../services/chat_service.dart';
+import '../utils/node_id_utils.dart';
 import '../ffi/bindings.dart';
 
 /// Connection retry configuration
@@ -150,7 +151,7 @@ class ConnectionActions {
     }
     final settings = _ref.read(settingsProvider);
     final bootstrap = bootstrapServer ?? (settings.bootstrapServer.isNotEmpty ? settings.bootstrapServer : '');
-    final nodeIdBytes = _hexToBytes(identity.nodeId);
+    final nodeIdBytes = NodeIdUtils.toBytesAsList(identity.nodeId);
 
     // Initialize connection first
     final connResult = await connectionProvider.initialize(
@@ -244,15 +245,5 @@ class ConnectionActions {
     _ref.read(chatNotifierProvider).shutdown();
     _ref.read(dnsNotifierProvider).shutdown();
     _ref.read(connectionNotifierProvider).shutdown();
-  }
-
-  List<int> _hexToBytes(String hex) {
-    final result = <int>[];
-    for (int i = 0; i < hex.length; i += 2) {
-      if (i + 2 <= hex.length) {
-        result.add(int.parse(hex.substring(i, i + 2), radix: 16));
-      }
-    }
-    return result;
   }
 }

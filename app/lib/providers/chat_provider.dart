@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:ffi/ffi.dart';
 import '../ffi/bindings.dart';
+import '../utils/node_id_utils.dart';
 
 /// Received message from native layer
 class ReceivedMessage {
@@ -249,8 +250,8 @@ class ChatProvider extends ChangeNotifier {
   Future<bool> initialize({required List<int> localId}) async {
     if (_initialized) return true;
 
-    // Store local node ID
-    _localNodeId = _bytesToHex(localId);
+    // Store local node ID (convert 32-byte array to UUID/hex string)
+    _localNodeId = NodeIdUtils.bytesToNodeId(localId, localId.length);
 
     // Convert local ID to native pointer
     final localIdPtr = calloc<Uint8>(32);
@@ -298,7 +299,7 @@ class ChatProvider extends ChangeNotifier {
       return SendResult.failure('Chat not initialized');
     }
 
-    final peerIdBytes = _hexToBytes(toPeerId);
+    final peerIdBytes = NodeIdUtils.toBytesAsList(toPeerId);
     final peerIdPtr = calloc<Uint8>(32);
 
     try {
@@ -330,7 +331,7 @@ class ChatProvider extends ChangeNotifier {
   }) async {
     if (!_initialized) return false;
 
-    final peerIdBytes = _hexToBytes(toPeerId);
+    final peerIdBytes = NodeIdUtils.toBytesAsList(toPeerId);
     final peerIdPtr = calloc<Uint8>(32);
 
     try {
@@ -360,7 +361,7 @@ class ChatProvider extends ChangeNotifier {
   }) async {
     if (!_initialized) return false;
 
-    final peerIdBytes = _hexToBytes(toPeerId);
+    final peerIdBytes = NodeIdUtils.toBytesAsList(toPeerId);
     final peerIdPtr = calloc<Uint8>(32);
 
     try {
@@ -384,7 +385,7 @@ class ChatProvider extends ChangeNotifier {
   }) async {
     if (!_initialized) return false;
 
-    final peerIdBytes = _hexToBytes(toPeerId);
+    final peerIdBytes = NodeIdUtils.toBytesAsList(toPeerId);
     final peerIdPtr = calloc<Uint8>(32);
 
     try {
@@ -411,7 +412,7 @@ class ChatProvider extends ChangeNotifier {
   }) async {
     if (!_initialized) return false;
 
-    final peerIdBytes = _hexToBytes(toPeerId);
+    final peerIdBytes = NodeIdUtils.toBytesAsList(toPeerId);
     final peerIdPtr = calloc<Uint8>(32);
 
     try {
@@ -434,7 +435,7 @@ class ChatProvider extends ChangeNotifier {
   }) async {
     if (!_initialized) return false;
 
-    final peerIdBytes = _hexToBytes(toPeerId);
+    final peerIdBytes = NodeIdUtils.toBytesAsList(toPeerId);
     final peerIdPtr = calloc<Uint8>(32);
 
     try {
@@ -481,7 +482,7 @@ class ChatProvider extends ChangeNotifier {
     final type = msg['type'] as int;
     final data = msg['data'] as List<int>;
 
-    final fromNodeId = _bytesToHex(fromBytes);
+    final fromNodeId = NodeIdUtils.bytesToNodeId(fromBytes, fromBytes.length);
 
     final received = ReceivedMessage(
       fromNodeId: fromNodeId,
@@ -544,20 +545,6 @@ class ChatProvider extends ChangeNotifier {
         debugPrint('ChatProvider: Unknown message type 0x${type.toRadixString(16)}');
         break;
     }
-  }
-
-  String _bytesToHex(List<int> bytes) {
-    return bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
-  }
-
-  List<int> _hexToBytes(String hex) {
-    final result = <int>[];
-    for (int i = 0; i < hex.length; i += 2) {
-      if (i + 2 <= hex.length) {
-        result.add(int.parse(hex.substring(i, i + 2), radix: 16));
-      }
-    }
-    return result;
   }
 
   @override

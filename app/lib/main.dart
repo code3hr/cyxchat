@@ -7,6 +7,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:cyxchat/screens/home_screen.dart';
 import 'package:cyxchat/screens/onboarding_screen.dart';
 import 'package:cyxchat/services/identity_service.dart';
+import 'package:cyxchat/services/log_service.dart';
 import 'package:cyxchat/providers/identity_provider.dart';
 
 // App colors
@@ -46,6 +47,9 @@ class AppColors {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Initialize logging to capture all debugPrint output
+  setupLogging();
 
   // Initialize sqflite for desktop platforms
   if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {

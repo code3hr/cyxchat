@@ -9,8 +9,10 @@ import '../providers/settings_provider.dart';
 import '../providers/network_provider.dart';
 import '../providers/file_provider.dart';
 import '../services/identity_service.dart';
+import '../services/log_service.dart';
 import '../models/identity.dart';
 import 'onboarding_screen.dart';
+import 'log_viewer_screen.dart';
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -216,6 +218,31 @@ class SettingsScreen extends ConsumerWidget {
                       subtitle: 'Free up space',
                       onTap: () {},
                     ),
+                  ],
+                ),
+
+                const SizedBox(height: 16),
+
+                // Debug section
+                _SettingsSection(
+                  title: 'Debug',
+                  icon: Icons.bug_report_rounded,
+                  iconGradient: const [AppColors.accent, AppColors.accentGreen],
+                  children: [
+                    _SettingsTile(
+                      icon: Icons.article_outlined,
+                      title: 'View Logs',
+                      subtitle: 'See app activity and errors',
+                      trailing: const Icon(
+                        Icons.chevron_right_rounded,
+                        color: AppColors.textDarkSecondary,
+                      ),
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const LogViewerScreen()),
+                      ),
+                    ),
+                    const _LogCountTile(),
                   ],
                 ),
 
@@ -1779,6 +1806,115 @@ class _VideoCallsTile extends ConsumerWidget {
               ),
             ),
           ),
+      ],
+    );
+  }
+}
+
+/// Log count tile showing number of captured logs
+class _LogCountTile extends StatelessWidget {
+  const _LogCountTile();
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: LogService.instance,
+      builder: (context, _) {
+        final logCount = LogService.instance.logs.length;
+        final errorCount = LogService.instance.logs
+            .where((log) => log.level == 'ERROR')
+            .length;
+        final warnCount = LogService.instance.logs
+            .where((log) => log.level == 'WARN')
+            .length;
+
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+          child: Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AppColors.bgDarkTertiary,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              children: [
+                _LogStat(
+                  label: 'Total',
+                  count: logCount,
+                  color: AppColors.accent,
+                ),
+                const SizedBox(width: 16),
+                _LogStat(
+                  label: 'Errors',
+                  count: errorCount,
+                  color: errorCount > 0 ? AppColors.error : AppColors.textDarkSecondary,
+                ),
+                const SizedBox(width: 16),
+                _LogStat(
+                  label: 'Warnings',
+                  count: warnCount,
+                  color: warnCount > 0 ? AppColors.accentOrange : AppColors.textDarkSecondary,
+                ),
+                const Spacer(),
+                TextButton(
+                  onPressed: () {
+                    LogService.instance.clear();
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: const Text('Logs cleared'),
+                        behavior: SnackBarBehavior.floating,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                    );
+                  },
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppColors.textDarkSecondary,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                  ),
+                  child: const Text('Clear'),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _LogStat extends StatelessWidget {
+  final String label;
+  final int count;
+  final Color color;
+
+  const _LogStat({
+    required this.label,
+    required this.count,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '$count',
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+            color: color,
+          ),
+        ),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 10,
+            color: AppColors.textDarkSecondary.withOpacity(0.7),
+          ),
+        ),
       ],
     );
   }

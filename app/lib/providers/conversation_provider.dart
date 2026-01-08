@@ -118,4 +118,11 @@ class ChatActions {
     await ChatService.instance.toggleMute(conversationId);
     _ref.invalidate(conversationsProvider);
   }
+
+  /// Retry sending a failed message
+  Future<bool> retryMessage(String messageId, String conversationId) async {
+    final success = await ChatService.instance.retryMessage(messageId, conversationId);
+    _ref.invalidate(messagesProvider(conversationId));
+    return success;
+  }
 }

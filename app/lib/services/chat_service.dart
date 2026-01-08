@@ -591,6 +591,121 @@ class ChatService {
     debugPrint('ChatService: Message $localId edited to: ${edit.newText}');
   }
 
+  /// Retry sending a failed message
+  Future<bool> retryMessage(String messageId, String conversationId) async {
+    final db = await DatabaseService.instance.database;
+
+    // Load the message
+    final rows = await db.query(
+      'messages',
+      where: 'id = ?',
+      whereArgs: [messageId],
+    );
+    if (rows.isEmpty) {
+      debugPrint('ChatService: Message not found for retry: $messageId');
+      return false;
+    }
+
+    final message = Message.fromMap(rows.first);
+
+    // Only retry failed or pending messages
+    if (message.status != MessageStatus.failed && message.status != MessageStatus.pending) {
+      debugPrint('ChatService: Message status is ${message.status}, not retrying');
+      return false;
+    }
+
+    // Get conversation for peer ID
+    final convRows = await db.query(
+      'conversations',
+      where: 'id = ?',
+      whereArgs: [conversationId],
+    );
+    if (convRows.isEmpty) {
+      debugPrint('ChatService: Conversation not found for retry');
+      return false;
+    }
+    final conversation = Conversation.fromMap(convRows.first);
+
+    if (conversation.peerId == null) {
+      debugPrint('ChatService: No peer ID for conversation');
+      return false;
+    }
+
+    // Update status to sending
+    await db.update(
+      'messages',
+      {'status': MessageStatus.sending.index},
+      where: 'id = ?',
+      whereArgs: [messageId],
+    );
+
+    // Try to send via native chat
+    if (_chatProvider == null) {
+      debugPrint('ChatService: No chat provider for retry');
+      await db.update(
+        'messages',
+        {'status': MessageStatus.failed.index},
+        where: 'id = ?',
+        whereArgs: [messageId],
+      );
+      return false;
+    }
+
+    // Only retry text messages via chat provider
+    if (message.type == MessageType.text) {
+      final result = await _chatProvider!.sendText(
+        toPeerId: conversation.peerId!,
+        text: message.content,
+        replyToMsgId: null, // Don't preserve reply on retry
+      );
+
+      if (result.success && result.nativeMsgId != null) {
+        // Store mapping
+        _nativeMsgIdToLocalId[result.nativeMsgId!] = messageId;
+        _localIdToNativeMsgId[messageId] = result.nativeMsgId!;
+
+        await db.update(
+          'messages',
+          {'status': MessageStatus.sent.index},
+          where: 'id = ?',
+          whereArgs: [messageId],
+        );
+        debugPrint('ChatService: Retry successful for message $messageId');
+        return true;
+      } else {
+        await db.update(
+          'messages',
+          {'status': MessageStatus.failed.index},
+          where: 'id = ?',
+          whereArgs: [messageId],
+        );
+        debugPrint('ChatService: Retry failed: ${result.error}');
+        return false;
+      }
+    } else {
+      // For non-text messages (file, audio), mark as failed - they need special handling
+      debugPrint('ChatService: Cannot retry non-text message type: ${message.type}');
+      await db.update(
+        'messages',
+        {'status': MessageStatus.failed.index},
+        where: 'id = ?',
+        whereArgs: [messageId],
+      );
+      return false;
+    }
+  }
+
+  /// Update message status
+  Future<void> updateMessageStatus(String messageId, MessageStatus status) async {
+    final db = await DatabaseService.instance.database;
+    await db.update(
+      'messages',
+      {'status': status.index},
+      where: 'id = ?',
+      whereArgs: [messageId],
+    );
+  }
+
   void dispose() {
     disconnectProvider();
     _messageController.close();

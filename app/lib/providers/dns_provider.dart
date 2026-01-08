@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:ffi/ffi.dart';
 import '../ffi/bindings.dart';
+import '../utils/node_id_utils.dart';
 
 /// Riverpod provider for DNS functionality
 final dnsNotifierProvider = ChangeNotifierProvider<DnsProvider>((ref) {
@@ -222,7 +223,7 @@ class DnsProvider extends ChangeNotifier {
     // Try native cache
     final nodeIdPtr = _bindings.dnsResolve(normalizedName);
     if (nodeIdPtr != null) {
-      final nodeId = _bytesToHex(nodeIdPtr, 32);
+      final nodeId = NodeIdUtils.ptrToNodeId(nodeIdPtr, 32);
       calloc.free(nodeIdPtr);
 
       final record = DnsRecord(
@@ -256,7 +257,7 @@ class DnsProvider extends ChangeNotifier {
   Future<bool> setPetname(String nodeIdHex, String petname) async {
     if (!_initialized) return false;
 
-    final nodeId = _hexToBytes(nodeIdHex);
+    final nodeId = NodeIdUtils.toBytesAsList(nodeIdHex);
     final nodeIdPtr = calloc<Uint8>(32);
 
     try {
@@ -285,7 +286,7 @@ class DnsProvider extends ChangeNotifier {
 
     if (!_initialized) return null;
 
-    final nodeId = _hexToBytes(nodeIdHex);
+    final nodeId = NodeIdUtils.toBytesAsList(nodeIdHex);
     final nodeIdPtr = calloc<Uint8>(32);
 
     try {
@@ -307,7 +308,7 @@ class DnsProvider extends ChangeNotifier {
   Future<bool> removePetname(String nodeIdHex) async {
     if (!_initialized) return false;
 
-    final nodeId = _hexToBytes(nodeIdHex);
+    final nodeId = NodeIdUtils.toBytesAsList(nodeIdHex);
     final nodeIdPtr = calloc<Uint8>(32);
 
     try {
@@ -408,7 +409,7 @@ class DnsProvider extends ChangeNotifier {
       // Try to resolve from cache
       final nodeIdPtr = _bindings.dnsResolve(name);
       if (nodeIdPtr != null) {
-        final nodeId = _bytesToHex(nodeIdPtr, 32);
+        final nodeId = NodeIdUtils.ptrToNodeId(nodeIdPtr, 32);
         calloc.free(nodeIdPtr);
 
         final record = DnsRecord(
@@ -441,24 +442,6 @@ class DnsProvider extends ChangeNotifier {
         }
       }
     }
-  }
-
-  List<int> _hexToBytes(String hex) {
-    final result = <int>[];
-    for (int i = 0; i < hex.length; i += 2) {
-      if (i + 2 <= hex.length) {
-        result.add(int.parse(hex.substring(i, i + 2), radix: 16));
-      }
-    }
-    return result;
-  }
-
-  String _bytesToHex(Pointer<Uint8> ptr, int len) {
-    final buffer = StringBuffer();
-    for (int i = 0; i < len; i++) {
-      buffer.write(ptr[i].toRadixString(16).padLeft(2, '0'));
-    }
-    return buffer.toString();
   }
 
   @override

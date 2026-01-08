@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../services/identity_service.dart';
+import '../utils/node_id_utils.dart';
 import 'dart:async';
 import 'dart:ffi';
 import 'package:flutter/foundation.dart';
@@ -120,7 +121,7 @@ class ConnectionProvider extends ChangeNotifier {
   Future<int> connect(String peerIdHex) async {
     if (!_initialized) return CyxChatError.errNull;
 
-    final peerId = _hexToBytes(peerIdHex);
+    final peerId = NodeIdUtils.toBytesAsList(peerIdHex);
     final peerIdPtr = calloc<Uint8>(32);
 
     try {
@@ -149,7 +150,7 @@ class ConnectionProvider extends ChangeNotifier {
   Future<int> disconnect(String peerIdHex) async {
     if (!_initialized) return CyxChatError.errNull;
 
-    final peerId = _hexToBytes(peerIdHex);
+    final peerId = NodeIdUtils.toBytesAsList(peerIdHex);
     final peerIdPtr = calloc<Uint8>(32);
 
     try {
@@ -196,7 +197,7 @@ class ConnectionProvider extends ChangeNotifier {
   Future<int> forceRelay(String peerIdHex) async {
     if (!_initialized) return CyxChatError.errNull;
 
-    final peerId = _hexToBytes(peerIdHex);
+    final peerId = NodeIdUtils.toBytesAsList(peerIdHex);
     final peerIdPtr = calloc<Uint8>(32);
 
     try {
@@ -261,7 +262,7 @@ class ConnectionProvider extends ChangeNotifier {
     bool changed = false;
 
     for (final peerIdHex in _peerStates.keys.toList()) {
-      final peerId = _hexToBytes(peerIdHex);
+      final peerId = NodeIdUtils.toBytesAsList(peerIdHex);
       final peerIdPtr = calloc<Uint8>(32);
 
       try {
@@ -292,16 +293,6 @@ class ConnectionProvider extends ChangeNotifier {
     if (changed) {
       notifyListeners();
     }
-  }
-
-  List<int> _hexToBytes(String hex) {
-    final result = <int>[];
-    for (int i = 0; i < hex.length; i += 2) {
-      if (i + 2 <= hex.length) {
-        result.add(int.parse(hex.substring(i, i + 2), radix: 16));
-      }
-    }
-    return result;
   }
 
   @override

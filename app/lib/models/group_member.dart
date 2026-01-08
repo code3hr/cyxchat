@@ -1,4 +1,5 @@
 import 'package:equatable/equatable.dart';
+import '../utils/node_id_utils.dart';
 
 /// Group member role
 enum GroupRole {
@@ -61,7 +62,7 @@ class GroupMember extends Equatable {
     };
   }
 
-  String get shortId => nodeId.length >= 8 ? nodeId.substring(0, 8) : nodeId;
+  String get shortId => NodeIdUtils.shortId(nodeId);
 
   String get displayText => displayName ?? shortId;
 

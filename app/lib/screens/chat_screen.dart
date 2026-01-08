@@ -6,6 +6,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:file_picker/file_picker.dart';
 import '../providers/conversation_provider.dart';
+import '../providers/connection_provider.dart';
+import '../providers/network_provider.dart';
 import '../providers/file_provider.dart';
 import '../providers/voice_provider.dart';
 import '../providers/call_provider.dart';
@@ -34,7 +36,20 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     // Mark as read when opening
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(chatActionsProvider).markAsRead(widget.conversationId);
+      // Pre-connect to peer for faster first message
+      _preConnectToPeer();
     });
+  }
+
+  /// Pre-connect to peer to establish connection before sending
+  void _preConnectToPeer() {
+    final connectionProvider = ref.read(connectionNotifierProvider);
+    if (connectionProvider.initialized) {
+      // conversationId is the peer's node ID for 1:1 chats
+      connectionProvider.connect(widget.conversationId).then((result) {
+        debugPrint('Pre-connect to ${widget.conversationId}: $result');
+      });
+    }
   }
 
   /// Listen for incoming messages and refresh UI
@@ -157,6 +172,31 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     _textController.clear();
     final replyTo = _replyToId;
     _cancelReply();
+
+    // Check connection status and wait briefly if needed
+    final connectionProvider = ref.read(connectionNotifierProvider);
+    if (!connectionProvider.initialized) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Connecting to network...'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+      // Wait a bit for connection
+      await Future.delayed(const Duration(seconds: 2));
+    }
+
+    // Pre-connect to peer before sending (ensures route is established)
+    final conversationAsync = ref.read(conversationProvider(widget.conversationId));
+    final conversation = conversationAsync.value;
+    if (conversation?.peerId != null && connectionProvider.initialized) {
+      debugPrint('ChatScreen: Ensuring connection to peer before sending...');
+      await connectionProvider.connect(conversation!.peerId!);
+      // Brief wait for route discovery
+      await Future.delayed(const Duration(milliseconds: 300));
+    }
 
     await ref.read(chatActionsProvider).sendMessage(
           conversationId: widget.conversationId,
@@ -416,14 +456,53 @@ class _MessageBubbleState extends ConsumerState<_MessageBubble> {
                         ),
                       ),
                     const SizedBox(height: 4),
-                    Text(
-                      '${widget.message.timeString}${widget.message.isEdited ? ' (edited)' : ''}${isOutgoing ? ' ${widget.message.status.icon}' : ''}',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: isOutgoing
-                            ? colorScheme.onPrimary.withOpacity(0.7)
-                            : colorScheme.onSurface.withOpacity(0.5),
-                      ),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          '${widget.message.timeString}${widget.message.isEdited ? ' (edited)' : ''}',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: isOutgoing
+                                ? colorScheme.onPrimary.withOpacity(0.7)
+                                : colorScheme.onSurface.withOpacity(0.5),
+                          ),
+                        ),
+                        if (isOutgoing) ...[
+                          const SizedBox(width: 4),
+                          if (widget.message.status == MessageStatus.failed)
+                            GestureDetector(
+                              onTap: () => _retryMessage(context),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.error_outline,
+                                    size: 14,
+                                    color: Colors.red.shade300,
+                                  ),
+                                  const SizedBox(width: 2),
+                                  Text(
+                                    'Retry',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.red.shade300,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            )
+                          else
+                            Text(
+                              widget.message.status.icon,
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: colorScheme.onPrimary.withOpacity(0.7),
+                              ),
+                            ),
+                        ],
+                      ],
                     ),
                   ],
                 ),
@@ -433,6 +512,42 @@ class _MessageBubbleState extends ConsumerState<_MessageBubble> {
         ),
       ),
     );
+  }
+
+  Future<void> _retryMessage(BuildContext context) async {
+    debugPrint('Retrying message: ${widget.message.id}');
+
+    // Show sending indicator
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Retrying...'),
+        duration: Duration(seconds: 1),
+      ),
+    );
+
+    // Retry sending via chat actions
+    final success = await ref.read(chatActionsProvider).retryMessage(
+      widget.message.id,
+      widget.conversationId,
+    );
+
+    if (context.mounted) {
+      if (success) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Message sent'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Failed to send. Try again later.'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    }
   }
 
   void _showMessageOptions(BuildContext context) {
@@ -1302,10 +1417,13 @@ class _MessageInputState extends ConsumerState<_MessageInput> {
   }
 
   Future<void> _startRecording() async {
+    debugPrint('VoiceMessage: Starting recording...');
     final recorder = ref.read(voiceRecorderProvider);
     final started = await recorder.startRecording();
+    debugPrint('VoiceMessage: Recording started=$started, state=${recorder.state}');
     if (!started && mounted) {
       final error = recorder.errorMessage ?? 'Failed to start recording';
+      debugPrint('VoiceMessage: Recording error: $error');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(error)),
       );
@@ -1316,11 +1434,23 @@ class _MessageInputState extends ConsumerState<_MessageInput> {
     final recorder = ref.read(voiceRecorderProvider);
     final voiceMessage = await recorder.stopRecording();
 
-    if (voiceMessage == null || !mounted) return;
+    debugPrint('VoiceMessage: stopRecording returned ${voiceMessage != null ? "${voiceMessage.sizeBytes} bytes, ${voiceMessage.duration.inSeconds}s" : "null"}');
+
+    if (voiceMessage == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Recording failed - no audio captured')),
+        );
+      }
+      return;
+    }
+    if (!mounted) return;
 
     // Get peer ID from conversation
     final conversationAsync = ref.read(conversationProvider(widget.conversationId));
     final conversation = conversationAsync.value;
+    debugPrint('VoiceMessage: conversation=${conversation?.id}, peerId=${conversation?.peerId}');
+
     if (conversation == null || conversation.peerId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Cannot send voice message: peer not found')),
@@ -1329,12 +1459,15 @@ class _MessageInputState extends ConsumerState<_MessageInput> {
     }
 
     // Send voice message via file transfer
+    debugPrint('VoiceMessage: Sending ${voiceMessage.sizeBytes} bytes to ${conversation.peerId}');
     final sendResult = await ref.read(fileActionsProvider).sendFile(
       toPeerId: conversation.peerId!,
       filename: voiceMessage.filename,
       data: voiceMessage.data,
       mimeType: 'audio/mp4',
     );
+
+    debugPrint('VoiceMessage: sendResult success=${sendResult.success}, fileId=${sendResult.fileId}, error=${sendResult.error}');
 
     if (sendResult.success && sendResult.fileId != null) {
       // Save audio message to conversation
@@ -1344,6 +1477,7 @@ class _MessageInputState extends ConsumerState<_MessageInput> {
         duration: voiceMessage.duration.inSeconds,
         filename: voiceMessage.filename,
       );
+      debugPrint('VoiceMessage: Audio message saved to conversation');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -1534,23 +1668,34 @@ class _MessageInputState extends ConsumerState<_MessageInput> {
                     icon: const Icon(Icons.send),
                     onPressed: widget.onSend,
                   )
-                : GestureDetector(
-                    onLongPressStart: (_) => _startRecording(),
-                    onLongPressEnd: (_) {
-                      if (ref.read(voiceRecorderProvider).isRecording) {
-                        _stopRecordingAndSend();
-                      }
-                    },
-                    child: Container(
-                      width: 48,
-                      height: 48,
-                      decoration: BoxDecoration(
-                        color: colorScheme.primary.withOpacity(0.1),
-                        shape: BoxShape.circle,
-                      ),
-                      child: Icon(
-                        Icons.mic,
-                        color: colorScheme.primary,
+                : Tooltip(
+                    message: 'Hold to record voice message',
+                    child: GestureDetector(
+                      onTap: () {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Hold the mic button to record'),
+                            duration: Duration(seconds: 2),
+                          ),
+                        );
+                      },
+                      onLongPressStart: (_) => _startRecording(),
+                      onLongPressEnd: (_) {
+                        if (ref.read(voiceRecorderProvider).isRecording) {
+                          _stopRecordingAndSend();
+                        }
+                      },
+                      child: Container(
+                        width: 48,
+                        height: 48,
+                        decoration: BoxDecoration(
+                          color: colorScheme.primary.withOpacity(0.1),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          Icons.mic,
+                          color: colorScheme.primary,
+                        ),
                       ),
                     ),
                   ),

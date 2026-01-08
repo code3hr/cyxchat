@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 import 'package:equatable/equatable.dart';
+import '../utils/node_id_utils.dart';
 
 /// Contact presence status
 enum PresenceStatus {
@@ -88,7 +89,7 @@ class Contact extends Equatable {
     };
   }
 
-  String get shortId => nodeId.length >= 8 ? nodeId.substring(0, 8) : nodeId;
+  String get shortId => NodeIdUtils.shortId(nodeId);
 
   String get displayText => displayName ?? shortId;
 

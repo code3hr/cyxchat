@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:ffi/ffi.dart';
 import '../ffi/bindings.dart';
+import '../utils/node_id_utils.dart';
 
 /// DHT node discovered event
 class DhtNodeDiscoveredEvent {
@@ -77,7 +78,7 @@ class DhtProvider extends ChangeNotifier {
     // Convert hex strings to bytes
     final nodeBytes = <int>[];
     for (final nodeIdHex in seedNodeIds) {
-      final bytes = _hexToBytes(nodeIdHex);
+      final bytes = NodeIdUtils.toBytesAsList(nodeIdHex);
       if (bytes.length != 32) continue;
       nodeBytes.addAll(bytes);
     }
@@ -109,7 +110,7 @@ class DhtProvider extends ChangeNotifier {
 
   /// Add a known node to DHT
   Future<bool> addNode(String nodeIdHex) async {
-    final bytes = _hexToBytes(nodeIdHex);
+    final bytes = NodeIdUtils.toBytesAsList(nodeIdHex);
     if (bytes.length != 32) return false;
 
     final nodeIdPtr = calloc<Uint8>(32);
@@ -133,7 +134,7 @@ class DhtProvider extends ChangeNotifier {
   /// Find a node via DHT (fire-and-forget)
   /// The node will be added to the routing table if found
   Future<bool> findNode(String targetIdHex) async {
-    final bytes = _hexToBytes(targetIdHex);
+    final bytes = NodeIdUtils.toBytesAsList(targetIdHex);
     if (bytes.length != 32) return false;
 
     final targetIdPtr = calloc<Uint8>(32);
@@ -152,7 +153,7 @@ class DhtProvider extends ChangeNotifier {
   /// Get closest known nodes to target
   /// Returns list of node ID hex strings
   List<String> getClosestNodes(String targetIdHex, {int maxNodes = 8}) {
-    final bytes = _hexToBytes(targetIdHex);
+    final bytes = NodeIdUtils.toBytesAsList(targetIdHex);
     if (bytes.length != 32) return [];
 
     final targetIdPtr = calloc<Uint8>(32);
@@ -163,7 +164,7 @@ class DhtProvider extends ChangeNotifier {
 
       final nodesList =
           _bindings.dhtGetClosest(targetIdPtr, maxNodes: maxNodes);
-      return nodesList.map((bytes) => _bytesToHex(bytes)).toList();
+      return nodesList.map((bytes) => NodeIdUtils.bytesToNodeId(bytes, bytes.length)).toList();
     } finally {
       calloc.free(targetIdPtr);
     }
@@ -173,21 +174,6 @@ class DhtProvider extends ChangeNotifier {
   void refresh() {
     _updateStats();
     notifyListeners();
-  }
-
-  // Helper methods
-  List<int> _hexToBytes(String hex) {
-    final result = <int>[];
-    for (int i = 0; i < hex.length; i += 2) {
-      if (i + 2 <= hex.length) {
-        result.add(int.parse(hex.substring(i, i + 2), radix: 16));
-      }
-    }
-    return result;
-  }
-
-  String _bytesToHex(List<int> bytes) {
-    return bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
   }
 
   @override

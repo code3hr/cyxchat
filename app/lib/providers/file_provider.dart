@@ -5,6 +5,7 @@ import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../ffi/bindings.dart';
+import '../utils/node_id_utils.dart';
 
 /// File transfer info
 class FileTransferInfo {
@@ -381,7 +382,7 @@ class FileProvider extends ChangeNotifier {
     }
 
     // Convert peer ID to native pointer
-    final peerIdBytes = _hexToBytes(toPeerId);
+    final peerIdBytes = NodeIdUtils.toBytesAsList(toPeerId);
     if (peerIdBytes.length != 32) {
       return FileSendResult(success: false, error: 'Invalid peer ID');
     }
@@ -547,17 +548,6 @@ class FileProvider extends ChangeNotifier {
 
   /// Get active transfer count
   int get activeTransferCount => _bindings.fileActiveCount();
-
-  /// Helper to convert hex string to bytes
-  List<int> _hexToBytes(String hex) {
-    final result = <int>[];
-    for (int i = 0; i < hex.length; i += 2) {
-      if (i + 2 <= hex.length) {
-        result.add(int.parse(hex.substring(i, i + 2), radix: 16));
-      }
-    }
-    return result;
-  }
 
   @override
   void dispose() {

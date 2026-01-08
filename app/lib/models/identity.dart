@@ -1,9 +1,10 @@
 import 'dart:typed_data';
 import 'package:equatable/equatable.dart';
+import '../utils/node_id_utils.dart';
 
 /// Local user identity
 class Identity extends Equatable {
-  /// 32-byte node ID (hex encoded)
+  /// Node ID (UUID format: "550e8400-e29b-41d4-a716-446655440000")
   final String nodeId;
 
   /// Display name (optional)
@@ -46,8 +47,8 @@ class Identity extends Equatable {
     };
   }
 
-  /// Short node ID for display (first 8 chars)
-  String get shortId => nodeId.length >= 8 ? nodeId.substring(0, 8) : nodeId;
+  /// Short node ID for display (first segment of UUID or first 8 chars)
+  String get shortId => NodeIdUtils.shortId(nodeId);
 
   /// Display name or short ID
   String get displayText => displayName ?? shortId;

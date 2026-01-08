@@ -104,21 +104,27 @@ class VoiceRecorderProvider extends ChangeNotifier {
 
   /// Start recording
   Future<bool> startRecording() async {
+    debugPrint('VoiceRecorder: startRecording called, current state=$_state');
     if (_state == VoiceRecordingState.recording) {
+      debugPrint('VoiceRecorder: Already recording');
       return false;
     }
 
     // Check permission first
+    debugPrint('VoiceRecorder: Checking permission...');
     final hasPermission = await checkPermission();
     if (!hasPermission) {
+      debugPrint('VoiceRecorder: No permission');
       return false;
     }
+    debugPrint('VoiceRecorder: Permission granted');
 
     try {
       // Get temp directory for recording
       final tempDir = await getTemporaryDirectory();
       final timestamp = DateTime.now().millisecondsSinceEpoch;
       _tempFilePath = '${tempDir.path}/voice_$timestamp.m4a';
+      debugPrint('VoiceRecorder: Will record to $_tempFilePath');
 
       // Configure recording - AAC codec for best compatibility
       const config = RecordConfig(
@@ -128,7 +134,9 @@ class VoiceRecorderProvider extends ChangeNotifier {
         numChannels: 1, // Mono
       );
 
+      debugPrint('VoiceRecorder: Calling recorder.start()...');
       await _recorder.start(config, path: _tempFilePath!);
+      debugPrint('VoiceRecorder: recorder.start() completed');
 
       _state = VoiceRecordingState.recording;
       _recordingDuration = Duration.zero;
@@ -146,20 +154,30 @@ class VoiceRecorderProvider extends ChangeNotifier {
       });
 
       notifyListeners();
-      debugPrint('VoiceRecorder: Started recording to $_tempFilePath');
+      debugPrint('VoiceRecorder: Recording started successfully, state=$_state');
       return true;
-    } catch (e) {
+    } catch (e, stackTrace) {
       _state = VoiceRecordingState.error;
       _errorMessage = 'Failed to start recording: $e';
       notifyListeners();
       debugPrint('VoiceRecorder: Error starting: $e');
+      debugPrint('VoiceRecorder: Stack trace: $stackTrace');
       return false;
     }
   }
 
   /// Stop recording and return voice message info
   Future<VoiceMessageInfo?> stopRecording() async {
+    debugPrint('VoiceRecorder: stopRecording called, state=$_state');
     if (_state != VoiceRecordingState.recording) {
+      debugPrint('VoiceRecorder: Not recording, returning null');
+      return null;
+    }
+
+    // Check minimum duration (at least 500ms)
+    if (_recordingDuration.inMilliseconds < 500) {
+      debugPrint('VoiceRecorder: Recording too short (${_recordingDuration.inMilliseconds}ms), cancelling');
+      await cancelRecording();
       return null;
     }
 
@@ -171,7 +189,9 @@ class VoiceRecorderProvider extends ChangeNotifier {
       notifyListeners();
 
       // Stop recording
+      debugPrint('VoiceRecorder: Stopping recorder...');
       final path = await _recorder.stop();
+      debugPrint('VoiceRecorder: Recorder stopped, path=$path, tempFilePath=$_tempFilePath');
       if (path == null || _tempFilePath == null) {
         _state = VoiceRecordingState.error;
         _errorMessage = 'Recording failed - no file created';
