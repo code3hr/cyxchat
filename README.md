@@ -179,12 +179,31 @@ Attach files using the paperclip icon:
 **Onion Mode** (default, private):
 - Max file size: 64KB
 - IP address hidden from recipient
-- Transfer rate: ~4 chunks/second
+- Transfer rate: ~4 chunks/second (90-byte chunks)
+- Best for: Text, small images, short voice messages
 
 **Direct Mode** (fast):
 - Max file size: 4GB
 - Enable in Settings → Privacy → Fast File Transfer
+- Transfer rate: Unlimited (32KB chunks)
 - Warning: Recipient can see your IP address
+
+**How Direct Mode Works:**
+
+When direct mode is enabled, peers securely exchange their public IP addresses before transferring:
+
+1. Sender's public IP:port is discovered via STUN
+2. Before sending file, sender shares address via onion routing (stays private from relays)
+3. Receiver adds sender's address to their UDP transport
+4. File chunks flow directly peer-to-peer (32KB each, no rate limit)
+5. Transfer completes in seconds instead of minutes
+
+```
+Onion Mode:  Sender → Relay → Relay → Relay → Receiver  (slow, private)
+Direct Mode: Sender ←――――――― UDP ―――――――→ Receiver     (fast, IP visible)
+```
+
+*The address exchange itself uses onion routing, so relay nodes never learn either peer's IP address.*
 
 ### Settings
 
