@@ -6,6 +6,7 @@
 #include <cyxchat/cyxchat.h>
 #include <cyxwiz/crypto.h>
 #include <cyxwiz/memory.h>
+#include <cyxwiz/log.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
