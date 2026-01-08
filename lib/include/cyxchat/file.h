@@ -489,6 +489,25 @@ CYXCHAT_API void cyxchat_file_set_transport(
     cyxwiz_transport_t *transport
 );
 
+/* Forward declare connection context */
+typedef struct cyxchat_conn_ctx cyxchat_conn_ctx_t;
+
+/**
+ * Set connection context for peer address exchange
+ *
+ * When direct mode is enabled, peers need to exchange public IP:port addresses
+ * before direct UDP communication can work. This function sets the connection
+ * context which provides the local public address (from STUN) and the ability
+ * to add peer addresses.
+ *
+ * @param ctx       File context
+ * @param conn_ctx  Connection context (from cyxchat_conn_create)
+ */
+CYXCHAT_API void cyxchat_file_set_conn_ctx(
+    cyxchat_file_ctx_t *ctx,
+    cyxchat_conn_ctx_t *conn_ctx
+);
+
 /* ============================================================
  * DHT-Based Transfer (for offline recipients)
  * ============================================================ */

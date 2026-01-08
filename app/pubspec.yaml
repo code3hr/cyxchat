@@ -43,8 +43,9 @@ dependencies:
   file_picker: ^6.1.1
 
   # Audio recording & playback (voice messages)
-  record: ^5.0.4
-  just_audio: ^0.9.36
+  record: ^6.0.0
+  just_audio: ^0.9.46
+  just_audio_windows: ^0.2.0
 
   # Video calls (WebRTC)
   flutter_webrtc: ^0.9.47

@@ -691,6 +691,8 @@ static void on_onion_delivery(
         case CYXCHAT_MSG_FILE_META:
         case CYXCHAT_MSG_FILE_CHUNK:
         case CYXCHAT_MSG_FILE_ACK:
+        case CYXCHAT_MSG_PEER_ADDR:
+        case CYXCHAT_MSG_PEER_ADDR_ACK:
             /* Route to file module if registered */
             if (ctx->file_ctx) {
                 CYXWIZ_INFO("Routing file message (type=0x%02x) to file module", type);

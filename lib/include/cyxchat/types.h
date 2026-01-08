@@ -109,6 +109,10 @@ extern "C" {
 #define CYXCHAT_MSG_CALL_REJECT     0x54    /* Reject incoming call */
 #define CYXCHAT_MSG_CALL_BUSY       0x55    /* Busy signal */
 
+/* Peer Address Exchange (0x60-0x6F) - For direct P2P mode */
+#define CYXCHAT_MSG_PEER_ADDR       0x60    /* Exchange public IP:port for direct mode */
+#define CYXCHAT_MSG_PEER_ADDR_ACK   0x61    /* Acknowledge address received */
+
 /* DNS Messages (0xD0-0xD9) - CyxChat internal DNS */
 #define CYXCHAT_MSG_DNS_REGISTER      0xD0  /* Register name with signature */
 #define CYXCHAT_MSG_DNS_REGISTER_ACK  0xD1  /* Registration confirmed */

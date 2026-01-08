@@ -232,6 +232,11 @@ class ConnectionActions {
         CyxChatBindings.instance.fileSetTransport(transport);
         debugPrint('File transport set for direct P2P transfers');
       }
+
+      // Set connection context on file context for peer address exchange
+      // This allows file module to get our public IP:port and add peer addresses
+      CyxChatBindings.instance.fileSetConnCtx();
+      debugPrint('File connection context set for peer address exchange');
     }
 
     return true;

@@ -1676,6 +1676,12 @@ class CyxChatBindings {
     if (_connCtx == null || _fileCtx == null) return;
     _native.cyxchat_conn_set_file_ctx(_connCtx!, _fileCtx!);
   }
+
+  /// Set connection context on file context for peer address exchange in direct mode
+  void fileSetConnCtx() {
+    if (_fileCtx == null || _connCtx == null) return;
+    _native.cyxchat_file_set_conn_ctx(_fileCtx!, _connCtx!);
+  }
 }
 
 /// Native function signatures
@@ -2264,6 +2270,10 @@ class CyxChatNative {
   late final cyxchat_file_set_transport = _lib.lookupFunction<
       Void Function(Pointer<Void>, Pointer<Void>),
       void Function(Pointer<Void>, Pointer<Void>)>('cyxchat_file_set_transport');
+
+  late final cyxchat_file_set_conn_ctx = _lib.lookupFunction<
+      Void Function(Pointer<Void>, Pointer<Void>),
+      void Function(Pointer<Void>, Pointer<Void>)>('cyxchat_file_set_conn_ctx');
 }
 
 // Error codes

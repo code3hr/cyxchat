@@ -6,6 +6,7 @@ import '../providers/identity_provider.dart';
 import '../providers/dns_provider.dart';
 import '../providers/contact_provider.dart';
 import '../providers/conversation_provider.dart';
+import '../utils/node_id_utils.dart';
 import 'chat_screen.dart';
 
 class AddContactScreen extends ConsumerStatefulWidget {
@@ -192,8 +193,8 @@ class _ScanTabState extends ConsumerState<_ScanTab> {
     final nodeId = parts[0];
     final pubkey = parts[1];
 
-    // Validate node ID (64 hex chars)
-    if (nodeId.length != 64 || !RegExp(r'^[0-9a-f]+$').hasMatch(nodeId)) {
+    // Validate node ID (UUID or 64 hex chars)
+    if (!NodeIdUtils.isValid(nodeId)) {
       setState(() {
         _error = 'Invalid node ID in QR code';
       });
@@ -436,9 +437,9 @@ class _ManualTabState extends ConsumerState<_ManualTab> {
             controller: widget.controller,
             decoration: const InputDecoration(
               labelText: 'Node ID',
-              hintText: 'Enter 64 hex characters',
+              hintText: 'Enter UUID (e.g., 550e8400-e29b-41d4-a716-446655440000)',
             ),
-            maxLength: 64,
+            maxLength: 64,  // Supports both UUID (36) and legacy hex (64)
             style: const TextStyle(fontFamily: 'monospace'),
           ),
           const SizedBox(height: 16),
@@ -468,10 +469,10 @@ class _ManualTabState extends ConsumerState<_ManualTab> {
   Future<void> _addContact() async {
     final nodeId = widget.controller.text.trim().toLowerCase();
 
-    // Validate node ID format (64 hex characters)
-    if (nodeId.length != 64 || !RegExp(r'^[0-9a-f]+$').hasMatch(nodeId)) {
+    // Validate node ID format (UUID or 64 hex characters)
+    if (!NodeIdUtils.isValid(nodeId)) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Invalid node ID - must be 64 hex characters')),
+        const SnackBar(content: Text('Invalid node ID - must be UUID or 64 hex characters')),
       );
       return;
     }

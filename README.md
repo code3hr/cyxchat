@@ -7,6 +7,8 @@ Privacy-first messaging application built on the [CyxWiz](https://github.com/cod
 - **True Privacy**: No phone number, no email, no central server
 - **End-to-End Encryption**: XChaCha20-Poly1305 with X25519 key exchange
 - **Anonymous Routing**: Onion routing hides metadata
+- **Voice Messages**: Hold-to-record, automatic playback with speed control
+- **File Transfer**: Send files up to 64KB via onion routing (larger with direct mode)
 - **Offline Capable**: Messages queue and sync when reconnected
 - **Group Chat**: Private groups with rotating keys
 - **Cross-Platform**: Desktop (Windows, macOS, Linux) + Mobile (iOS, Android)
@@ -100,13 +102,15 @@ In app settings, set bootstrap to `127.0.0.1:7777`
 ### First Launch
 
 On first launch, CyxChat automatically:
-1. **Generates your identity** - A unique 64-character Node ID (your address)
+1. **Generates your identity** - A unique UUID v4 Node ID (your address)
 2. **Creates encryption keys** - X25519 for key exchange, XChaCha20-Poly1305 for messages
 3. **Connects to bootstrap** - Registers with the network
 
 ### Your Node ID
 
 Your Node ID is your identity on the network - like a phone number, but anonymous.
+
+Format: `xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx` (UUID v4)
 
 1. Go to **Settings** (gear icon)
 2. Tap your **profile card** at the top
@@ -118,7 +122,7 @@ Your Node ID is your identity on the network - like a phone number, but anonymou
 **Method 1: By Node ID**
 1. Go to **Contacts** tab
 2. Tap **+** button
-3. Paste their 64-character Node ID
+3. Paste their UUID Node ID (e.g., `af494fe2-292e-4aaf-9502-56b0d4e41f93`)
 4. (Optional) Add a display name
 5. Tap **Add Contact**
 
@@ -145,14 +149,52 @@ Messages over 80 bytes are automatically **fragmented** into chunks:
 - Reassembled on recipient's device
 - Works transparently - just type and send!
 
+### Voice Messages
+
+Hold the microphone button to record, release to send:
+
+1. In chat, tap and **hold** the microphone icon (appears when text field is empty)
+2. Record your message (up to 5 minutes)
+3. **Release** to send, or slide left to cancel
+4. Voice message is compressed (AAC, ~64kbps) and sent via onion routing
+
+**Playback:**
+- Tap the **play button** to listen
+- Tap **speed** (1x/1.5x/2x) to change playback rate
+- Progress bar shows position
+
+**Transfer Times** (via onion routing):
+| Duration | Size | Transfer Time |
+|----------|------|---------------|
+| 2 seconds | ~18KB | ~50 seconds |
+| 5 seconds | ~40KB | ~2 minutes |
+| 30 seconds | ~240KB | ~10 minutes |
+
+*Note: Enable "Fast File Transfer" in Settings for instant transfers (trades privacy for speed)*
+
+### File Transfer
+
+Attach files using the paperclip icon:
+
+**Onion Mode** (default, private):
+- Max file size: 64KB
+- IP address hidden from recipient
+- Transfer rate: ~4 chunks/second
+
+**Direct Mode** (fast):
+- Max file size: 4GB
+- Enable in Settings → Privacy → Fast File Transfer
+- Warning: Recipient can see your IP address
+
 ### Settings
 
 | Setting | Description |
 |---------|-------------|
 | **Bootstrap Server** | Network entry point (default: `127.0.0.1:7777`) |
 | **Display Name** | Your name shown to contacts |
-| **Node ID** | Your unique address (tap to copy) |
+| **Node ID** | Your unique address (UUID format, tap to copy) |
 | **Network Status** | Shows connection state and peer count |
+| **Fast File Transfer** | Enable direct P2P for large files (exposes IP) |
 
 ### Network Requirements
 

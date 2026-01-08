@@ -425,6 +425,10 @@ class FileProvider extends ChangeNotifier {
           isOutgoing: true,
           startedAt: DateTime.now(),
         );
+
+        // Store sent file data so sender can play their own voice messages
+        _receivedFiles[fileId] = Uint8List.fromList(data);
+
         notifyListeners();
 
         return FileSendResult(success: true, fileId: fileId);

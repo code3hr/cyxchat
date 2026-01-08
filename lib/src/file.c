@@ -4,6 +4,7 @@
 
 #include <cyxchat/file.h>
 #include <cyxchat/chat.h>
+#include <cyxchat/connection.h>
 #include <cyxwiz/routing.h>
 #include <cyxwiz/transport.h>
 #include <cyxwiz/crypto.h>
@@ -15,10 +16,14 @@
 #include <stdio.h>
 
 #ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #define CHUNK_DELAY_MS(ms) Sleep(ms)
 #else
 #include <unistd.h>
+#include <arpa/inet.h>
 #define CHUNK_DELAY_MS(ms) usleep((ms) * 1000)
 #endif
 
@@ -42,7 +47,20 @@ typedef struct {
     int active;
     uint64_t last_chunk_sent_ms;            /* Timestamp of last chunk sent */
     size_t chunk_size;                      /* Chunk size used for this transfer */
+    int peer_addr_sent;                     /* 1 if we sent our address for this transfer */
+    int peer_addr_received;                 /* 1 if we received peer's address */
 } file_transfer_slot_t;
+
+/* Forward declare connection context for peer address exchange */
+typedef struct cyxchat_conn_ctx cyxchat_conn_ctx_t;
+
+/* Peer address message (sent via onion, contains public IP:port) */
+typedef struct {
+    uint8_t type;                           /* CYXCHAT_MSG_PEER_ADDR (0x60) */
+    uint8_t file_id[CYXCHAT_FILE_ID_SIZE];  /* Related file transfer ID (optional) */
+    uint32_t public_ip;                     /* Public IP (network byte order) */
+    uint16_t public_port;                   /* Public port (network byte order) */
+} cyxchat_peer_addr_msg_t;
 
 struct cyxchat_file_ctx {
     cyxchat_ctx_t *chat_ctx;
@@ -55,6 +73,7 @@ struct cyxchat_file_ctx {
     int use_direct_mode;            /* 0 = onion (default), 1 = direct P2P */
     cyxwiz_router_t *router;        /* Router for direct P2P sending */
     cyxwiz_transport_t *transport;  /* Transport for direct P2P (bypasses router) */
+    cyxchat_conn_ctx_t *conn_ctx;   /* Connection context for peer address exchange */
 
     /* Transfers */
     file_transfer_slot_t transfers[CYXCHAT_MAX_TRANSFERS];
@@ -580,6 +599,19 @@ cyxchat_error_t cyxchat_file_send(
     }
     memcpy(slot->data, data, data_len);
     slot->data_capacity = data_len;
+
+    /* For direct mode, send our public address BEFORE file metadata.
+     * This allows the peer to add us to their transport for direct P2P. */
+    if (ctx->use_direct_mode && ctx->conn_ctx) {
+        cyxchat_error_t addr_err = send_peer_addr_to_peer(ctx, to, &slot->transfer.meta.file_id);
+        if (addr_err != CYXCHAT_OK) {
+            CYXWIZ_WARN("file: failed to send peer addr for direct mode: %d", addr_err);
+            /* Continue anyway - maybe they already have our address */
+        } else {
+            slot->peer_addr_sent = 1;
+            CYXWIZ_INFO("file: sent peer addr for direct transfer");
+        }
+    }
 
     /* Build and send metadata message using compact wire format */
     /* Wire format: type(1) + file_id(8) + filename_len(1) + filename(N) +
@@ -1699,6 +1731,109 @@ static cyxchat_error_t handle_file_dht_ready(
     return CYXCHAT_OK;
 }
 
+/**
+ * Handle incoming PEER_ADDR message
+ * This is sent by peer before direct mode file transfer to exchange public address.
+ */
+static cyxchat_error_t handle_peer_addr(
+    cyxchat_file_ctx_t *ctx,
+    const cyxwiz_node_id_t *from,
+    const uint8_t *data,
+    size_t data_len
+) {
+    if (data_len < sizeof(cyxchat_peer_addr_msg_t) - 1) {  /* -1 for type byte already consumed */
+        CYXWIZ_WARN("file: peer addr message too short");
+        return CYXCHAT_ERR_INVALID;
+    }
+
+    /* Parse the message (type byte already consumed, data points to file_id) */
+    const uint8_t *file_id = data;
+    uint32_t public_ip;
+    uint16_t public_port;
+
+    memcpy(&public_ip, data + CYXCHAT_FILE_ID_SIZE, sizeof(uint32_t));
+    memcpy(&public_port, data + CYXCHAT_FILE_ID_SIZE + sizeof(uint32_t), sizeof(uint16_t));
+
+    /* Format IP:port string for logging and connection */
+    uint32_t ip = ntohl(public_ip);
+    uint16_t port = ntohs(public_port);
+    char addr_str[32];
+    snprintf(addr_str, sizeof(addr_str), "%u.%u.%u.%u:%u",
+        (ip >> 24) & 0xFF, (ip >> 16) & 0xFF, (ip >> 8) & 0xFF, ip & 0xFF, port);
+
+    CYXWIZ_INFO("file: received peer addr %s from peer for direct mode", addr_str);
+
+    /* Find transfer slot if file_id is specified */
+    cyxchat_file_id_t fid;
+    memcpy(fid.bytes, file_id, CYXCHAT_FILE_ID_SIZE);
+
+    /* Check if file_id is all zeros (no specific transfer) */
+    int is_zero_id = 1;
+    for (int i = 0; i < CYXCHAT_FILE_ID_SIZE && is_zero_id; i++) {
+        if (file_id[i] != 0) is_zero_id = 0;
+    }
+
+    if (!is_zero_id) {
+        file_transfer_slot_t *slot = find_transfer(ctx, &fid);
+        if (slot) {
+            slot->peer_addr_received = 1;
+            CYXWIZ_DEBUG("file: marked peer addr received for transfer");
+        }
+    }
+
+    /* Add the peer's address to our connection context for direct sending */
+    if (ctx->conn_ctx) {
+        cyxchat_error_t err = cyxchat_conn_add_peer_addr(ctx->conn_ctx, from, addr_str);
+        if (err == CYXCHAT_OK) {
+            CYXWIZ_INFO("file: added peer to transport for direct P2P");
+        } else {
+            CYXWIZ_WARN("file: failed to add peer addr: %d", err);
+        }
+    }
+
+    /* Send acknowledgment */
+    uint8_t ack[1 + CYXCHAT_FILE_ID_SIZE];
+    ack[0] = CYXCHAT_MSG_PEER_ADDR_ACK;
+    memcpy(ack + 1, file_id, CYXCHAT_FILE_ID_SIZE);
+    cyxchat_send_raw(ctx->chat_ctx, from, ack, sizeof(ack));
+
+    return CYXCHAT_OK;
+}
+
+/**
+ * Handle incoming PEER_ADDR_ACK message
+ */
+static cyxchat_error_t handle_peer_addr_ack(
+    cyxchat_file_ctx_t *ctx,
+    const cyxwiz_node_id_t *from,
+    const uint8_t *data,
+    size_t data_len
+) {
+    CYXWIZ_DEBUG("file: received peer addr ACK from peer");
+
+    /* Find transfer if file_id specified */
+    if (data_len >= CYXCHAT_FILE_ID_SIZE) {
+        cyxchat_file_id_t fid;
+        memcpy(fid.bytes, data, CYXCHAT_FILE_ID_SIZE);
+
+        /* Check if file_id is all zeros */
+        int is_zero_id = 1;
+        for (int i = 0; i < CYXCHAT_FILE_ID_SIZE && is_zero_id; i++) {
+            if (data[i] != 0) is_zero_id = 0;
+        }
+
+        if (!is_zero_id) {
+            file_transfer_slot_t *slot = find_transfer(ctx, &fid);
+            if (slot) {
+                /* Peer received our address - they can now send to us directly */
+                CYXWIZ_DEBUG("file: peer confirmed receipt of our address");
+            }
+        }
+    }
+
+    return CYXCHAT_OK;
+}
+
 cyxchat_error_t cyxchat_file_handle_message(
     cyxchat_file_ctx_t *ctx,
     const cyxwiz_node_id_t *from,
@@ -1741,6 +1876,13 @@ cyxchat_error_t cyxchat_file_handle_message(
         case CYXCHAT_MSG_FILE_DHT_READY:
             return handle_file_dht_ready(ctx, from, data, data_len);
 
+        /* Peer address exchange for direct mode */
+        case CYXCHAT_MSG_PEER_ADDR:
+            return handle_peer_addr(ctx, from, data, data_len);
+
+        case CYXCHAT_MSG_PEER_ADDR_ACK:
+            return handle_peer_addr_ack(ctx, from, data, data_len);
+
         default:
             return CYXCHAT_ERR_INVALID;
     }
@@ -1773,6 +1915,60 @@ void cyxchat_file_set_transport(cyxchat_file_ctx_t *ctx, cyxwiz_transport_t *tra
         ctx->transport = transport;
         CYXWIZ_INFO("file: transport set for direct P2P transfers");
     }
+}
+
+void cyxchat_file_set_conn_ctx(cyxchat_file_ctx_t *ctx, cyxchat_conn_ctx_t *conn_ctx) {
+    if (ctx) {
+        ctx->conn_ctx = conn_ctx;
+        CYXWIZ_INFO("file: connection context set for peer address exchange");
+    }
+}
+
+/**
+ * Send our public address to peer via onion routing (stays private from relay nodes).
+ * This must be called before direct P2P file transfer can work.
+ */
+static cyxchat_error_t send_peer_addr_to_peer(
+    cyxchat_file_ctx_t *ctx,
+    const cyxwiz_node_id_t *peer_id,
+    const cyxchat_file_id_t *file_id
+) {
+    if (!ctx || !peer_id) {
+        return CYXCHAT_ERR_NULL;
+    }
+
+    /* Get our public address from connection context */
+    if (!ctx->conn_ctx) {
+        CYXWIZ_WARN("file: cannot send peer addr - no connection context");
+        return CYXCHAT_ERR_NETWORK;
+    }
+
+    cyxchat_network_status_t status;
+    cyxchat_conn_get_status(ctx->conn_ctx, &status);
+
+    if (!status.stun_complete) {
+        CYXWIZ_WARN("file: cannot send peer addr - STUN not complete");
+        return CYXCHAT_ERR_NETWORK;
+    }
+
+    /* Build peer address message */
+    cyxchat_peer_addr_msg_t msg;
+    memset(&msg, 0, sizeof(msg));
+    msg.type = CYXCHAT_MSG_PEER_ADDR;
+    if (file_id) {
+        memcpy(msg.file_id, file_id->bytes, CYXCHAT_FILE_ID_SIZE);
+    }
+    msg.public_ip = status.public_ip;
+    msg.public_port = status.public_port;
+
+    /* Log what we're sending */
+    uint32_t ip = ntohl(status.public_ip);
+    uint16_t port = ntohs(status.public_port);
+    CYXWIZ_INFO("file: sending peer addr %u.%u.%u.%u:%u to peer for direct mode",
+        (ip >> 24) & 0xFF, (ip >> 16) & 0xFF, (ip >> 8) & 0xFF, ip & 0xFF, port);
+
+    /* Send via onion routing (chat layer) - address stays private from relays */
+    return cyxchat_send_raw(ctx->chat_ctx, peer_id, (uint8_t *)&msg, sizeof(msg));
 }
 
 cyxchat_error_t cyxchat_file_set_direct_mode(cyxchat_file_ctx_t *ctx, int direct) {

@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 import '../models/models.dart';
 import '../providers/chat_provider.dart';
+import '../utils/node_id_utils.dart';
 import 'database_service.dart';
 import 'identity_service.dart';
 
@@ -265,8 +266,12 @@ class ChatService {
   }) async {
     final db = await DatabaseService.instance.database;
 
+    // Normalize peer ID format (convert 64-char hex with trailing zeros to UUID)
+    final normalizedPeerId = _normalizePeerId(fromPeerId);
+    debugPrint('ChatService: Normalized peer ID: $fromPeerId -> $normalizedPeerId');
+
     // Get or create conversation with sender
-    final conversation = await getOrCreateDirectConversation(fromPeerId);
+    final conversation = await getOrCreateDirectConversation(normalizedPeerId);
 
     // Detect if this is a voice message (check filename pattern and extension)
     final isVoiceMessage = filename.startsWith('voice_') &&
@@ -745,6 +750,28 @@ class ChatService {
       default:
         return value.round();
     }
+  }
+
+  /// Normalize peer ID from 64-char hex (with trailing zeros) to UUID format
+  String _normalizePeerId(String peerId) {
+    // If already UUID format, return as-is
+    if (NodeIdUtils.isUuidFormat(peerId)) {
+      return peerId;
+    }
+
+    // Check if it's 64-char hex with trailing zeros (UUID stored in 32 bytes)
+    if (peerId.length == 64) {
+      // Check if bytes 17-32 (chars 32-63) are all zeros
+      final trailingPart = peerId.substring(32);
+      if (trailingPart == '0' * 32) {
+        // Convert first 32 chars (16 bytes) to UUID format
+        final hexPart = peerId.substring(0, 32);
+        return '${hexPart.substring(0, 8)}-${hexPart.substring(8, 12)}-${hexPart.substring(12, 16)}-${hexPart.substring(16, 20)}-${hexPart.substring(20, 32)}';
+      }
+    }
+
+    // Return as-is if no conversion needed
+    return peerId;
   }
 
   void dispose() {
