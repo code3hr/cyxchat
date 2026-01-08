@@ -268,14 +268,33 @@ class ChatService {
     // Get or create conversation with sender
     final conversation = await getOrCreateDirectConversation(fromPeerId);
 
-    // Create file message (content is JSON with file metadata)
-    final fileContent = '{"fileId":"$fileId","filename":"$filename","size":"$fileSize"}';
+    // Detect if this is a voice message (check filename pattern and extension)
+    final isVoiceMessage = filename.startsWith('voice_') &&
+        (filename.endsWith('.m4a') || filename.endsWith('.aac') || filename.endsWith('.opus'));
+
+    // Create message content based on type
+    final String fileContent;
+    final MessageType messageType;
+
+    if (isVoiceMessage) {
+      // Voice message - extract duration from size estimate (rough: 8kbps = 1KB/s)
+      final sizeBytes = _parseSizeToBytes(fileSize);
+      final estimatedDuration = (sizeBytes / 8000).round(); // Rough estimate
+      fileContent = '{"fileId":"$fileId","duration":$estimatedDuration,"filename":"$filename"}';
+      messageType = MessageType.audio;
+      debugPrint('ChatService: Received voice message: $filename ($fileSize)');
+    } else {
+      // Regular file
+      fileContent = '{"fileId":"$fileId","filename":"$filename","size":"$fileSize"}';
+      messageType = MessageType.file;
+      debugPrint('ChatService: Received file: $filename ($fileSize)');
+    }
 
     final message = Message(
       id: _uuid.v4(),
       conversationId: conversation.id,
       senderId: fromPeerId,
-      type: MessageType.file,
+      type: messageType,
       content: fileContent,
       timestamp: DateTime.now(),
       status: MessageStatus.delivered,
@@ -704,6 +723,28 @@ class ChatService {
       where: 'id = ?',
       whereArgs: [messageId],
     );
+  }
+
+  /// Parse size string (e.g., "12.5 KB", "1.2 MB") to bytes
+  int _parseSizeToBytes(String sizeStr) {
+    final match = RegExp(r'([\d.]+)\s*(\w+)').firstMatch(sizeStr);
+    if (match == null) return 0;
+
+    final value = double.tryParse(match.group(1) ?? '0') ?? 0;
+    final unit = match.group(2)?.toUpperCase() ?? 'B';
+
+    switch (unit) {
+      case 'B':
+        return value.round();
+      case 'KB':
+        return (value * 1024).round();
+      case 'MB':
+        return (value * 1024 * 1024).round();
+      case 'GB':
+        return (value * 1024 * 1024 * 1024).round();
+      default:
+        return value.round();
+    }
   }
 
   void dispose() {
