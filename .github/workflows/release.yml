@@ -21,7 +21,7 @@ jobs:
       - name: Checkout CyxWiz (parent)
         uses: actions/checkout@v4
         with:
-          repository: ${{ github.repository_owner }}/cyxwiz
+          repository: ${{ github.repository_owner }}/conspiracy
           path: cyxwiz
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -100,7 +100,7 @@ jobs:
       - name: Checkout CyxWiz (parent)
         uses: actions/checkout@v4
         with:
-          repository: ${{ github.repository_owner }}/cyxwiz
+          repository: ${{ github.repository_owner }}/conspiracy
           path: cyxwiz
           token: ${{ secrets.GITHUB_TOKEN }}
 
