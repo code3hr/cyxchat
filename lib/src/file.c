@@ -579,11 +579,10 @@ cyxchat_error_t cyxchat_file_send(
     cyxwiz_crypto_random(slot->transfer.meta.file_key, 32);
 
     /* Set metadata */
-    memset(slot->transfer.meta.filename, 0, sizeof(slot->transfer.meta.filename));
-    strncpy(slot->transfer.meta.filename, filename, sizeof(slot->transfer.meta.filename) - 1);
+    snprintf(slot->transfer.meta.filename, sizeof(slot->transfer.meta.filename), "%s", filename);
     if (mime_type) {
     memset(slot->transfer.meta.mime_type, 0, sizeof(slot->transfer.meta.mime_type));
-    strncpy(slot->transfer.meta.mime_type, mime_type, sizeof(slot->transfer.meta.mime_type) - 1);
+    snprintf(slot->transfer.meta.mime_type, sizeof(slot->transfer.meta.mime_type), "%s", mime_type);
     } else {
         /* Detect from extension */
         const char *detected = cyxchat_file_detect_mime(filename);
@@ -1242,10 +1241,8 @@ static cyxchat_error_t handle_file_meta(
 
     /* Fill in metadata */
     memcpy(&slot->transfer.meta.file_id, &file_id, sizeof(cyxchat_file_id_t));
-    memset(slot->transfer.meta.filename, 0, sizeof(slot->transfer.meta.filename));
-    memset(slot->transfer.meta.mime_type, 0, sizeof(slot->transfer.meta.mime_type));
-    strncpy(slot->transfer.meta.filename, filename, sizeof(slot->transfer.meta.filename) - 1);
-    strncpy(slot->transfer.meta.mime_type, mime_type, sizeof(slot->transfer.meta.mime_type) - 1);
+    snprintf(slot->transfer.meta.filename, sizeof(slot->transfer.meta.filename), "%s", filename);
+    snprintf(slot->transfer.meta.mime_type, sizeof(slot->transfer.meta.mime_type), "%s", mime_type);
     slot->transfer.meta.size = size;
     slot->transfer.meta.chunk_count = chunk_count;
     memcpy(slot->transfer.meta.file_hash, file_hash, 32);
@@ -1452,8 +1449,7 @@ static cyxchat_error_t handle_file_offer(
 
     /* Fill in metadata */
     memcpy(&slot->transfer.meta.file_id, &file_id, sizeof(cyxchat_file_id_t));
-    memset(slot->transfer.meta.filename, 0, sizeof(slot->transfer.meta.filename));
-    strncpy(slot->transfer.meta.filename, filename, sizeof(slot->transfer.meta.filename) - 1);
+    snprintf(slot->transfer.meta.filename, sizeof(slot->transfer.meta.filename), "%s", filename);
     slot->transfer.meta.size = encrypted_size;
     slot->transfer.meta.chunk_count = chunk_count;
     memcpy(slot->transfer.meta.file_hash, file_hash, 32);
