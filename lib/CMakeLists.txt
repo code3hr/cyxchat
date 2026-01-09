@@ -174,7 +174,7 @@ if(CYXCHAT_BUILD_SHARED)
             $<INSTALL_INTERFACE:include>
         PRIVATE
             ${CYXWIZ_INCLUDE_DIR}
-            ${SODIUM_INCLUDE_DIRS}
+            ${SODIUM_INCLUDE_DIRS} ${SODIUM_INCLUDE_DIR}
     )
     target_compile_definitions(cyxchat PRIVATE CYXCHAT_EXPORTS CYXWIZ_HAS_CRYPTO)
 
@@ -212,7 +212,7 @@ if(CYXCHAT_BUILD_STATIC)
             $<INSTALL_INTERFACE:include>
         PRIVATE
             ${CYXWIZ_INCLUDE_DIR}
-            ${SODIUM_INCLUDE_DIRS}
+            ${SODIUM_INCLUDE_DIRS} ${SODIUM_INCLUDE_DIR}
     )
 
     target_compile_definitions(cyxchat_static PRIVATE CYXCHAT_STATIC CYXWIZ_HAS_CRYPTO)
@@ -254,7 +254,7 @@ if(CYXCHAT_BUILD_TESTS)
     target_include_directories(test_cyxchat PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include
         ${CYXWIZ_INCLUDE_DIR}
-        ${SODIUM_INCLUDE_DIRS}
+        ${SODIUM_INCLUDE_DIRS} ${SODIUM_INCLUDE_DIR}
     )
     target_compile_definitions(test_cyxchat PRIVATE CYXCHAT_STATIC CYXWIZ_HAS_CRYPTO)
 
