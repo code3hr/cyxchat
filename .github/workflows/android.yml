@@ -94,6 +94,15 @@ jobs:
           grep -r "crypto_secretbox_xchacha20poly1305_NONCEBYTES" libsodium/libsodium-android-armv8-a+crypto/include/ || echo "Constant not found!"
           echo "=== Checking sodium.h includes ==="
           grep "crypto_secretbox" libsodium/libsodium-android-armv8-a+crypto/include/sodium.h | head -5
+          echo "=== Testing preprocess with Android clang ==="
+          cat > /tmp/test_sodium.c << 'TESTEOF'
+          #include <sodium.h>
+          int main() { return crypto_secretbox_xchacha20poly1305_NONCEBYTES; }
+          TESTEOF
+          $ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/clang \
+            --target=aarch64-none-linux-android21 \
+            -I${{ github.workspace }}/libsodium/libsodium-android-armv8-a+crypto/include \
+            -E /tmp/test_sodium.c 2>&1 | tail -30 || echo "Preprocess test failed"
 
       # Build libcyxwiz for Android
       # We need to explicitly set SODIUM_INCLUDE_DIR and SODIUM_LIBRARY to prevent
