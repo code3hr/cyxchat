@@ -118,6 +118,15 @@ jobs:
             --target=aarch64-none-linux-android21 \
             -I${{ github.workspace }}/libsodium/libsodium-android-armv8-a+crypto/include \
             -E /tmp/test2.c 2>&1 | tail -10 || echo "Direct include failed"
+          echo "=== Include chain with -H (show all includes) ==="
+          $ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/clang \
+            --target=aarch64-none-linux-android21 \
+            -I${{ github.workspace }}/libsodium/libsodium-android-armv8-a+crypto/include \
+            -H -E /tmp/test_sodium.c 2>&1 | grep -i "xchacha\|crypto_secretbox" | head -10 || echo "No xchacha includes found"
+          echo "=== Showing sodium.h content (lines 10-30) ==="
+          sed -n '10,30p' ${{ github.workspace }}/libsodium/libsodium-android-armv8-a+crypto/include/sodium.h
+          echo "=== Showing sodium.h content (lines 45-65) ==="
+          sed -n '45,65p' ${{ github.workspace }}/libsodium/libsodium-android-armv8-a+crypto/include/sodium.h
 
       # Build libcyxwiz for Android
       # We need to explicitly set SODIUM_INCLUDE_DIR and SODIUM_LIBRARY to prevent
