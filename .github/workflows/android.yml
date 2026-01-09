@@ -85,10 +85,9 @@ jobs:
 
       # Build libcyxwiz for Android
       - name: Build libcyxwiz for Android (arm64-v8a)
-        env:
-          SODIUM_ROOT: ${{ github.workspace }}/libsodium/libsodium-android-armv8-a+crypto
         run: |
           cd cyxwiz
+          export SODIUM_ROOT=${{ github.workspace }}/libsodium/libsodium-android-armv8-a+crypto
           cmake -B build-android-arm64 \
             -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=arm64-v8a \
@@ -99,18 +98,14 @@ jobs:
             -DCYXWIZ_TRANSPORT_BLUETOOTH=OFF \
             -DCYXWIZ_TRANSPORT_WIFI=OFF \
             -DCYXWIZ_TRANSPORT_LORA=OFF \
-            -DSODIUM_ROOT_DIR=$SODIUM_ROOT \
-            -DSODIUM_INCLUDE_DIR=$SODIUM_ROOT/include \
-            -DSODIUM_LIBRARY=$SODIUM_ROOT/lib/libsodium.a \
-            -DCMAKE_C_FLAGS="-I$SODIUM_ROOT/include" \
+            -DCMAKE_PREFIX_PATH=$SODIUM_ROOT \
             -G Ninja
           cmake --build build-android-arm64 --config Release
 
       - name: Build libcyxwiz for Android (armeabi-v7a)
-        env:
-          SODIUM_ROOT: ${{ github.workspace }}/libsodium/libsodium-android-armv7-a
         run: |
           cd cyxwiz
+          export SODIUM_ROOT=${{ github.workspace }}/libsodium/libsodium-android-armv7-a
           cmake -B build-android-arm32 \
             -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=armeabi-v7a \
@@ -121,18 +116,14 @@ jobs:
             -DCYXWIZ_TRANSPORT_BLUETOOTH=OFF \
             -DCYXWIZ_TRANSPORT_WIFI=OFF \
             -DCYXWIZ_TRANSPORT_LORA=OFF \
-            -DSODIUM_ROOT_DIR=$SODIUM_ROOT \
-            -DSODIUM_INCLUDE_DIR=$SODIUM_ROOT/include \
-            -DSODIUM_LIBRARY=$SODIUM_ROOT/lib/libsodium.a \
-            -DCMAKE_C_FLAGS="-I$SODIUM_ROOT/include" \
+            -DCMAKE_PREFIX_PATH=$SODIUM_ROOT \
             -G Ninja
           cmake --build build-android-arm32 --config Release
 
       - name: Build libcyxwiz for Android (x86_64)
-        env:
-          SODIUM_ROOT: ${{ github.workspace }}/libsodium/libsodium-android-westmere
         run: |
           cd cyxwiz
+          export SODIUM_ROOT=${{ github.workspace }}/libsodium/libsodium-android-westmere
           cmake -B build-android-x64 \
             -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=x86_64 \
@@ -143,19 +134,15 @@ jobs:
             -DCYXWIZ_TRANSPORT_BLUETOOTH=OFF \
             -DCYXWIZ_TRANSPORT_WIFI=OFF \
             -DCYXWIZ_TRANSPORT_LORA=OFF \
-            -DSODIUM_ROOT_DIR=$SODIUM_ROOT \
-            -DSODIUM_INCLUDE_DIR=$SODIUM_ROOT/include \
-            -DSODIUM_LIBRARY=$SODIUM_ROOT/lib/libsodium.a \
-            -DCMAKE_C_FLAGS="-I$SODIUM_ROOT/include" \
+            -DCMAKE_PREFIX_PATH=$SODIUM_ROOT \
             -G Ninja
           cmake --build build-android-x64 --config Release
 
       # Build libcyxchat for Android
       - name: Build libcyxchat for Android (arm64-v8a)
-        env:
-          SODIUM_DIR: ${{ github.workspace }}/libsodium/libsodium-android-armv8-a+crypto
         run: |
           cd lib
+          export SODIUM_ROOT=${{ github.workspace }}/libsodium/libsodium-android-armv8-a+crypto
           cmake -B build-android-arm64 \
             -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=arm64-v8a \
@@ -163,19 +150,17 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DCYXWIZ_ROOT=${{ github.workspace }}/cyxwiz \
             -DCYXWIZ_BUILD_DIR=${{ github.workspace }}/cyxwiz/build-android-arm64 \
-            -DSODIUM_INCLUDE_DIR=$SODIUM_DIR/include \
-            -DSODIUM_LIBRARY=$SODIUM_DIR/lib/libsodium.a \
-            -DCMAKE_C_FLAGS="-I$SODIUM_DIR/include" \
+            -DSODIUM_INCLUDE_DIR=$SODIUM_ROOT/include \
+            -DSODIUM_LIBRARY=$SODIUM_ROOT/lib/libsodium.a \
             -DCYXCHAT_BUILD_TESTS=OFF \
             -DCYXCHAT_BUILD_STATIC=OFF \
             -G Ninja
           cmake --build build-android-arm64 --config Release
 
       - name: Build libcyxchat for Android (armeabi-v7a)
-        env:
-          SODIUM_DIR: ${{ github.workspace }}/libsodium/libsodium-android-armv7-a
         run: |
           cd lib
+          export SODIUM_ROOT=${{ github.workspace }}/libsodium/libsodium-android-armv7-a
           cmake -B build-android-arm32 \
             -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=armeabi-v7a \
@@ -183,19 +168,17 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DCYXWIZ_ROOT=${{ github.workspace }}/cyxwiz \
             -DCYXWIZ_BUILD_DIR=${{ github.workspace }}/cyxwiz/build-android-arm32 \
-            -DSODIUM_INCLUDE_DIR=$SODIUM_DIR/include \
-            -DSODIUM_LIBRARY=$SODIUM_DIR/lib/libsodium.a \
-            -DCMAKE_C_FLAGS="-I$SODIUM_DIR/include" \
+            -DSODIUM_INCLUDE_DIR=$SODIUM_ROOT/include \
+            -DSODIUM_LIBRARY=$SODIUM_ROOT/lib/libsodium.a \
             -DCYXCHAT_BUILD_TESTS=OFF \
             -DCYXCHAT_BUILD_STATIC=OFF \
             -G Ninja
           cmake --build build-android-arm32 --config Release
 
       - name: Build libcyxchat for Android (x86_64)
-        env:
-          SODIUM_DIR: ${{ github.workspace }}/libsodium/libsodium-android-westmere
         run: |
           cd lib
+          export SODIUM_ROOT=${{ github.workspace }}/libsodium/libsodium-android-westmere
           cmake -B build-android-x64 \
             -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=x86_64 \
@@ -203,9 +186,8 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DCYXWIZ_ROOT=${{ github.workspace }}/cyxwiz \
             -DCYXWIZ_BUILD_DIR=${{ github.workspace }}/cyxwiz/build-android-x64 \
-            -DSODIUM_INCLUDE_DIR=$SODIUM_DIR/include \
-            -DSODIUM_LIBRARY=$SODIUM_DIR/lib/libsodium.a \
-            -DCMAKE_C_FLAGS="-I$SODIUM_DIR/include" \
+            -DSODIUM_INCLUDE_DIR=$SODIUM_ROOT/include \
+            -DSODIUM_LIBRARY=$SODIUM_ROOT/lib/libsodium.a \
             -DCYXCHAT_BUILD_TESTS=OFF \
             -DCYXCHAT_BUILD_STATIC=OFF \
             -G Ninja
