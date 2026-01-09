@@ -120,13 +120,13 @@ jobs:
       - name: Build CyxWiz library
         run: |
           cd cyxwiz
-          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_POSITION_INDEPENDENT_CODE=ON
           cmake --build build --config Release
 
       - name: Build CyxChat library
         run: |
           cd cyxchat/lib
-          cmake -B build -DCMAKE_BUILD_TYPE=Release "-DCYXWIZ_LIBRARY=${{ github.workspace }}/cyxwiz/build/libcyxwiz.a" "-DCYXWIZ_INCLUDE_DIR=${{ github.workspace }}/cyxwiz/include"
+          cmake -B build -DCMAKE_BUILD_TYPE=Release "-DCYXWIZ_LIBRARY=${{ github.workspace }}/cyxwiz/build/libcyxwiz.a" "-DCYXWIZ_INCLUDE_DIR=${{ github.workspace }}/cyxwiz/include" -DCMAKE_POSITION_INDEPENDENT_CODE=ON
           cmake --build build --config Release
 
       - name: Build Flutter app
