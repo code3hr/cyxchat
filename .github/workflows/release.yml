@@ -49,7 +49,7 @@ jobs:
       - name: Build CyxChat library
         run: |
           cd cyxchat\lib
-          cmake -B build -DCMAKE_BUILD_TYPE=Release "-DCYXWIZ_LIBRARY=${{ github.workspace }}\cyxwiz\build\Release\cyxwiz.lib" "-DCYXWIZ_INCLUDE_DIR=${{ github.workspace }}\cyxwiz\include" -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake -DSODIUM_INCLUDE_DIR=C:/vcpkg/installed/x64-windows/include -DSODIUM_LIBRARY=C:/vcpkg/installed/x64-windows/lib/libsodium.lib
+          cmake -B build -DCMAKE_BUILD_TYPE=Release "-DCYXWIZ_LIBRARY=${{ github.workspace }}\cyxwiz\build\Release\cyxwiz.lib" "-DCYXWIZ_INCLUDE_DIR=${{ github.workspace }}\cyxwiz\include" -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake "-DCMAKE_C_FLAGS=/IC:/vcpkg/installed/x64-windows/include"
           cmake --build build --config Release
         shell: cmd
 
