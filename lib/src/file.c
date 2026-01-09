@@ -92,6 +92,16 @@ struct cyxchat_file_ctx {
     cyxchat_on_file_error_t on_error;
     void *on_error_data;
 };
+/* ============================================================
+ * Forward Declarations
+ * ============================================================ */
+
+static cyxchat_error_t send_peer_addr_to_peer(
+    cyxchat_file_ctx_t *ctx,
+    const cyxwiz_node_id_t *to,
+    const cyxchat_file_id_t *file_id
+);
+
 
 /* ============================================================
  * Helper Functions
