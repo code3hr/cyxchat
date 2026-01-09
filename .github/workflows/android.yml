@@ -67,6 +67,7 @@ jobs:
           cd libsodium
           export ANDROID_NDK_HOME=$ANDROID_NDK_HOME
           export NDK_PLATFORM=android-${{ env.ANDROID_API_LEVEL }}
+          export LIBSODIUM_FULL_BUILD=1
           ./dist-build/android-armv8-a.sh
 
       - name: Build libsodium for Android (armeabi-v7a)
@@ -74,6 +75,7 @@ jobs:
           cd libsodium
           export ANDROID_NDK_HOME=$ANDROID_NDK_HOME
           export NDK_PLATFORM=android-${{ env.ANDROID_API_LEVEL }}
+          export LIBSODIUM_FULL_BUILD=1
           ./dist-build/android-armv7-a.sh
 
       - name: Build libsodium for Android (x86_64)
@@ -81,6 +83,7 @@ jobs:
           cd libsodium
           export ANDROID_NDK_HOME=$ANDROID_NDK_HOME
           export NDK_PLATFORM=android-${{ env.ANDROID_API_LEVEL }}
+          export LIBSODIUM_FULL_BUILD=1
           ./dist-build/android-x86_64.sh
 
       - name: Verify libsodium headers
