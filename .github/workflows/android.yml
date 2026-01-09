@@ -95,14 +95,29 @@ jobs:
           echo "=== Checking sodium.h includes ==="
           grep "crypto_secretbox" libsodium/libsodium-android-armv8-a+crypto/include/sodium.h | head -5
           echo "=== Testing preprocess with Android clang ==="
-          cat > /tmp/test_sodium.c << 'TESTEOF'
-          #include <sodium.h>
-          int main() { return crypto_secretbox_xchacha20poly1305_NONCEBYTES; }
-          TESTEOF
+          # Create test file without leading whitespace
+          echo '#include <sodium.h>' > /tmp/test_sodium.c
+          echo 'int main() { return crypto_secretbox_xchacha20poly1305_NONCEBYTES; }' >> /tmp/test_sodium.c
+          echo "=== Test file contents ==="
+          cat /tmp/test_sodium.c
+          echo "=== Running preprocessor (errors only) ==="
           $ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/clang \
             --target=aarch64-none-linux-android21 \
             -I${{ github.workspace }}/libsodium/libsodium-android-armv8-a+crypto/include \
-            -E /tmp/test_sodium.c 2>&1 | tail -30 || echo "Preprocess test failed"
+            -E /tmp/test_sodium.c > /tmp/preprocess_out.txt 2> /tmp/preprocess_err.txt || true
+          echo "=== Preprocessor errors ==="
+          cat /tmp/preprocess_err.txt || true
+          echo "=== Last 5 lines of preprocess output ==="
+          tail -5 /tmp/preprocess_out.txt || true
+          echo "=== Searching for NONCEBYTES expansion ==="
+          grep -o "24U\|crypto_secretbox_xchacha20poly1305_NONCEBYTES" /tmp/preprocess_out.txt | tail -5 || echo "Neither found!"
+          echo "=== Direct header test ==="
+          echo '#include "sodium/crypto_secretbox_xchacha20poly1305.h"' > /tmp/test2.c
+          echo 'int x = crypto_secretbox_xchacha20poly1305_NONCEBYTES;' >> /tmp/test2.c
+          $ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/clang \
+            --target=aarch64-none-linux-android21 \
+            -I${{ github.workspace }}/libsodium/libsodium-android-armv8-a+crypto/include \
+            -E /tmp/test2.c 2>&1 | tail -10 || echo "Direct include failed"
 
       # Build libcyxwiz for Android
       # We need to explicitly set SODIUM_INCLUDE_DIR and SODIUM_LIBRARY to prevent
