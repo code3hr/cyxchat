@@ -24,3 +24,18 @@ plugins {
 }
 
 include(":app")
+
+// Fix for plugins that use flutter.compileSdkVersion (like record_android)
+// Must be configured here before subprojects are evaluated
+gradle.beforeProject {
+    if (name != "app" && name != rootProject.name) {
+        extensions.create("flutter", FlutterExtension::class.java)
+    }
+}
+
+open class FlutterExtension {
+    val compileSdkVersion: Int = 35
+    val minSdkVersion: Int = 21
+    val targetSdkVersion: Int = 35
+    val ndkVersion: String = "26.1.10909125"
+}

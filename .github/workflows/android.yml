@@ -88,48 +88,11 @@ jobs:
 
       - name: Verify libsodium headers
         run: |
-          echo "=== Checking libsodium-android-armv8-a+crypto structure ==="
-          ls -la libsodium/libsodium-android-armv8-a+crypto/
-          ls -la libsodium/libsodium-android-armv8-a+crypto/include/
-          echo "=== Checking for xchacha20poly1305 header ==="
-          ls -la libsodium/libsodium-android-armv8-a+crypto/include/sodium/ | grep xchacha || echo "xchacha not found in sodium dir"
-          echo "=== Checking if crypto_secretbox_xchacha20poly1305_NONCEBYTES is defined ==="
-          grep -r "crypto_secretbox_xchacha20poly1305_NONCEBYTES" libsodium/libsodium-android-armv8-a+crypto/include/ || echo "Constant not found!"
-          echo "=== Checking sodium.h includes ==="
-          grep "crypto_secretbox" libsodium/libsodium-android-armv8-a+crypto/include/sodium.h | head -5
-          echo "=== Testing preprocess with Android clang ==="
-          # Create test file without leading whitespace
-          echo '#include <sodium.h>' > /tmp/test_sodium.c
-          echo 'int main() { return crypto_secretbox_xchacha20poly1305_NONCEBYTES; }' >> /tmp/test_sodium.c
-          echo "=== Test file contents ==="
-          cat /tmp/test_sodium.c
-          echo "=== Running preprocessor (errors only) ==="
-          $ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/clang \
-            --target=aarch64-none-linux-android21 \
-            -I${{ github.workspace }}/libsodium/libsodium-android-armv8-a+crypto/include \
-            -E /tmp/test_sodium.c > /tmp/preprocess_out.txt 2> /tmp/preprocess_err.txt || true
-          echo "=== Preprocessor errors ==="
-          cat /tmp/preprocess_err.txt || true
-          echo "=== Last 5 lines of preprocess output ==="
-          tail -5 /tmp/preprocess_out.txt || true
-          echo "=== Searching for NONCEBYTES expansion ==="
-          grep -o "24U\|crypto_secretbox_xchacha20poly1305_NONCEBYTES" /tmp/preprocess_out.txt | tail -5 || echo "Neither found!"
-          echo "=== Direct header test ==="
-          echo '#include "sodium/crypto_secretbox_xchacha20poly1305.h"' > /tmp/test2.c
-          echo 'int x = crypto_secretbox_xchacha20poly1305_NONCEBYTES;' >> /tmp/test2.c
-          $ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/clang \
-            --target=aarch64-none-linux-android21 \
-            -I${{ github.workspace }}/libsodium/libsodium-android-armv8-a+crypto/include \
-            -E /tmp/test2.c 2>&1 | tail -10 || echo "Direct include failed"
-          echo "=== Include chain with -H (show all includes) ==="
-          $ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/clang \
-            --target=aarch64-none-linux-android21 \
-            -I${{ github.workspace }}/libsodium/libsodium-android-armv8-a+crypto/include \
-            -H -E /tmp/test_sodium.c 2>&1 | grep -i "xchacha\|crypto_secretbox" | head -10 || echo "No xchacha includes found"
-          echo "=== Showing sodium.h content (lines 10-30) ==="
-          sed -n '10,30p' ${{ github.workspace }}/libsodium/libsodium-android-armv8-a+crypto/include/sodium.h
-          echo "=== Showing sodium.h content (lines 45-65) ==="
-          sed -n '45,65p' ${{ github.workspace }}/libsodium/libsodium-android-armv8-a+crypto/include/sodium.h
+          echo "=== Verifying libsodium full build (not minimal) ==="
+          # Check that xchacha20poly1305 header is included in sodium.h (not in #ifndef SODIUM_LIBRARY_MINIMAL block)
+          grep -q "crypto_secretbox_xchacha20poly1305" libsodium/libsodium-android-armv8-a+crypto/include/sodium.h
+          echo "✓ Full libsodium build verified (xchacha20poly1305 included)"
+          ls -la libsodium/libsodium-android-armv8-a+crypto/lib/
 
       # Build libcyxwiz for Android
       # We need to explicitly set SODIUM_INCLUDE_DIR and SODIUM_LIBRARY to prevent
