@@ -96,6 +96,8 @@ jobs:
           grep "crypto_secretbox" libsodium/libsodium-android-armv8-a+crypto/include/sodium.h | head -5
 
       # Build libcyxwiz for Android
+      # We need to explicitly set SODIUM_INCLUDE_DIR and SODIUM_LIBRARY to prevent
+      # cmake from finding the system libsodium via pkg-config (which is x86_64, not Android)
       - name: Build libcyxwiz for Android (arm64-v8a)
         run: |
           cd cyxwiz
@@ -110,7 +112,8 @@ jobs:
             -DCYXWIZ_TRANSPORT_BLUETOOTH=OFF \
             -DCYXWIZ_TRANSPORT_WIFI=OFF \
             -DCYXWIZ_TRANSPORT_LORA=OFF \
-            -DCMAKE_PREFIX_PATH=$SODIUM_ROOT \
+            -DSODIUM_INCLUDE_DIR=$SODIUM_ROOT/include \
+            -DSODIUM_LIBRARY=$SODIUM_ROOT/lib/libsodium.a \
             -G Ninja
           cmake --build build-android-arm64 --config Release
 
@@ -128,7 +131,8 @@ jobs:
             -DCYXWIZ_TRANSPORT_BLUETOOTH=OFF \
             -DCYXWIZ_TRANSPORT_WIFI=OFF \
             -DCYXWIZ_TRANSPORT_LORA=OFF \
-            -DCMAKE_PREFIX_PATH=$SODIUM_ROOT \
+            -DSODIUM_INCLUDE_DIR=$SODIUM_ROOT/include \
+            -DSODIUM_LIBRARY=$SODIUM_ROOT/lib/libsodium.a \
             -G Ninja
           cmake --build build-android-arm32 --config Release
 
@@ -146,7 +150,8 @@ jobs:
             -DCYXWIZ_TRANSPORT_BLUETOOTH=OFF \
             -DCYXWIZ_TRANSPORT_WIFI=OFF \
             -DCYXWIZ_TRANSPORT_LORA=OFF \
-            -DCMAKE_PREFIX_PATH=$SODIUM_ROOT \
+            -DSODIUM_INCLUDE_DIR=$SODIUM_ROOT/include \
+            -DSODIUM_LIBRARY=$SODIUM_ROOT/lib/libsodium.a \
             -G Ninja
           cmake --build build-android-x64 --config Release
 
