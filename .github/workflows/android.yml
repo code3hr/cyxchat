@@ -65,19 +65,22 @@ jobs:
       - name: Build libsodium for Android (arm64-v8a)
         run: |
           cd libsodium
-          export ANDROID_NDK_HOME=${{ env.ANDROID_NDK_HOME }}
+          export ANDROID_NDK_HOME=$ANDROID_NDK_HOME
+          export NDK_PLATFORM=android-${{ env.ANDROID_API_LEVEL }}
           ./dist-build/android-armv8-a.sh
 
       - name: Build libsodium for Android (armeabi-v7a)
         run: |
           cd libsodium
-          export ANDROID_NDK_HOME=${{ env.ANDROID_NDK_HOME }}
+          export ANDROID_NDK_HOME=$ANDROID_NDK_HOME
+          export NDK_PLATFORM=android-${{ env.ANDROID_API_LEVEL }}
           ./dist-build/android-armv7-a.sh
 
       - name: Build libsodium for Android (x86_64)
         run: |
           cd libsodium
-          export ANDROID_NDK_HOME=${{ env.ANDROID_NDK_HOME }}
+          export ANDROID_NDK_HOME=$ANDROID_NDK_HOME
+          export NDK_PLATFORM=android-${{ env.ANDROID_API_LEVEL }}
           ./dist-build/android-x86_64.sh
 
       # Build libcyxwiz for Android
