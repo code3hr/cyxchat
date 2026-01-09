@@ -579,9 +579,11 @@ cyxchat_error_t cyxchat_file_send(
     cyxwiz_crypto_random(slot->transfer.meta.file_key, 32);
 
     /* Set metadata */
-    strncpy(slot->transfer.meta.filename, filename, CYXCHAT_MAX_FILENAME - 1);
+    memset(slot->transfer.meta.filename, 0, sizeof(slot->transfer.meta.filename));
+    strncpy(slot->transfer.meta.filename, filename, sizeof(slot->transfer.meta.filename) - 1);
     if (mime_type) {
-        strncpy(slot->transfer.meta.mime_type, mime_type, 63);
+    memset(slot->transfer.meta.mime_type, 0, sizeof(slot->transfer.meta.mime_type));
+    strncpy(slot->transfer.meta.mime_type, mime_type, sizeof(slot->transfer.meta.mime_type) - 1);
     } else {
         /* Detect from extension */
         const char *detected = cyxchat_file_detect_mime(filename);
@@ -1240,8 +1242,10 @@ static cyxchat_error_t handle_file_meta(
 
     /* Fill in metadata */
     memcpy(&slot->transfer.meta.file_id, &file_id, sizeof(cyxchat_file_id_t));
-    strncpy(slot->transfer.meta.filename, filename, CYXCHAT_MAX_FILENAME - 1);
-    strncpy(slot->transfer.meta.mime_type, mime_type, 63);
+    memset(slot->transfer.meta.filename, 0, sizeof(slot->transfer.meta.filename));
+    memset(slot->transfer.meta.mime_type, 0, sizeof(slot->transfer.meta.mime_type));
+    strncpy(slot->transfer.meta.filename, filename, sizeof(slot->transfer.meta.filename) - 1);
+    strncpy(slot->transfer.meta.mime_type, mime_type, sizeof(slot->transfer.meta.mime_type) - 1);
     slot->transfer.meta.size = size;
     slot->transfer.meta.chunk_count = chunk_count;
     memcpy(slot->transfer.meta.file_hash, file_hash, 32);
@@ -1448,7 +1452,8 @@ static cyxchat_error_t handle_file_offer(
 
     /* Fill in metadata */
     memcpy(&slot->transfer.meta.file_id, &file_id, sizeof(cyxchat_file_id_t));
-    strncpy(slot->transfer.meta.filename, filename, CYXCHAT_MAX_FILENAME - 1);
+    memset(slot->transfer.meta.filename, 0, sizeof(slot->transfer.meta.filename));
+    strncpy(slot->transfer.meta.filename, filename, sizeof(slot->transfer.meta.filename) - 1);
     slot->transfer.meta.size = encrypted_size;
     slot->transfer.meta.chunk_count = chunk_count;
     memcpy(slot->transfer.meta.file_hash, file_hash, 32);
@@ -1819,6 +1824,7 @@ static cyxchat_error_t handle_peer_addr_ack(
     const uint8_t *data,
     size_t data_len
 ) {
+    (void)from;  /* Suppress unused parameter warning */
     CYXWIZ_DEBUG("file: received peer addr ACK from peer");
 
     /* Find transfer if file_id specified */
