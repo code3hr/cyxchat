@@ -77,8 +77,16 @@ message(STATUS "CYXWIZ_LIBRARY: ${CYXWIZ_LIBRARY}")
 message(STATUS "CMAKE_CROSSCOMPILING: ${CMAKE_CROSSCOMPILING}")
 
 # Find libsodium
+# Try vcpkg's CMake config first (when using vcpkg toolchain)
+find_package(unofficial-sodium CONFIG QUIET)
+if(unofficial-sodium_FOUND)
+    set(SODIUM_FOUND TRUE)
+    set(SODIUM_TARGET unofficial-sodium::sodium)
+    message(STATUS "Found libsodium via vcpkg CMake config")
+endif()
+
 # Skip pkg-config when cross-compiling (it finds host libraries, not target)
-if(PKG_CONFIG_FOUND AND NOT CMAKE_CROSSCOMPILING)
+if(NOT SODIUM_FOUND AND PKG_CONFIG_FOUND AND NOT CMAKE_CROSSCOMPILING)
     pkg_check_modules(SODIUM libsodium)
 endif()
 
@@ -184,10 +192,11 @@ if(CYXCHAT_BUILD_SHARED)
         target_compile_options(cyxchat PRIVATE -Wall -Wextra -Werror)
     endif()
 
-    target_link_libraries(cyxchat
-        PRIVATE
-            ${SODIUM_LIBRARIES}
-    )
+    if(SODIUM_TARGET)
+        target_link_libraries(cyxchat PRIVATE ${SODIUM_TARGET})
+    else()
+        target_link_libraries(cyxchat PRIVATE ${SODIUM_LIBRARIES})
+    endif()
 
     # Link cyxwiz if available
     if(TARGET cyxwiz)
@@ -230,7 +239,9 @@ if(CYXCHAT_BUILD_STATIC)
         target_link_libraries(cyxchat_static PUBLIC ${CYXWIZ_LIBRARY})
     endif()
 
-    if(SODIUM_LIBRARIES)
+    if(SODIUM_TARGET)
+        target_link_libraries(cyxchat_static PUBLIC ${SODIUM_TARGET})
+    elseif(SODIUM_LIBRARIES)
         target_link_libraries(cyxchat_static PUBLIC ${SODIUM_LIBRARIES})
     endif()
 
@@ -267,7 +278,9 @@ if(CYXCHAT_BUILD_TESTS)
     if(CYXWIZ_LIBRARY)
         target_link_libraries(test_cyxchat PRIVATE ${CYXWIZ_LIBRARY})
     endif()
-    if(SODIUM_LIBRARIES)
+    if(SODIUM_TARGET)
+        target_link_libraries(test_cyxchat PRIVATE ${SODIUM_TARGET})
+    elseif(SODIUM_LIBRARIES)
         target_link_libraries(test_cyxchat PRIVATE ${SODIUM_LIBRARIES})
     endif()
 
