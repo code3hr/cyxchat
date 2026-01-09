@@ -83,6 +83,18 @@ jobs:
           export NDK_PLATFORM=android-${{ env.ANDROID_API_LEVEL }}
           ./dist-build/android-x86_64.sh
 
+      - name: Verify libsodium headers
+        run: |
+          echo "=== Checking libsodium-android-armv8-a+crypto structure ==="
+          ls -la libsodium/libsodium-android-armv8-a+crypto/
+          ls -la libsodium/libsodium-android-armv8-a+crypto/include/
+          echo "=== Checking for xchacha20poly1305 header ==="
+          ls -la libsodium/libsodium-android-armv8-a+crypto/include/sodium/ | grep xchacha || echo "xchacha not found in sodium dir"
+          echo "=== Checking if crypto_secretbox_xchacha20poly1305_NONCEBYTES is defined ==="
+          grep -r "crypto_secretbox_xchacha20poly1305_NONCEBYTES" libsodium/libsodium-android-armv8-a+crypto/include/ || echo "Constant not found!"
+          echo "=== Checking sodium.h includes ==="
+          grep "crypto_secretbox" libsodium/libsodium-android-armv8-a+crypto/include/sodium.h | head -5
+
       # Build libcyxwiz for Android
       - name: Build libcyxwiz for Android (arm64-v8a)
         run: |
