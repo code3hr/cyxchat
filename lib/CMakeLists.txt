@@ -141,13 +141,14 @@ if(NOT SODIUM_FOUND)
     endif()
 endif()
 
-# Ensure SODIUM_INCLUDE_DIRS is set if SODIUM_INCLUDE_DIR is set
-# This handles the case where paths are passed via command line
-if(SODIUM_INCLUDE_DIR AND NOT SODIUM_INCLUDE_DIRS)
+# Ensure SODIUM_INCLUDE_DIRS and SODIUM_LIBRARIES are set correctly
+# Prefer explicit paths from command line over pkg-config results
+if(SODIUM_INCLUDE_DIR)
     set(SODIUM_INCLUDE_DIRS ${SODIUM_INCLUDE_DIR})
 endif()
-if(SODIUM_LIBRARY AND NOT SODIUM_LIBRARIES)
+if(SODIUM_LIBRARY)
     set(SODIUM_LIBRARIES ${SODIUM_LIBRARY})
+    set(SODIUM_FOUND TRUE)
 endif()
 
 message(STATUS "SODIUM_INCLUDE_DIR: ${SODIUM_INCLUDE_DIR}")
