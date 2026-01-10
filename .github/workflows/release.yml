@@ -34,7 +34,7 @@ jobs:
 
       - name: Install vcpkg and libsodium
         run: |
-          git clone https://github.com/microsoft/vcpkg.git C:\vcpkg
+          if not exist C:\vcpkg git clone https://github.com/microsoft/vcpkg.git C:\vcpkg
           C:\vcpkg\bootstrap-vcpkg.bat
           C:\vcpkg\vcpkg install libsodium:x64-windows
         shell: cmd
@@ -49,14 +49,9 @@ jobs:
       - name: Build CyxChat library
         run: |
           cd cyxchat\lib
-          cmake -B build -DCMAKE_BUILD_TYPE=Release ^
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake ^
             "-DCYXWIZ_LIBRARY=${{ github.workspace }}\cyxwiz\build\Release\cyxwiz.lib" ^
             "-DCYXWIZ_INCLUDE_DIR=${{ github.workspace }}\cyxwiz\include" ^
-            "-DSODIUM_INCLUDE_DIR=C:/vcpkg/installed/x64-windows/include" ^
-            "-DSODIUM_INCLUDE_DIRS=C:/vcpkg/installed/x64-windows/include" ^
-            "-DSODIUM_LIBRARY=C:/vcpkg/installed/x64-windows/lib/libsodium.lib" ^
-            "-DSODIUM_LIBRARIES=C:/vcpkg/installed/x64-windows/lib/libsodium.lib" ^
-            "-DCMAKE_C_FLAGS=/IC:/vcpkg/installed/x64-windows/include" ^
             -DCYXCHAT_BUILD_TESTS=OFF
           cmake --build build --config Release
         shell: cmd
@@ -232,6 +227,8 @@ jobs:
           flutter create --platforms=macos .
           # Update minimum macOS version for record_macos plugin
           sed -i '' 's/platform :osx, .*/platform :osx, "10.15"/' macos/Podfile
+          # Also update MACOSX_DEPLOYMENT_TARGET in Xcode project (10.14 -> 10.15)
+          sed -i '' 's/MACOSX_DEPLOYMENT_TARGET = 10.14/MACOSX_DEPLOYMENT_TARGET = 10.15/g' macos/Runner.xcodeproj/project.pbxproj
           flutter pub get
           flutter build macos --release
 
