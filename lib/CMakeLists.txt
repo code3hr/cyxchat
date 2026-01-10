@@ -95,7 +95,13 @@ if(SODIUM_FOUND AND (NOT SODIUM_INCLUDE_DIRS OR NOT SODIUM_LIBRARIES))
     set(SODIUM_FOUND FALSE)
 endif()
 
-if(NOT SODIUM_FOUND)
+# Check if explicit paths were provided on command line
+if(SODIUM_INCLUDE_DIR AND SODIUM_LIBRARY)
+    set(SODIUM_FOUND TRUE)
+    set(SODIUM_INCLUDE_DIRS ${SODIUM_INCLUDE_DIR})
+    set(SODIUM_LIBRARIES ${SODIUM_LIBRARY})
+    message(STATUS "Using explicitly provided libsodium paths")
+elseif(NOT SODIUM_FOUND)
     # Check parent project's libsodium path first
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../../libsodium")
         set(SODIUM_ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../libsodium")

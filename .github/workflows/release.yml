@@ -52,6 +52,8 @@ jobs:
           cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake ^
             "-DCYXWIZ_LIBRARY=${{ github.workspace }}\cyxwiz\build\Release\cyxwiz.lib" ^
             "-DCYXWIZ_INCLUDE_DIR=${{ github.workspace }}\cyxwiz\include" ^
+            "-DSODIUM_INCLUDE_DIR=C:/vcpkg/installed/x64-windows/include" ^
+            "-DSODIUM_LIBRARY=C:/vcpkg/installed/x64-windows/lib/libsodium.lib" ^
             -DCYXCHAT_BUILD_TESTS=OFF
           cmake --build build --config Release
         shell: cmd
@@ -234,7 +236,13 @@ jobs:
 
       - name: Copy libraries to release
         run: |
-          cp cyxchat/lib/build/libcyxchat.dylib "cyxchat/app/build/macos/Build/Products/Release/CyxChat.app/Contents/Frameworks/"
+          # Find the .app bundle (could be cyxchat.app or app.app depending on flutter create)
+          APP_BUNDLE=$(find cyxchat/app/build/macos/Build/Products/Release -name "*.app" -type d | head -1)
+          echo "Found app bundle: $APP_BUNDLE"
+          mkdir -p "$APP_BUNDLE/Contents/Frameworks"
+          cp cyxchat/lib/build/libcyxchat.dylib "$APP_BUNDLE/Contents/Frameworks/"
+          # Rename to CyxChat.app for consistency
+          mv "$APP_BUNDLE" "cyxchat/app/build/macos/Build/Products/Release/CyxChat.app"
 
       - name: Create DMG package
         run: |
