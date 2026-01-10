@@ -171,3 +171,79 @@ jobs:
           prerelease: ${{ contains(github.ref, '-') }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout CyxChat
+        uses: actions/checkout@v4
+        with:
+          path: cyxchat
+
+      - name: Checkout CyxWiz (parent)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/conspiracy
+          path: cyxwiz
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install dependencies
+        run: |
+          brew install libsodium cmake ninja
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Build CyxWiz library
+        run: |
+          cd cyxwiz
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+          cmake --build build --config Release
+
+      - name: Build CyxChat library
+        run: |
+          cd cyxchat/lib
+          SODIUM_PREFIX=$(brew --prefix libsodium)
+          cmake -B build -DCMAKE_BUILD_TYPE=Release \
+            "-DCYXWIZ_LIBRARY=${{ github.workspace }}/cyxwiz/build/libcyxwiz.a" \
+            "-DCYXWIZ_INCLUDE_DIR=${{ github.workspace }}/cyxwiz/include" \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DCYXCHAT_BUILD_TESTS=OFF \
+            "-DSODIUM_INCLUDE_DIR=${SODIUM_PREFIX}/include" \
+            "-DSODIUM_LIBRARY=${SODIUM_PREFIX}/lib/libsodium.dylib"
+          cmake --build build --config Release
+
+      - name: Build Flutter app
+        run: |
+          cd cyxchat/app
+          flutter pub get
+          flutter build macos --release
+
+      - name: Copy libraries to release
+        run: |
+          cp cyxchat/lib/build/libcyxchat.dylib "cyxchat/app/build/macos/Build/Products/Release/CyxChat.app/Contents/Frameworks/"
+
+      - name: Create DMG package
+        run: |
+          cd cyxchat/app/build/macos/Build/Products/Release
+          hdiutil create -volname "CyxChat" -srcfolder "CyxChat.app" -ov -format UDZO CyxChat-macOS.dmg
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CyxChat-macOS
+          path: cyxchat/app/build/macos/Build/Products/Release/CyxChat-macOS.dmg
+
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v1
+        with:
+          files: cyxchat/app/build/macos/Build/Products/Release/CyxChat-macOS.dmg
+          draft: false
+          prerelease: ${{ contains(github.ref, '-') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
