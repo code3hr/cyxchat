@@ -79,23 +79,35 @@ jobs:
 
       - name: Build Flutter app
         run: |
-          cd cyxchat\app
+          cd cyxchat/app
           flutter pub get
           flutter build windows --release
-        shell: cmd
+        shell: pwsh
 
       - name: Copy DLLs to release
         run: |
-          copy cyxchat\lib\build\Release\cyxchat.dll cyxchat\app\build\windows\x64\runner\Release\
-          # Find sodium DLL (vcpkg packages use bin/, not installed/)
-          if (Test-Path "C:\vcpkg\packages\libsodium_x64-windows\bin\libsodium.dll") {
-            copy "C:\vcpkg\packages\libsodium_x64-windows\bin\libsodium.dll" "cyxchat\app\build\windows\x64\runner\Release\"
-          } elseif (Test-Path "C:\vcpkg\installed\x64-windows\bin\libsodium.dll") {
-            copy "C:\vcpkg\installed\x64-windows\bin\libsodium.dll" "cyxchat\app\build\windows\x64\runner\Release\"
-          } else {
-            echo "Warning: Could not find libsodium.dll"
-            Get-ChildItem -Path "C:\vcpkg" -Recurse -Name "libsodium.dll" -ErrorAction SilentlyContinue | Select-Object -First 3
+          $dest = "cyxchat/app/build/windows/x64/runner/Release"
+          Write-Host "Destination: $dest"
+          Write-Host "Checking if destination exists..."
+          if (-not (Test-Path $dest)) {
+            Write-Host "ERROR: Flutter build output not found at $dest"
+            Get-ChildItem -Path "cyxchat/app/build" -Recurse -Directory | Select-Object -First 10
+            exit 1
           }
+          Write-Host "Copying cyxchat.dll..."
+          Copy-Item "cyxchat/lib/build/Release/cyxchat.dll" $dest
+          Write-Host "Finding libsodium.dll..."
+          if (Test-Path "C:/vcpkg/packages/libsodium_x64-windows/bin/libsodium.dll") {
+            Write-Host "Found in packages/bin/"
+            Copy-Item "C:/vcpkg/packages/libsodium_x64-windows/bin/libsodium.dll" $dest
+          } elseif (Test-Path "C:/vcpkg/installed/x64-windows/bin/libsodium.dll") {
+            Write-Host "Found in installed/bin/"
+            Copy-Item "C:/vcpkg/installed/x64-windows/bin/libsodium.dll" $dest
+          } else {
+            Write-Host "WARNING: libsodium.dll not found, searching..."
+            Get-ChildItem -Path "C:/vcpkg" -Recurse -Name "libsodium.dll" -ErrorAction SilentlyContinue | Select-Object -First 5
+          }
+          Write-Host "DLLs copied successfully"
         shell: pwsh
 
       - name: Create ZIP package
