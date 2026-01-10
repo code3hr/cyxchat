@@ -207,6 +207,7 @@ jobs:
           cmake -B build -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
             -DCYXWIZ_TRANSPORT_BLUETOOTH=OFF \
+            -DCYXWIZ_TRANSPORT_LORA=OFF \
             "-DSODIUM_INCLUDE_DIR=${SODIUM_PREFIX}/include" \
             "-DSODIUM_LIBRARY=${SODIUM_PREFIX}/lib/libsodium.a"
           cmake --build build --config Release

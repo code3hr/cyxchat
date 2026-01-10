@@ -141,7 +141,17 @@ if(NOT SODIUM_FOUND)
     endif()
 endif()
 
+# Ensure SODIUM_INCLUDE_DIRS is set if SODIUM_INCLUDE_DIR is set
+# This handles the case where paths are passed via command line
+if(SODIUM_INCLUDE_DIR AND NOT SODIUM_INCLUDE_DIRS)
+    set(SODIUM_INCLUDE_DIRS ${SODIUM_INCLUDE_DIR})
+endif()
+if(SODIUM_LIBRARY AND NOT SODIUM_LIBRARIES)
+    set(SODIUM_LIBRARIES ${SODIUM_LIBRARY})
+endif()
+
 message(STATUS "SODIUM_INCLUDE_DIR: ${SODIUM_INCLUDE_DIR}")
+message(STATUS "SODIUM_INCLUDE_DIRS: ${SODIUM_INCLUDE_DIRS}")
 message(STATUS "SODIUM_LIBRARY: ${SODIUM_LIBRARY}")
 
 # Source files
