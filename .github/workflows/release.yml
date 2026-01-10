@@ -46,6 +46,17 @@ jobs:
           cmake --build build --config Release
         shell: cmd
 
+      - name: Verify sodium.h exists
+        run: |
+          if exist C:\vcpkg\installed\x64-windows\include\sodium.h (
+            echo sodium.h found at C:\vcpkg\installed\x64-windows\include\sodium.h
+          ) else (
+            echo ERROR: sodium.h not found!
+            dir C:\vcpkg\installed\x64-windows\include\ 2>nul || echo Directory does not exist
+            exit /b 1
+          )
+        shell: cmd
+
       - name: Build CyxChat library
         run: |
           cd cyxchat\lib
