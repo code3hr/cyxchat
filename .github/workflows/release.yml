@@ -52,9 +52,10 @@ jobs:
           cmake -B build -DCMAKE_BUILD_TYPE=Release ^
             "-DCYXWIZ_LIBRARY=${{ github.workspace }}\cyxwiz\build\Release\cyxwiz.lib" ^
             "-DCYXWIZ_INCLUDE_DIR=${{ github.workspace }}\cyxwiz\include" ^
-            -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake ^
             "-DSODIUM_INCLUDE_DIR=C:/vcpkg/installed/x64-windows/include" ^
+            "-DSODIUM_INCLUDE_DIRS=C:/vcpkg/installed/x64-windows/include" ^
             "-DSODIUM_LIBRARY=C:/vcpkg/installed/x64-windows/lib/libsodium.lib" ^
+            "-DSODIUM_LIBRARIES=C:/vcpkg/installed/x64-windows/lib/libsodium.lib" ^
             -DCYXCHAT_BUILD_TESTS=OFF
           cmake --build build --config Release
         shell: cmd
@@ -144,6 +145,7 @@ jobs:
       - name: Build Flutter app
         run: |
           cd cyxchat/app
+          flutter create --platforms=linux .
           flutter pub get
           flutter build linux --release
 
@@ -201,7 +203,12 @@ jobs:
       - name: Build CyxWiz library
         run: |
           cd cyxwiz
-          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+          SODIUM_PREFIX=$(brew --prefix libsodium)
+          cmake -B build -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DCYXWIZ_TRANSPORT_BLUETOOTH=OFF \
+            "-DSODIUM_INCLUDE_DIR=${SODIUM_PREFIX}/include" \
+            "-DSODIUM_LIBRARY=${SODIUM_PREFIX}/lib/libsodium.a"
           cmake --build build --config Release
 
       - name: Build CyxChat library
@@ -214,12 +221,13 @@ jobs:
             -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
             -DCYXCHAT_BUILD_TESTS=OFF \
             "-DSODIUM_INCLUDE_DIR=${SODIUM_PREFIX}/include" \
-            "-DSODIUM_LIBRARY=${SODIUM_PREFIX}/lib/libsodium.dylib"
+            "-DSODIUM_LIBRARY=${SODIUM_PREFIX}/lib/libsodium.a"
           cmake --build build --config Release
 
       - name: Build Flutter app
         run: |
           cd cyxchat/app
+          flutter create --platforms=macos .
           flutter pub get
           flutter build macos --release
 
