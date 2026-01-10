@@ -7,7 +7,7 @@ plugins {
 
 android {
     namespace = "com.example.cyxchat"
-    compileSdk = flutter.compileSdkVersion
+    compileSdk = 35  // Override for plugin compatibility (record_android, flutter_plugin_android_lifecycle)
     ndkVersion = "27.0.12077973"  // Override for plugin compatibility
 
     compileOptions {
@@ -24,7 +24,7 @@ android {
         applicationId = "com.example.cyxchat"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
+        minSdk = 23  // Override: record_android requires minSdk 23
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName

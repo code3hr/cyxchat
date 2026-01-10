@@ -35,7 +35,7 @@ gradle.beforeProject {
 
 open class FlutterExtension {
     val compileSdkVersion: Int = 35
-    val minSdkVersion: Int = 21
+    val minSdkVersion: Int = 23  // record_android requires minSdk 23
     val targetSdkVersion: Int = 35
     val ndkVersion: String = "27.0.12077973"
 }
