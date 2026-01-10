@@ -381,24 +381,15 @@ cyxchat_group_invite(group_ctx, &group_id, &member_id, member_pubkey);
 
 ## Troubleshooting
 
-### Bootstrap connection failed
-1. Ensure bootstrap server is running (`./build/cyxwizd` then `/bootstrap 7777`)
-2. Check firewall allows UDP on that port
-3. Verify bootstrap address in app settings
+For detailed troubleshooting including platform-specific issues (macOS keychain errors, Windows DLL issues, Linux permissions), build problems, and network connectivity issues, see:
 
-### Peer not found or messages not sending
-1. Both peers must use the same bootstrap server
-2. Wait for key exchange to complete (see logs)
-3. NAT traversal may take a few seconds
+**[Full Troubleshooting Guide](docs/TROUBLESHOOTING.md)**
 
-### Windows: DLL not found
-Copy `cyxchat.dll` to the app directory or add to PATH.
-
-### Linux: libsodium not found
-```bash
-sudo ldconfig
-export LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH
-```
+Quick fixes:
+- **Bootstrap connection failed**: Ensure `./build/cyxwizd` is running with `/bootstrap 7777`
+- **macOS Error 42018**: Automatically handled (uses SharedPreferences instead of keychain)
+- **Windows DLL not found**: Copy `cyxchat.dll` to app directory
+- **Linux libsodium error**: Run `sudo ldconfig`
 
 ---
 
@@ -407,6 +398,8 @@ export LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH
 - [Architecture](docs/ARCHITECTURE.md) - System design
 - [NAT Traversal](docs/NAT-TRAVERSAL.md) - How peer connectivity works
 - [DNS](docs/DNS.md) - Username resolution system
+- [Troubleshooting](docs/TROUBLESHOOTING.md) - Platform-specific issues and solutions
+- [macOS Production Guide](docs/PRODUCTION-MACOS.md) - Securing private keys for redistribution
 
 ## License
 

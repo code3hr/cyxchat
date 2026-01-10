@@ -1,6 +1,8 @@
 import 'dart:typed_data';
 import 'dart:math';
+import 'dart:io' show Platform;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/identity.dart';
 import '../utils/node_id_utils.dart';
 import 'database_service.dart';
@@ -31,6 +33,54 @@ class IdentityService {
   /// Check if identity exists
   bool get hasIdentity => _currentIdentity != null;
 
+  /// Write secure data (uses SharedPreferences on macOS to avoid keychain issues)
+  ///
+  /// SECURITY WARNING (macOS):
+  /// Private keys are stored UNENCRYPTED in SharedPreferences at:
+  /// ~/Library/Containers/com.example.cyxchat/Data/Library/Preferences/
+  ///
+  /// This workaround avoids Error 42018 (errSecNotAvailable) during development,
+  /// but is NOT suitable for production. For production releases:
+  /// 1. Obtain Apple Developer code signing certificate
+  /// 2. Add keychain entitlements to macos/Runner/Release.entitlements
+  /// 3. Remove this macOS workaround to use Keychain Services
+  ///
+  /// See docs/TROUBLESHOOTING.md for details.
+  Future<void> _writeSecure(String key, String value) async {
+    if (Platform.isMacOS) {
+      // On macOS, use SharedPreferences instead of secure storage
+      // to avoid keychain access issues with app sandbox
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_storageKey(key), value);
+    } else {
+      await _secureStorage.write(key: _storageKey(key), value: value);
+    }
+  }
+
+  /// Read secure data (uses SharedPreferences on macOS to avoid keychain issues)
+  ///
+  /// See _writeSecure() for security warnings.
+  Future<String?> _readSecure(String key) async {
+    if (Platform.isMacOS) {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getString(_storageKey(key));
+    } else {
+      return await _secureStorage.read(key: _storageKey(key));
+    }
+  }
+
+  /// Delete secure data (uses SharedPreferences on macOS to avoid keychain issues)
+  ///
+  /// See _writeSecure() for security warnings.
+  Future<void> _deleteSecure(String key) async {
+    if (Platform.isMacOS) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_storageKey(key));
+    } else {
+      await _secureStorage.delete(key: _storageKey(key));
+    }
+  }
+
   /// Load identity from database
   Future<void> _loadIdentity() async {
     final db = await DatabaseService.instance.database;
@@ -57,11 +107,8 @@ class IdentityService {
       privateKey[i] = random.nextInt(256);
     }
 
-    // Store private key securely
-    await _secureStorage.write(
-      key: _storageKey('private_key'),
-      value: String.fromCharCodes(privateKey),
-    );
+    // Store private key securely (uses SharedPreferences on macOS)
+    await _writeSecure('private_key', String.fromCharCodes(privateKey));
 
     // Create identity
     final identity = Identity(
@@ -98,14 +145,14 @@ class IdentityService {
 
   /// Get private key (for signing/encryption)
   Future<Uint8List?> getPrivateKey() async {
-    final keyStr = await _secureStorage.read(key: _storageKey('private_key'));
+    final keyStr = await _readSecure('private_key');
     if (keyStr == null) return null;
     return Uint8List.fromList(keyStr.codeUnits);
   }
 
   /// Delete identity (logout/reset)
   Future<void> deleteIdentity() async {
-    await _secureStorage.delete(key: _storageKey('private_key'));
+    await _deleteSecure('private_key');
     await DatabaseService.instance.clearAllData();
     _currentIdentity = null;
   }

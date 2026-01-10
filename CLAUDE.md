@@ -25,6 +25,49 @@ CyxChat is a decentralized, privacy-first messaging application built on the Cyx
 | Flutter UI | Complete | Auto-connect, real-time message updates |
 | File Transfer | Complete | Chunked transfer via onion routing, max 64KB |
 
+## Platform-Specific Security Considerations
+
+### macOS: Private Key Storage
+
+**Development Workaround (NOT for Production):**
+On macOS, private keys are stored unencrypted in SharedPreferences to avoid Error 42018 (`errSecNotAvailable` - keychain access denied by app sandbox). This workaround is implemented in `app/lib/services/identity_service.dart`.
+
+**Storage Location:**
+```
+~/Library/Containers/com.example.cyxchat/Data/Library/Preferences/
+```
+
+**Security Implications:**
+- Keys stored in plaintext (not encrypted)
+- Protected only by file system permissions and app sandbox
+- **NOT suitable for production releases**
+
+**Production Requirements:**
+
+For production redistribution, you MUST fix this security issue. Two options:
+
+1. **Proper Keychain Integration** (Recommended)
+   - Requires Apple Developer certificate ($99/year)
+   - Uses macOS Keychain Services (most secure)
+   - Full guide: `docs/TROUBLESHOOTING.md#option-1-proper-keychain-integration-recommended`
+
+2. **Encrypted SharedPreferences** (Interim)
+   - No code signing required
+   - Encrypts keys using device-specific hardware UUID
+   - Full guide: `docs/TROUBLESHOOTING.md#option-2-encrypted-sharedpreferences-interim`
+
+**Quick Reference:**
+```bash
+# Option 1: Build with Keychain (after code signing setup)
+flutter build macos --release --dart-define=USE_KEYCHAIN=true
+
+# Option 2: Add encryption dependencies
+flutter pub add encrypt device_info_plus
+# Then implement MacOSSecureStorage class
+```
+
+See **[Production Fix: macOS Keychain Security](docs/TROUBLESHOOTING.md#production-fix-macos-keychain-security)** for complete step-by-step implementation.
+
 ## Message Flow
 
 ```
@@ -409,4 +452,6 @@ To test P2P messaging locally:
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - CyxChat architecture
 - [docs/NAT-TRAVERSAL.md](docs/NAT-TRAVERSAL.md) - NAT traversal details
 - [docs/COMMUNICATION-FLOW.md](docs/COMMUNICATION-FLOW.md) - Full message flow diagram
+- [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) - Platform issues and solutions
+- [docs/PRODUCTION-MACOS.md](docs/PRODUCTION-MACOS.md) - macOS production release guide
 - [DOCKER.md](DOCKER.md) - Server deployment guide

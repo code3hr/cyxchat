@@ -24,6 +24,8 @@ Decentralized communication applications built on the CyxWiz protocol.
 | [LABELS.md](./LABELS.md) | MPLS-style efficient routing |
 | [EMAIL.md](./EMAIL.md) | Decentralized email (CyxMail) |
 | [GATEWAY.md](./GATEWAY.md) | Bridge to traditional email (Gmail, Outlook, etc.) |
+| [TROUBLESHOOTING.md](./TROUBLESHOOTING.md) | Platform-specific issues, build problems, and solutions |
+| [PRODUCTION-MACOS.md](./PRODUCTION-MACOS.md) | macOS production release guide (keychain security fix) |
 
 ---
 
