@@ -38,6 +38,10 @@ dependencies:
   flutter_secure_storage: ^9.0.0
   # Settings persistence
   shared_preferences: ^2.2.0
+  # Encryption for macOS secure storage
+  encrypt: ^5.0.3
+  crypto: ^3.0.3
+  device_info_plus: ^9.1.1
 
   # File picker (for attachments)
   file_picker: ^6.1.1
