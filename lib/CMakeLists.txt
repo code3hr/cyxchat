@@ -100,9 +100,14 @@ if(SODIUM_INCLUDE_DIR AND SODIUM_LIBRARY)
     set(SODIUM_FOUND TRUE)
     set(SODIUM_INCLUDE_DIRS ${SODIUM_INCLUDE_DIR})
     set(SODIUM_LIBRARIES ${SODIUM_LIBRARY})
-    # Use include_directories for MSVC compatibility (target_include_directories
-    # with PRIVATE doesn't always propagate correctly to all source files)
+    # Use both include_directories AND CMAKE_C_FLAGS for MSVC compatibility
+    # Some MSVC/CMake combinations don't properly inherit target_include_directories
     include_directories(${SODIUM_INCLUDE_DIR})
+    if(WIN32)
+        # Force include directory via compiler flags on Windows
+        string(REPLACE "/" "\\\\" SODIUM_INCLUDE_NATIVE "${SODIUM_INCLUDE_DIR}")
+        set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /I\"${SODIUM_INCLUDE_DIR}\"")
+    endif()
     message(STATUS "Using explicitly provided libsodium paths")
 elseif(NOT SODIUM_FOUND)
     # Check parent project's libsodium path first

@@ -41,7 +41,7 @@ class MacOSSecureStorage {
 
     // Get hardware UUID (unique per Mac)
     final deviceInfo = DeviceInfoPlugin();
-    final macInfo = await deviceInfo.macOsInfo();
+    final macInfo = await deviceInfo.macOsInfo;
     final hardwareUUID = macInfo.systemGUID ?? 'fallback-uuid';
 
     // Derive encryption key from hardware UUID + app-specific salt
