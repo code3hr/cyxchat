@@ -37,5 +37,5 @@ open class FlutterExtension {
     val compileSdkVersion: Int = 35
     val minSdkVersion: Int = 21
     val targetSdkVersion: Int = 35
-    val ndkVersion: String = "26.1.10909125"
+    val ndkVersion: String = "27.0.12077973"
 }
