@@ -56,6 +56,7 @@ jobs:
             "-DSODIUM_INCLUDE_DIRS=C:/vcpkg/installed/x64-windows/include" ^
             "-DSODIUM_LIBRARY=C:/vcpkg/installed/x64-windows/lib/libsodium.lib" ^
             "-DSODIUM_LIBRARIES=C:/vcpkg/installed/x64-windows/lib/libsodium.lib" ^
+            "-DCMAKE_C_FLAGS=/IC:/vcpkg/installed/x64-windows/include" ^
             -DCYXCHAT_BUILD_TESTS=OFF
           cmake --build build --config Release
         shell: cmd
@@ -229,6 +230,8 @@ jobs:
         run: |
           cd cyxchat/app
           flutter create --platforms=macos .
+          # Update minimum macOS version for record_macos plugin
+          sed -i '' 's/platform :osx, .*/platform :osx, "10.15"/' macos/Podfile
           flutter pub get
           flutter build macos --release
 
