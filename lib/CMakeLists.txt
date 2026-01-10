@@ -100,6 +100,9 @@ if(SODIUM_INCLUDE_DIR AND SODIUM_LIBRARY)
     set(SODIUM_FOUND TRUE)
     set(SODIUM_INCLUDE_DIRS ${SODIUM_INCLUDE_DIR})
     set(SODIUM_LIBRARIES ${SODIUM_LIBRARY})
+    # Use include_directories for MSVC compatibility (target_include_directories
+    # with PRIVATE doesn't always propagate correctly to all source files)
+    include_directories(${SODIUM_INCLUDE_DIR})
     message(STATUS "Using explicitly provided libsodium paths")
 elseif(NOT SODIUM_FOUND)
     # Check parent project's libsodium path first
