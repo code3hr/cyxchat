@@ -46,16 +46,24 @@ jobs:
           cmake --build build --config Release
         shell: cmd
 
-      - name: Verify sodium.h exists
+      - name: Find sodium path
+        id: sodium
         run: |
-          if exist C:\vcpkg\installed\x64-windows\include\sodium.h (
-            echo sodium.h found at C:\vcpkg\installed\x64-windows\include\sodium.h
-          ) else (
-            echo ERROR: sodium.h not found!
-            dir C:\vcpkg\installed\x64-windows\include\ 2>nul || echo Directory does not exist
-            exit /b 1
-          )
-        shell: cmd
+          # vcpkg with toolchain installs to packages/, not installed/
+          if (Test-Path "C:\vcpkg\packages\libsodium_x64-windows\include\sodium.h") {
+            echo "SODIUM_INCLUDE=C:/vcpkg/packages/libsodium_x64-windows/include" >> $env:GITHUB_OUTPUT
+            echo "SODIUM_LIBRARY=C:/vcpkg/packages/libsodium_x64-windows/lib/libsodium.lib" >> $env:GITHUB_OUTPUT
+            echo "Found in packages directory"
+          } elseif (Test-Path "C:\vcpkg\installed\x64-windows\include\sodium.h") {
+            echo "SODIUM_INCLUDE=C:/vcpkg/installed/x64-windows/include" >> $env:GITHUB_OUTPUT
+            echo "SODIUM_LIBRARY=C:/vcpkg/installed/x64-windows/lib/libsodium.lib" >> $env:GITHUB_OUTPUT
+            echo "Found in installed directory"
+          } else {
+            echo "ERROR: sodium.h not found!"
+            Get-ChildItem -Path "C:\vcpkg" -Recurse -Name "sodium.h" -ErrorAction SilentlyContinue | Select-Object -First 5
+            exit 1
+          }
+        shell: pwsh
 
       - name: Build CyxChat library
         run: |
@@ -63,8 +71,8 @@ jobs:
           cmake -B build -DCMAKE_BUILD_TYPE=Release ^
             "-DCYXWIZ_LIBRARY=${{ github.workspace }}\cyxwiz\build\Release\cyxwiz.lib" ^
             "-DCYXWIZ_INCLUDE_DIR=${{ github.workspace }}\cyxwiz\include" ^
-            "-DSODIUM_INCLUDE_DIR=C:/vcpkg/installed/x64-windows/include" ^
-            "-DSODIUM_LIBRARY=C:/vcpkg/installed/x64-windows/lib/libsodium.lib" ^
+            "-DSODIUM_INCLUDE_DIR=${{ steps.sodium.outputs.SODIUM_INCLUDE }}" ^
+            "-DSODIUM_LIBRARY=${{ steps.sodium.outputs.SODIUM_LIBRARY }}" ^
             -DCYXCHAT_BUILD_TESTS=OFF
           cmake --build build --config Release
         shell: cmd
