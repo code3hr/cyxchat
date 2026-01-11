@@ -96,11 +96,11 @@ class SettingsScreen extends ConsumerWidget {
                     _SettingsTile(
                       icon: Icons.security_rounded,
                       title: 'Onion Routing',
-                      subtitle: 'Multi-hop encrypted messaging',
+                      subtitle: 'Up to 8 hops for maximum anonymity',
                       trailing: const _StatusChip(label: 'Always On', isActive: true),
                       onTap: null,
                     ),
-                    // Info box about onion routing
+                    // Info box about onion routing with hop details
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
                       child: Container(
@@ -112,22 +112,35 @@ class SettingsScreen extends ConsumerWidget {
                             color: AppColors.primary.withOpacity(0.2),
                           ),
                         ),
-                        child: Row(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Icon(
-                              Icons.info_outline_rounded,
-                              size: 16,
-                              color: AppColors.primary.withOpacity(0.8),
-                            ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Text(
-                                'All messages encrypted via multi-hop routing. Speed limit: ~360 B/s',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  color: AppColors.textDarkSecondary.withOpacity(0.8),
+                            Row(
+                              children: [
+                                Icon(
+                                  Icons.layers_rounded,
+                                  size: 16,
+                                  color: AppColors.primary.withOpacity(0.8),
                                 ),
-                              ),
+                                const SizedBox(width: 10),
+                                Text(
+                                  'Payload capacity by hop count:',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w500,
+                                    color: AppColors.textDarkSecondary.withOpacity(0.9),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceAround,
+                              children: [
+                                _HopInfo(hops: 2, payload: '1.2 KB', isDefault: true),
+                                _HopInfo(hops: 5, payload: '873 B', isDefault: false),
+                                _HopInfo(hops: 8, payload: '561 B', isDefault: false),
+                              ],
                             ),
                           ],
                         ),
@@ -1915,6 +1928,60 @@ class _LogStat extends StatelessWidget {
             color: AppColors.textDarkSecondary.withOpacity(0.7),
           ),
         ),
+      ],
+    );
+  }
+}
+
+/// Hop info display for onion routing
+class _HopInfo extends StatelessWidget {
+  final int hops;
+  final String payload;
+  final bool isDefault;
+
+  const _HopInfo({
+    required this.hops,
+    required this.payload,
+    required this.isDefault,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: isDefault
+                ? AppColors.primary.withOpacity(0.2)
+                : AppColors.bgDarkTertiary,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Text(
+            '$hops hops',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: isDefault ? AppColors.primary : AppColors.textDarkSecondary,
+            ),
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          payload,
+          style: TextStyle(
+            fontSize: 10,
+            color: AppColors.textDarkSecondary.withOpacity(0.7),
+          ),
+        ),
+        if (isDefault)
+          Text(
+            '(default)',
+            style: TextStyle(
+              fontSize: 9,
+              color: AppColors.primary.withOpacity(0.6),
+            ),
+          ),
       ],
     );
   }
