@@ -125,7 +125,7 @@ Example - DNS message types are defined in CyxChat, not CyxWiz:
 │  • Relay fallback                       │
 ├─────────────────────────────────────────┤
 │          libcyxwiz (Core Protocol)      │
-│  • Transport (UDP, WiFi Direct, BT, LoRa│
+│  • Transport (UDP with NAT traversal)│
 │  • Onion routing (anonymous messaging)  │
 │  • Crypto (X25519, XChaCha20-Poly1305)  │
 └─────────────────────────────────────────┘

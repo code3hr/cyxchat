@@ -132,20 +132,6 @@ class SettingsScreen extends ConsumerWidget {
                   iconGradient: const [AppColors.accentGreen, AppColors.accent],
                   children: [
                     _SettingsTile(
-                      icon: Icons.wifi_rounded,
-                      title: 'WiFi Direct',
-                      subtitle: 'Enabled',
-                      trailing: _StatusChip(label: 'Active', isActive: true),
-                      onTap: () {},
-                    ),
-                    _SettingsTile(
-                      icon: Icons.bluetooth_rounded,
-                      title: 'Bluetooth',
-                      subtitle: 'Enabled',
-                      trailing: _StatusChip(label: 'Active', isActive: true),
-                      onTap: () {},
-                    ),
-                    _SettingsTile(
                       icon: Icons.cell_tower_rounded,
                       title: 'Internet Relay',
                       subtitle: 'Connected to 3 relays',
