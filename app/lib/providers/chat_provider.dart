@@ -547,6 +547,16 @@ class ChatProvider extends ChangeNotifier {
     }
   }
 
+  /// Set preferred onion routing hop count
+  void setHopCount(int hopCount) {
+    _bindings.setHopCount(hopCount);
+  }
+
+  /// Get current onion routing hop count
+  int getHopCount() {
+    return _bindings.getHopCount();
+  }
+
   @override
   void dispose() {
     shutdown();
@@ -659,5 +669,15 @@ class ChatActions {
       msgId: msgId,
       newText: newText,
     );
+  }
+
+  /// Set preferred onion routing hop count (1-8, or 0 for auto)
+  void setHopCount(int hopCount) {
+    _ref.read(chatNotifierProvider).setHopCount(hopCount);
+  }
+
+  /// Get current onion routing hop count (0 = auto)
+  int getHopCount() {
+    return _ref.read(chatNotifierProvider).getHopCount();
   }
 }

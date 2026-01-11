@@ -221,6 +221,9 @@ class ConnectionActions {
       // Apply direct file transfer setting
       fileProvider.setDirectMode(settings.directFileTransfer);
 
+      // Apply hop count setting
+      chatProvider.setHopCount(settings.onionHopCount);
+
       // Wire up file context to connection for direct mode file routing
       // This allows direct P2P file messages to bypass onion and reach file module
       CyxChatBindings.instance.connSetFileCtx();

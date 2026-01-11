@@ -164,6 +164,18 @@ class CyxChatBindings {
     return _native.cyxchat_poll(_chatCtx!, nowMs);
   }
 
+  /// Set preferred onion routing hop count (1-8, or 0 for auto)
+  void setHopCount(int hopCount) {
+    if (_chatCtx == null) return;
+    _native.cyxchat_set_hop_count(_chatCtx!, hopCount);
+  }
+
+  /// Get current onion routing hop count (0 = auto)
+  int getHopCount() {
+    if (_chatCtx == null) return 0;
+    return _native.cyxchat_get_hop_count(_chatCtx!);
+  }
+
   /// Get next received message
   /// Returns map with 'from', 'type', 'data' keys, or null if queue empty
   Map<String, dynamic>? chatRecvNext() {
@@ -2274,6 +2286,15 @@ class CyxChatNative {
   late final cyxchat_file_set_conn_ctx = _lib.lookupFunction<
       Void Function(Pointer<Void>, Pointer<Void>),
       void Function(Pointer<Void>, Pointer<Void>)>('cyxchat_file_set_conn_ctx');
+
+  // Hop count functions
+  late final cyxchat_set_hop_count = _lib.lookupFunction<
+      Void Function(Pointer<Void>, Uint8),
+      void Function(Pointer<Void>, int)>('cyxchat_set_hop_count');
+
+  late final cyxchat_get_hop_count = _lib.lookupFunction<
+      Uint8 Function(Pointer<Void>),
+      int Function(Pointer<Void>)>('cyxchat_get_hop_count');
 }
 
 // Error codes

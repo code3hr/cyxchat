@@ -8,6 +8,7 @@ class SettingsKeys {
   static const String directFileTransfer = 'direct_file_transfer';
   static const String videoCallsEnabled = 'video_calls_enabled';
   static const String hasSeenCallPrivacyWarning = 'has_seen_call_privacy_warning';
+  static const String onionHopCount = 'onion_hop_count';
 }
 
 /// Check for dart-define override
@@ -25,6 +26,7 @@ class SettingsDefaults {
   static const bool directFileTransfer = false;
   static const bool videoCallsEnabled = false; // Off by default for privacy
   static const bool hasSeenCallPrivacyWarning = false;
+  static const int onionHopCount = 2; // Default 2 hops (good balance)
 }
 
 /// Settings state
@@ -34,6 +36,7 @@ class AppSettings {
   final bool directFileTransfer;
   final bool videoCallsEnabled;
   final bool hasSeenCallPrivacyWarning;
+  final int onionHopCount;
 
   const AppSettings({
     this.bootstrapServer = '',
@@ -41,6 +44,7 @@ class AppSettings {
     this.directFileTransfer = false,
     this.videoCallsEnabled = false,
     this.hasSeenCallPrivacyWarning = false,
+    this.onionHopCount = 2,
   });
 
   AppSettings copyWith({
@@ -49,6 +53,7 @@ class AppSettings {
     bool? directFileTransfer,
     bool? videoCallsEnabled,
     bool? hasSeenCallPrivacyWarning,
+    int? onionHopCount,
   }) {
     return AppSettings(
       bootstrapServer: bootstrapServer ?? this.bootstrapServer,
@@ -56,12 +61,28 @@ class AppSettings {
       directFileTransfer: directFileTransfer ?? this.directFileTransfer,
       videoCallsEnabled: videoCallsEnabled ?? this.videoCallsEnabled,
       hasSeenCallPrivacyWarning: hasSeenCallPrivacyWarning ?? this.hasSeenCallPrivacyWarning,
+      onionHopCount: onionHopCount ?? this.onionHopCount,
     );
   }
 
   /// Get combined server string for connection
   /// Format: "ip:port" for bootstrap, same server used for relay
   String get connectionBootstrap => bootstrapServer;
+
+  /// Get payload capacity for current hop count
+  String get hopPayloadCapacity {
+    switch (onionHopCount) {
+      case 1: return '1.3 KB';
+      case 2: return '1.2 KB';
+      case 3: return '1.1 KB';
+      case 4: return '977 B';
+      case 5: return '873 B';
+      case 6: return '769 B';
+      case 7: return '665 B';
+      case 8: return '561 B';
+      default: return '1.2 KB';
+    }
+  }
 }
 
 /// Settings notifier
@@ -87,6 +108,8 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
           SettingsDefaults.videoCallsEnabled,
       hasSeenCallPrivacyWarning: prefs.getBool(SettingsKeys.hasSeenCallPrivacyWarning) ??
           SettingsDefaults.hasSeenCallPrivacyWarning,
+      onionHopCount: prefs.getInt(SettingsKeys.onionHopCount) ??
+          SettingsDefaults.onionHopCount,
     );
   }
 
@@ -127,6 +150,15 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(SettingsKeys.hasSeenCallPrivacyWarning, value);
     state = state.copyWith(hasSeenCallPrivacyWarning: value);
+  }
+
+  /// Set onion routing hop count (1-8)
+  Future<void> setOnionHopCount(int value) async {
+    // Clamp to valid range
+    final clampedValue = value.clamp(1, 8);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(SettingsKeys.onionHopCount, clampedValue);
+    state = state.copyWith(onionHopCount: clampedValue);
   }
 }
 

@@ -1290,6 +1290,19 @@ cyxwiz_onion_ctx_t* cyxchat_get_onion(cyxchat_ctx_t *ctx) {
     return ctx ? ctx->onion : NULL;
 }
 
+void cyxchat_set_hop_count(cyxchat_ctx_t *ctx, uint8_t hop_count) {
+    if (ctx && ctx->onion) {
+        cyxwiz_onion_set_hop_count(ctx->onion, hop_count);
+    }
+}
+
+uint8_t cyxchat_get_hop_count(cyxchat_ctx_t *ctx) {
+    if (ctx && ctx->onion) {
+        return cyxwiz_onion_get_hop_count(ctx->onion);
+    }
+    return 0;
+}
+
 void cyxchat_set_file_ctx(cyxchat_ctx_t *ctx, cyxchat_file_ctx_t *file_ctx) {
     if (ctx) {
         ctx->file_ctx = file_ctx;

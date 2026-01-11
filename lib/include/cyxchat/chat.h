@@ -386,6 +386,24 @@ CYXCHAT_API void cyxchat_set_file_ctx(
  */
 CYXCHAT_API cyxwiz_onion_ctx_t* cyxchat_get_onion(cyxchat_ctx_t *ctx);
 
+/**
+ * Set preferred onion routing hop count
+ *
+ * @param ctx       Chat context
+ * @param hop_count Preferred number of hops (1-8), 0 for auto
+ *
+ * Higher hop counts provide more anonymity but reduce payload capacity:
+ * - 2 hops: ~1.2 KB payload (default)
+ * - 5 hops: ~873 B payload
+ * - 8 hops: ~561 B payload
+ */
+CYXCHAT_API void cyxchat_set_hop_count(cyxchat_ctx_t *ctx, uint8_t hop_count);
+
+/**
+ * Get current onion routing hop count (0 = auto)
+ */
+CYXCHAT_API uint8_t cyxchat_get_hop_count(cyxchat_ctx_t *ctx);
+
 #ifdef __cplusplus
 }
 #endif
