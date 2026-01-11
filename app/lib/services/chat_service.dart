@@ -112,15 +112,50 @@ class ChatService {
     );
 
     if (existing.isNotEmpty) {
-      return Conversation.fromMap(existing.first);
+      final conv = Conversation.fromMap(existing.first);
+
+      // If conversation exists but has no display name, try to get it from contacts
+      if (conv.displayName == null) {
+        final contactRows = await db.query(
+          'contacts',
+          columns: ['display_name'],
+          where: 'node_id = ?',
+          whereArgs: [peerId],
+        );
+        if (contactRows.isNotEmpty && contactRows.first['display_name'] != null) {
+          final displayName = contactRows.first['display_name'] as String;
+          // Update the conversation with the contact's display name
+          await db.update(
+            'conversations',
+            {'display_name': displayName},
+            where: 'id = ?',
+            whereArgs: [conv.id],
+          );
+          return conv.copyWith(displayName: displayName);
+        }
+      }
+      return conv;
     }
 
-    // Create new
+    // Look up contact's display name
+    String? contactDisplayName;
+    final contactRows = await db.query(
+      'contacts',
+      columns: ['display_name'],
+      where: 'node_id = ?',
+      whereArgs: [peerId],
+    );
+    if (contactRows.isNotEmpty && contactRows.first['display_name'] != null) {
+      contactDisplayName = contactRows.first['display_name'] as String;
+    }
+
+    // Create new conversation with contact's display name
     final id = _uuid.v4();
     final conversation = Conversation(
       id: id,
       type: ConversationType.direct,
       peerId: peerId,
+      displayName: contactDisplayName,
       lastActivityAt: DateTime.now(),
     );
 

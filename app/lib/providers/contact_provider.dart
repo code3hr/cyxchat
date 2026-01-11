@@ -2,6 +2,7 @@ import 'dart:typed_data';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/contact.dart';
 import '../services/database_service.dart';
+import 'conversation_provider.dart';
 
 /// Provider for all contacts
 final contactsProvider = FutureProvider<List<Contact>>((ref) async {
@@ -73,6 +74,14 @@ class ContactService {
       'contacts',
       {'display_name': displayName},
       where: 'node_id = ?',
+      whereArgs: [nodeId],
+    );
+
+    // Also update any existing conversation with this peer
+    await db.update(
+      'conversations',
+      {'display_name': displayName},
+      where: 'peer_id = ?',
       whereArgs: [nodeId],
     );
   }
@@ -158,6 +167,7 @@ class ContactActions {
   Future<void> updateDisplayName(String nodeId, String? displayName) async {
     await ContactService.instance.updateDisplayName(nodeId, displayName);
     _ref.invalidate(contactsProvider);
+    _ref.invalidate(conversationsProvider); // Refresh conversations with new name
   }
 
   /// Toggle verified status
