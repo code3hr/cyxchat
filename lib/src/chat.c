@@ -33,7 +33,7 @@
  * TEXT payload: text_len(1) + text(N) [+ reply_to(8) if flagged]
  */
 
-#define WIRE_HEADER_SIZE     10   /* type + flags + msg_id */
+#define WIRE_HEADER_SIZE     42   /* type + flags + msg_id + sender_id */
 #define WIRE_MAX_PAYLOAD     250  /* Max for direct routing */
 
 /* ============================================================
@@ -128,11 +128,13 @@ static size_t serialize_wire_header(
     uint8_t *out,
     uint8_t type,
     uint16_t flags,
-    const cyxchat_msg_id_t *msg_id
+    const cyxchat_msg_id_t *msg_id,
+    const cyxwiz_node_id_t *sender_id
 ) {
     out[0] = type;
     out[1] = (uint8_t)(flags & 0xFF);  /* Lower 8 bits of flags */
     memcpy(out + 2, msg_id->bytes, CYXCHAT_MSG_ID_SIZE);
+    memcpy(out + 10, sender_id->bytes, sizeof(cyxwiz_node_id_t));  /* 32 bytes */
     return WIRE_HEADER_SIZE;
 }
 
@@ -144,13 +146,15 @@ static size_t deserialize_wire_header(
     size_t len,
     uint8_t *type_out,
     uint16_t *flags_out,
-    cyxchat_msg_id_t *msg_id_out
+    cyxchat_msg_id_t *msg_id_out,
+    cyxwiz_node_id_t *sender_id_out
 ) {
     if (len < WIRE_HEADER_SIZE) return 0;
 
     *type_out = in[0];
     *flags_out = in[1];
     memcpy(msg_id_out->bytes, in + 2, CYXCHAT_MSG_ID_SIZE);
+    memcpy(sender_id_out->bytes, in + 10, sizeof(cyxwiz_node_id_t));  /* 32 bytes */
     return WIRE_HEADER_SIZE;
 }
 
@@ -164,12 +168,13 @@ static size_t serialize_text_msg(
     uint16_t flags,
     const char *text,
     size_t text_len,
-    const cyxchat_msg_id_t *reply_to
+    const cyxchat_msg_id_t *reply_to,
+    const cyxwiz_node_id_t *sender_id
 ) {
     size_t offset = 0;
 
     /* Header */
-    offset += serialize_wire_header(out + offset, CYXCHAT_MSG_TEXT, flags, msg_id);
+    offset += serialize_wire_header(out + offset, CYXCHAT_MSG_TEXT, flags, msg_id, sender_id);
 
     /* Text length (1 byte, max 255) */
     if (text_len > 255 || offset + 1 + text_len > out_size) return 0;
@@ -197,12 +202,13 @@ static size_t serialize_ack_msg(
     size_t out_size,
     const cyxchat_msg_id_t *msg_id,
     const cyxchat_msg_id_t *ack_msg_id,
-    uint8_t status
+    uint8_t status,
+    const cyxwiz_node_id_t *sender_id
 ) {
     size_t offset = 0;
 
     /* Header */
-    offset += serialize_wire_header(out + offset, CYXCHAT_MSG_ACK, 0, msg_id);
+    offset += serialize_wire_header(out + offset, CYXCHAT_MSG_ACK, 0, msg_id, sender_id);
 
     /* ACK target and status */
     if (offset + CYXCHAT_MSG_ID_SIZE + 1 > out_size) return 0;
@@ -220,11 +226,12 @@ static size_t serialize_typing_msg(
     uint8_t *out,
     size_t out_size,
     const cyxchat_msg_id_t *msg_id,
-    uint8_t is_typing
+    uint8_t is_typing,
+    const cyxwiz_node_id_t *sender_id
 ) {
     size_t offset = 0;
 
-    offset += serialize_wire_header(out + offset, CYXCHAT_MSG_TYPING, 0, msg_id);
+    offset += serialize_wire_header(out + offset, CYXCHAT_MSG_TYPING, 0, msg_id, sender_id);
 
     if (offset + 1 > out_size) return 0;
     out[offset++] = is_typing;
@@ -242,11 +249,12 @@ static size_t serialize_reaction_msg(
     const cyxchat_msg_id_t *target_msg_id,
     const char *reaction,
     size_t reaction_len,
-    uint8_t remove
+    uint8_t remove,
+    const cyxwiz_node_id_t *sender_id
 ) {
     size_t offset = 0;
 
-    offset += serialize_wire_header(out + offset, CYXCHAT_MSG_REACTION, 0, msg_id);
+    offset += serialize_wire_header(out + offset, CYXCHAT_MSG_REACTION, 0, msg_id, sender_id);
 
     /* Target msg ID + reaction_len + reaction + remove flag */
     if (offset + CYXCHAT_MSG_ID_SIZE + 1 + reaction_len + 1 > out_size) return 0;
@@ -270,11 +278,12 @@ static size_t serialize_delete_msg(
     uint8_t *out,
     size_t out_size,
     const cyxchat_msg_id_t *msg_id,
-    const cyxchat_msg_id_t *target_msg_id
+    const cyxchat_msg_id_t *target_msg_id,
+    const cyxwiz_node_id_t *sender_id
 ) {
     size_t offset = 0;
 
-    offset += serialize_wire_header(out + offset, CYXCHAT_MSG_DELETE, 0, msg_id);
+    offset += serialize_wire_header(out + offset, CYXCHAT_MSG_DELETE, 0, msg_id, sender_id);
 
     if (offset + CYXCHAT_MSG_ID_SIZE > out_size) return 0;
     memcpy(out + offset, target_msg_id->bytes, CYXCHAT_MSG_ID_SIZE);
@@ -292,11 +301,12 @@ static size_t serialize_edit_msg(
     const cyxchat_msg_id_t *msg_id,
     const cyxchat_msg_id_t *target_msg_id,
     const char *new_text,
-    size_t new_text_len
+    size_t new_text_len,
+    const cyxwiz_node_id_t *sender_id
 ) {
     size_t offset = 0;
 
-    offset += serialize_wire_header(out + offset, CYXCHAT_MSG_EDIT, 0, msg_id);
+    offset += serialize_wire_header(out + offset, CYXCHAT_MSG_EDIT, 0, msg_id, sender_id);
 
     /* Target ID + text_len + text */
     if (offset + CYXCHAT_MSG_ID_SIZE + 1 + new_text_len > out_size) return 0;
@@ -520,21 +530,25 @@ static void on_onion_delivery(
         return;
     }
 
-    /* Log received message */
-    char hex_id[17];
-    for (int i = 0; i < 8; i++) {
-        snprintf(hex_id + i*2, 3, "%02x", from->bytes[i]);
-    }
-    CYXWIZ_INFO("Received message from peer %.16s... (%zu bytes, type=0x%02x)",
-                hex_id, len, data[0]);
-
-    /* Parse wire header */
+    /* Parse wire header and extract sender from payload */
     uint8_t type;
     uint16_t flags;
     cyxchat_msg_id_t msg_id;
+    cyxwiz_node_id_t sender_id;
 
-    size_t offset = deserialize_wire_header(data, len, &type, &flags, &msg_id);
+    size_t offset = deserialize_wire_header(data, len, &type, &flags, &msg_id, &sender_id);
     if (offset == 0) return;
+    
+    /* Use sender from payload (not transport 'from' which is the relay in onion routing) */
+    const cyxwiz_node_id_t *actual_sender = &sender_id;
+    
+    /* Log received message with actual sender */
+    char hex_id[17];
+    for (int i = 0; i < 8; i++) {
+        snprintf(hex_id + i*2, 3, "%02x", actual_sender->bytes[i]);
+    }
+    CYXWIZ_INFO("Received message from peer %.16s... (%zu bytes, type=0x%02x)",
+                hex_id, len, data[0]);
 
     /* Handle fragmented TEXT messages */
     if (type == CYXCHAT_MSG_TEXT && (flags & CYXCHAT_FLAG_FRAGMENTED)) {
@@ -555,7 +569,7 @@ static void on_onion_delivery(
 
         /* Find or create fragment entry */
         cyxchat_frag_entry_t *entry = frag_find_or_create(
-            ctx, from, &msg_id, total_frags, now_ms);
+            ctx, actual_sender, &msg_id, total_frags, now_ms);
         if (!entry) {
             CYXWIZ_ERROR("Failed to allocate fragment entry");
             return;
@@ -587,7 +601,7 @@ static void on_onion_delivery(
             memcpy(queued_data + 2, reassembled, total_len);
             
             CYXWIZ_INFO("Queuing reassembled message: %zu bytes", total_len);
-            queue_push(ctx, from, type, queued_data, 2 + total_len);
+            queue_push(ctx, actual_sender, type, queued_data, 2 + total_len);
 
             /* Mark entry as used */
             entry->valid = 0;
@@ -604,10 +618,10 @@ static void on_onion_delivery(
             converted[0] = wire_text_len;
             converted[1] = 0;
             memcpy(converted + 2, data + offset + 1, wire_text_len);
-            queue_push(ctx, from, type, converted, 2 + wire_text_len);
+            queue_push(ctx, actual_sender, type, converted, 2 + wire_text_len);
         }
     } else {
-        queue_push(ctx, from, type, data + offset, len - offset);
+        queue_push(ctx, actual_sender, type, data + offset, len - offset);
     }
 
     /* Also fire callbacks if registered */
@@ -630,7 +644,7 @@ static void on_onion_delivery(
                         memcpy(&text_msg.reply_to, data + offset, CYXCHAT_MSG_ID_SIZE);
                     }
 
-                    ctx->on_message(ctx, from, &text_msg, ctx->on_message_data);
+                    ctx->on_message(ctx, actual_sender, &text_msg, ctx->on_message_data);
                 }
             }
             break;
@@ -641,14 +655,14 @@ static void on_onion_delivery(
                 memcpy(&ack_id, data + offset, CYXCHAT_MSG_ID_SIZE);
                 offset += CYXCHAT_MSG_ID_SIZE;
                 uint8_t status = data[offset];
-                ctx->on_ack(ctx, from, &ack_id, (cyxchat_msg_status_t)status, ctx->on_ack_data);
+                ctx->on_ack(ctx, actual_sender, &ack_id, (cyxchat_msg_status_t)status, ctx->on_ack_data);
             }
             break;
 
         case CYXCHAT_MSG_TYPING:
             if (ctx->on_typing && offset + 1 <= len) {
                 int is_typing = data[offset];
-                ctx->on_typing(ctx, from, is_typing, ctx->on_typing_data);
+                ctx->on_typing(ctx, actual_sender, is_typing, ctx->on_typing_data);
             }
             break;
 
@@ -663,7 +677,7 @@ static void on_onion_delivery(
                     memcpy(reaction, data + offset, reaction_len);
                     offset += reaction_len;
                     int remove = data[offset];
-                    ctx->on_reaction(ctx, from, &target_id, reaction, remove, ctx->on_reaction_data);
+                    ctx->on_reaction(ctx, actual_sender, &target_id, reaction, remove, ctx->on_reaction_data);
                 }
             }
             break;
@@ -672,7 +686,7 @@ static void on_onion_delivery(
             if (ctx->on_delete && offset + CYXCHAT_MSG_ID_SIZE <= len) {
                 cyxchat_msg_id_t target_id;
                 memcpy(&target_id, data + offset, CYXCHAT_MSG_ID_SIZE);
-                ctx->on_delete(ctx, from, &target_id, ctx->on_delete_data);
+                ctx->on_delete(ctx, actual_sender, &target_id, ctx->on_delete_data);
             }
             break;
 
@@ -683,7 +697,7 @@ static void on_onion_delivery(
                 offset += CYXCHAT_MSG_ID_SIZE;
                 uint8_t new_len = data[offset++];
                 if (offset + new_len <= len) {
-                    ctx->on_edit(ctx, from, &target_id, (const char *)(data + offset), new_len, ctx->on_edit_data);
+                    ctx->on_edit(ctx, actual_sender, &target_id, (const char *)(data + offset), new_len, ctx->on_edit_data);
                 }
             }
             break;
@@ -697,7 +711,7 @@ static void on_onion_delivery(
             if (ctx->file_ctx) {
                 CYXWIZ_INFO("Routing file message (type=0x%02x) to file module", type);
                 /* Pass data after the type byte (offset already points past header) */
-                cyxchat_file_handle_message(ctx->file_ctx, from, type, data + 1, len - 1);
+                cyxchat_file_handle_message(ctx->file_ctx, actual_sender, type, data + 1, len - 1);
             } else {
                 CYXWIZ_WARN("Received file message but no file context registered");
             }
@@ -839,7 +853,8 @@ cyxchat_error_t cyxchat_send_text(
         size_t wire_len = serialize_text_msg(
             wire_buf, sizeof(wire_buf),
             &msg_id, flags, text, text_len,
-            (flags & CYXCHAT_FLAG_REPLY) ? reply_to : NULL
+            (flags & CYXCHAT_FLAG_REPLY) ? reply_to : NULL,
+            &ctx->local_id
         );
 
         if (wire_len == 0) {
@@ -879,7 +894,7 @@ cyxchat_error_t cyxchat_send_text(
             size_t wire_len = 0;
 
             /* Serialize header */
-            wire_len = serialize_wire_header(wire_buf, CYXCHAT_MSG_TEXT, flags, &msg_id);
+            wire_len = serialize_wire_header(wire_buf, CYXCHAT_MSG_TEXT, flags, &msg_id, &ctx->local_id);
 
             /* Add fragment info */
             wire_buf[wire_len++] = (uint8_t)i;              /* Fragment index */
@@ -925,7 +940,8 @@ cyxchat_error_t cyxchat_send_ack(
     uint8_t wire_buf[WIRE_MAX_PAYLOAD];
     size_t wire_len = serialize_ack_msg(
         wire_buf, sizeof(wire_buf),
-        &our_msg_id, msg_id, (uint8_t)status
+        &our_msg_id, msg_id, (uint8_t)status,
+        &ctx->local_id
     );
 
     if (wire_len == 0) {
@@ -951,7 +967,8 @@ cyxchat_error_t cyxchat_send_typing(
     uint8_t wire_buf[WIRE_MAX_PAYLOAD];
     size_t wire_len = serialize_typing_msg(
         wire_buf, sizeof(wire_buf),
-        &msg_id, is_typing ? 1 : 0
+        &msg_id, is_typing ? 1 : 0,
+        &ctx->local_id
     );
 
     if (wire_len == 0) {
@@ -984,7 +1001,8 @@ cyxchat_error_t cyxchat_send_reaction(
     uint8_t wire_buf[WIRE_MAX_PAYLOAD];
     size_t wire_len = serialize_reaction_msg(
         wire_buf, sizeof(wire_buf),
-        &our_msg_id, msg_id, reaction, reaction_len, remove ? 1 : 0
+        &our_msg_id, msg_id, reaction, reaction_len, remove ? 1 : 0,
+        &ctx->local_id
     );
 
     if (wire_len == 0) {
@@ -1010,7 +1028,8 @@ cyxchat_error_t cyxchat_send_delete(
     uint8_t wire_buf[WIRE_MAX_PAYLOAD];
     size_t wire_len = serialize_delete_msg(
         wire_buf, sizeof(wire_buf),
-        &our_msg_id, msg_id
+        &our_msg_id, msg_id,
+        &ctx->local_id
     );
 
     if (wire_len == 0) {
@@ -1042,7 +1061,8 @@ cyxchat_error_t cyxchat_send_edit(
     uint8_t wire_buf[WIRE_MAX_PAYLOAD];
     size_t wire_len = serialize_edit_msg(
         wire_buf, sizeof(wire_buf),
-        &our_msg_id, msg_id, new_text, new_text_len
+        &our_msg_id, msg_id, new_text, new_text_len,
+        &ctx->local_id
     );
 
     if (wire_len == 0) {
