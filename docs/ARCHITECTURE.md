@@ -45,10 +45,8 @@ A fully decentralized, privacy-first chat application built on the CyxWiz protoc
                             │
 ┌────────────────────────────────────────────────────────────┐
 │                      TRANSPORT                             │
-│  • UDP/Internet (primary for mobile/desktop)               │
-│  • WiFi Direct (nearby, no internet)                       │
-│  • Bluetooth (close range)                                 │
-│  • LoRa (rural, emergency)                                 │
+│  • UDP/Internet with NAT traversal (STUN + hole punch)     │
+│  • Relay fallback when direct connection fails             │
 └────────────────────────────────────────────────────────────┘
 ```
 

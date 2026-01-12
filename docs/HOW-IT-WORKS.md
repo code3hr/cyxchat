@@ -215,7 +215,7 @@ Files are transferred in small chunks that fit within the onion routing payload 
 FILE TRANSFER CONSTRAINTS
 =========================
 
-LoRa packet limit:     250 bytes max
+Packet limit:          250 bytes max
 Onion overhead:        40 bytes/layer (nonce + auth tag)
 1-hop payload:         ~139 bytes usable
 Chunk overhead:        13 bytes (type + file_id + idx + len)
@@ -660,7 +660,7 @@ Relay (if used) knows:
 | Forward secrecy | Yes | Yes | Yes |
 | Onion routing | No | No | **Yes** |
 | Cover traffic | No | No | **Yes** |
-| Works offline/mesh | No | No | **Yes** (LoRa, BT, WiFi Direct) |
+| Works offline/mesh | No | No | No |
 | Open source | Client only | Yes | **Yes** (full stack) |
 
 ### Specific Security Features

@@ -11,7 +11,7 @@ A technical comparison of CyxChat with Meshtastic, Signal, Briar, and Matrix/Ses
 | **Requires Phone Number** | No | Yes | No | No | No | No |
 | **Requires Email** | No | No | No | No | Optional | No |
 | **Central Servers** | No | Yes | No | Decentralized | Federated | No |
-| **Works Offline/Mesh** | Yes | No | Yes (WiFi/BT) | No | No | Yes |
+| **Works Offline/Mesh** | No | No | Yes (WiFi/BT) | No | No | Yes |
 | **Metadata Protection** | Onion routing | Limited | Tor | Onion routing | No | Limited |
 | **NAT Traversal** | STUN + Relay | Server-based | Tor | Onion network | Server-based | N/A (radio) |
 | **End-to-End Encryption** | Yes | Yes | Yes | Yes | Yes | Limited |
@@ -75,7 +75,6 @@ A technical comparison of CyxChat with Meshtastic, Signal, Briar, and Matrix/Ses
 - Relay fallback when direct connection fails
 - Cross-platform (Windows, macOS, Linux, iOS, Android)
 - Lower latency than Tor
-- Future: LoRa support for long-range mesh (km not meters)
 
 ---
 
@@ -147,11 +146,10 @@ A technical comparison of CyxChat with Meshtastic, Signal, Briar, and Matrix/Ses
 - Requires special hardware (LoRa radio)
 
 **CyxChat difference:**
-- Built on CyxWiz protocol (designed for LoRa constraints from day one)
-- Onion routing even over LoRa (3-hop max due to packet size)
+- Built on CyxWiz protocol with efficient packet design
+- Onion routing with 3-hop maximum
 - Forward secrecy with rotating keys
-- Works over internet AND mesh (hybrid)
-- No special hardware required for internet mode
+- UDP with NAT traversal for reliable connectivity
 
 ---
 
@@ -190,13 +188,12 @@ Messages up to **4096 characters** are automatically:
 - Reassembled on recipient's device
 - Delivered as single message
 
-### 4. Hybrid Transport
+### 4. UDP Transport with NAT Traversal
 
-CyxChat works over multiple transports simultaneously:
-- **UDP/Internet** - Primary, with STUN NAT traversal
-- **WiFi Direct** - Local mesh (planned)
-- **Bluetooth** - Device-to-device (planned)
-- **LoRa** - Long-range mesh (planned)
+CyxChat uses UDP for reliable peer-to-peer connectivity:
+- **STUN** - Discover public IP address
+- **UDP Hole Punching** - Direct P2P when possible
+- **Relay Fallback** - Via bootstrap server when direct fails
 
 ---
 
@@ -281,15 +278,15 @@ CyxChat:        You → Peer → Peer → Recipient
 
 2. **Censorship Resistance**
    - No central server to block
-   - Works over multiple transports (UDP, WiFi Direct, Bluetooth, LoRa)
+   - UDP with NAT traversal works behind most networks
 
 3. **Self-Sovereignty**
    - You control your identity (it's just a keypair)
    - No company can ban you or read your messages
 
-4. **Offline/Mesh Capability**
-   - Direct device-to-device communication
-   - Future LoRa support for long-range mesh
+4. **Direct P2P Communication**
+   - UDP hole punching for direct connections
+   - Relay fallback ensures connectivity
 
 5. **Simplicity**
    - Clean, auditable codebase
@@ -357,19 +354,19 @@ CyxChat:        You → Peer → Peer → Recipient
 | **Features** | Matrix | Rooms, threads, bridges |
 | **Simplicity** | CyxChat | Minimal protocol, clean code |
 | **Censorship Resistance** | CyxChat/Briar | No central servers |
-| **Future Mesh** | CyxChat | Designed for LoRa from ground up |
+| **NAT Traversal** | CyxChat | UDP hole punch + relay fallback |
 
 ---
 
 ## Conclusion
 
-CyxChat occupies a unique position: **Signal-grade encryption + Tor-like anonymity + Meshtastic-like mesh potential**, without requiring phone numbers, servers, or cryptocurrency.
+CyxChat occupies a unique position: **Signal-grade encryption + Tor-like anonymity**, without requiring phone numbers, central servers, or cryptocurrency.
 
 It's not trying to replace Signal for everyday users. It's for those who need:
 - True anonymity (journalists, activists, whistleblowers)
 - Censorship resistance (users in restrictive countries)
 - Self-sovereign communication (no trust in third parties)
-- Future-proof mesh networking (offline-first design)
+- Direct P2P connections without central infrastructure
 
 **The trade-off is clear**: Less convenience, fewer features, smaller network - in exchange for stronger privacy guarantees and architectural resilience.
 

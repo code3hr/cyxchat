@@ -1231,12 +1231,6 @@ class CyxchatFFI {
 │  │  sudo apt install -y build-essential cmake git                  │   │
 │  │  sudo apt install -y libsodium-dev                              │   │
 │  │  sudo apt install -y libgtk-3-dev libblkid-dev liblzma-dev     │   │
-│  │                                                                  │   │
-│  │  # For Bluetooth support                                        │   │
-│  │  sudo apt install -y libbluetooth-dev                          │   │
-│  │                                                                  │   │
-│  │  # For WiFi Direct support                                      │   │
-│  │  sudo apt install -y wpasupplicant                              │   │
 │  └─────────────────────────────────────────────────────────────────┘   │
 │                                                                          │
 │  Install Flutter:                                                       │
@@ -1382,10 +1376,6 @@ class CyxchatFFI {
 │                                                                          │
 │  Permissions (Info.plist):                                              │
 │  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │  <!-- Bluetooth -->                                             │   │
-│  │  <key>NSBluetoothAlwaysUsageDescription</key>                  │   │
-│  │  <string>CyxChat uses Bluetooth for local messaging</string>   │   │
-│  │                                                                  │   │
 │  │  <!-- Camera (QR scanning) -->                                  │   │
 │  │  <key>NSCameraUsageDescription</key>                            │   │
 │  │  <string>CyxChat uses camera to scan QR codes</string>         │   │
@@ -1394,9 +1384,9 @@ class CyxchatFFI {
 │  │  <key>NSMicrophoneUsageDescription</key>                        │   │
 │  │  <string>CyxChat uses microphone for voice messages</string>   │   │
 │  │                                                                  │   │
-│  │  <!-- Local Network (for WiFi discovery fallback) -->          │   │
+│  │  <!-- Local Network (for UDP P2P connections) -->              │   │
 │  │  <key>NSLocalNetworkUsageDescription</key>                      │   │
-│  │  <string>CyxChat uses local network for peer discovery</string>│   │
+│  │  <string>CyxChat uses local network for P2P messaging</string> │   │
 │  └─────────────────────────────────────────────────────────────────┘   │
 │                                                                          │
 └─────────────────────────────────────────────────────────────────────────┘

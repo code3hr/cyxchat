@@ -25,10 +25,10 @@ CyxChat is a decentralized, privacy-first messaging application built on the Cyx
 │                               │                                         │
 │  ┌────────────────────────────┴────────────────────────────────────┐    │
 │  │                     Transport Layer                              │    │
-│  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────────────┐│    │
-│  │  │   UDP    │  │WiFi Direct│ │Bluetooth │  │      LoRa        ││    │
-│  │  │(Internet)│  │  (Local) │  │ (Local)  │  │   (Long Range)   ││    │
-│  │  └──────────┘  └──────────┘  └──────────┘  └──────────────────┘│    │
+│  │  ┌──────────────────────────────────────────────────────────┐   │    │
+│  │  │  UDP/Internet with NAT Traversal (STUN + Hole Punch)     │   │    │
+│  │  │  Relay fallback via bootstrap server                      │   │    │
+│  │  └──────────────────────────────────────────────────────────┘   │    │
 │  └──────────────────────────────────────────────────────────────────┘    │
 │                                                                          │
 └─────────────────────────────────────────────────────────────────────────┘
@@ -133,28 +133,24 @@ CyxChat uses anonymous cryptographic identities instead of phone numbers or emai
 │                         User Discovery Methods                           │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                          │
-│  ┌─────────────────────────────┐  ┌─────────────────────────────────┐  │
-│  │     LOCAL DISCOVERY         │  │       GLOBAL DISCOVERY          │  │
-│  │     (No Internet)           │  │       (Internet Required)       │  │
-│  ├─────────────────────────────┤  ├─────────────────────────────────┤  │
-│  │                             │  │                                 │  │
-│  │  WiFi Direct                │  │  Bootstrap Servers              │  │
-│  │  • Scan for nearby peers    │  │  • Initial peer discovery       │  │
-│  │  • ~100m range indoors      │  │  • NAT traversal (STUN)         │  │
-│  │                             │  │                                 │  │
-│  │  Bluetooth                  │  │  Relay Nodes                    │  │
-│  │  • Discover nearby devices  │  │  • Bridge mesh networks         │  │
-│  │  • ~10m range               │  │  • Store offline messages       │  │
-│  │                             │  │                                 │  │
-│  │  LoRa                       │  │  CyxCloud Directory             │  │
-│  │  • Long-range beacons       │  │  • Opt-in public profiles       │  │
-│  │  • ~10km line-of-sight      │  │  • Searchable by username       │  │
-│  │                             │  │                                 │  │
-│  │  ANNOUNCE Broadcasts        │  │  Friend Introductions           │  │
-│  │  • "I'm here" messages      │  │  • Alice introduces Bob to Carol│  │
-│  │  • Include public key       │  │  • Relay contact info securely  │  │
-│  │                             │  │                                 │  │
-│  └─────────────────────────────┘  └─────────────────────────────────┘  │
+│  ┌─────────────────────────────────────────────────────────────────┐  │
+│  │                      PEER DISCOVERY                              │  │
+│  ├─────────────────────────────────────────────────────────────────┤  │
+│  │                                                                   │  │
+│  │  Bootstrap Servers                                               │  │
+│  │  • Initial peer discovery                                        │  │
+│  │  • NAT traversal (STUN)                                          │  │
+│  │  • Relay fallback when direct connection fails                   │  │
+│  │                                                                   │  │
+│  │  UDP Hole Punching                                               │  │
+│  │  • Direct P2P connections through NAT                            │  │
+│  │  • Works behind most routers                                     │  │
+│  │                                                                   │  │
+│  │  Friend Introductions                                            │  │
+│  │  • Alice introduces Bob to Carol                                 │  │
+│  │  • Relay contact info securely                                   │  │
+│  │                                                                   │  │
+│  └─────────────────────────────────────────────────────────────────┘  │
 │                                                                          │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
@@ -1110,7 +1106,7 @@ typedef struct {
 │                                                                          │
 │  Windows                                                                │
 │  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │  • Transport: UDP (primary), WiFi Direct, Bluetooth             │   │
+│  │  • Transport: UDP with NAT traversal                            │   │
 │  │  • Storage: AppData\Roaming\CyxChat                             │   │
 │  │  • Keys: Windows Credential Manager                             │   │
 │  │  • Notifications: Windows Toast                                  │   │
@@ -1119,7 +1115,7 @@ typedef struct {
 │                                                                          │
 │  macOS                                                                  │
 │  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │  • Transport: UDP (primary), WiFi Direct, Bluetooth             │   │
+│  │  • Transport: UDP with NAT traversal                            │   │
 │  │  • Storage: ~/Library/Application Support/CyxChat               │   │
 │  │  • Keys: Keychain Services                                       │   │
 │  │  • Notifications: UserNotifications framework                   │   │
@@ -1128,7 +1124,7 @@ typedef struct {
 │                                                                          │
 │  Linux                                                                  │
 │  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │  • Transport: UDP (primary), WiFi Direct (wpa_supplicant), BT   │   │
+│  │  • Transport: UDP with NAT traversal                            │   │
 │  │  • Storage: ~/.local/share/cyxchat                              │   │
 │  │  • Keys: libsecret / GNOME Keyring                              │   │
 │  │  • Notifications: D-Bus (org.freedesktop.Notifications)         │   │
@@ -1137,17 +1133,16 @@ typedef struct {
 │                                                                          │
 │  iOS                                                                    │
 │  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │  • Transport: UDP (primary), Bluetooth LE                       │   │
+│  │  • Transport: UDP with NAT traversal                            │   │
 │  │  • Storage: Documents directory (encrypted)                     │   │
 │  │  • Keys: Keychain Services (Secure Enclave)                     │   │
 │  │  • Notifications: APNs (optional, for background)               │   │
-│  │  • Note: No WiFi Direct on iOS                                  │   │
 │  │  • Build: Xcode + libsodium (CocoaPods)                        │   │
 │  └─────────────────────────────────────────────────────────────────┘   │
 │                                                                          │
 │  Android                                                                │
 │  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │  • Transport: UDP (primary), WiFi Direct, Bluetooth             │   │
+│  │  • Transport: UDP with NAT traversal                            │   │
 │  │  • Storage: Internal storage (encrypted)                        │   │
 │  │  • Keys: Android Keystore (hardware-backed)                     │   │
 │  │  • Notifications: FCM (optional) or local                       │   │

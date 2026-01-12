@@ -12,7 +12,7 @@ Current per-layer overhead:
   ─────────────────────────────
   Total: 104 bytes per layer
 
-Payload capacity (250-byte LoRa limit):
+Payload capacity (250-byte packet limit):
   1-hop: 139 bytes
   2-hop: 35 bytes
   3-hop: Not possible!

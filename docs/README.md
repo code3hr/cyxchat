@@ -96,7 +96,7 @@ Both applications share:
 ┌─────────────────────────────────────────┐
 │              CyxWiz Core                │
 ├─────────────────────────────────────────┤
-│  • Transport (UDP, WiFi Direct, BT, LoRa│
+│  • Transport (UDP with NAT traversal)   │
 │  • Routing (mesh, onion)                │
 │  • Crypto (X25519, XChaCha20)           │
 │  • Storage (CyxCloud)                   │
