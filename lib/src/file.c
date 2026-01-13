@@ -57,6 +57,7 @@ typedef struct cyxchat_conn_ctx cyxchat_conn_ctx_t;
 /* Peer address message (sent via onion, contains public IP:port) */
 typedef struct {
     uint8_t type;                           /* CYXCHAT_MSG_PEER_ADDR (0x60) */
+    uint8_t sender_id[32];                  /* Sender node ID for onion routing */
     uint8_t file_id[CYXCHAT_FILE_ID_SIZE];  /* Related file transfer ID (optional) */
     uint32_t public_ip;                     /* Public IP (network byte order) */
     uint16_t public_port;                   /* Public port (network byte order) */
@@ -348,6 +349,13 @@ cyxchat_error_t cyxchat_file_ctx_create(
     }
 
     c->chat_ctx = chat_ctx;
+
+    /* Copy local_id from chat context for sender identification in file messages */
+    const cyxwiz_node_id_t *local_id = cyxchat_get_local_id(chat_ctx);
+    if (local_id) {
+        memcpy(&c->local_id, local_id, sizeof(cyxwiz_node_id_t));
+    }
+
     *ctx = c;
     return CYXCHAT_OK;
 }
@@ -382,7 +390,8 @@ static void send_next_chunk(cyxchat_file_ctx_t *ctx, file_transfer_slot_t *slot)
     }
 
     /* Allocate buffer for chunk - always use heap for portability */
-    size_t max_wire_len = 13 + chunk_size;  /* header(13) + data */
+    /* header(13) + sender_id(32) + data */
+    size_t max_wire_len = 13 + 32 + chunk_size;
     uint8_t *chunk_buf = malloc(max_wire_len);
 
     if (!chunk_buf) {
@@ -393,6 +402,9 @@ static void send_next_chunk(cyxchat_file_ctx_t *ctx, file_transfer_slot_t *slot)
     size_t chunk_wire_len = 0;
 
     chunk_buf[chunk_wire_len++] = CYXCHAT_MSG_FILE_CHUNK;
+    /* Add sender_id for onion routing */
+    memcpy(chunk_buf + chunk_wire_len, ctx->local_id.bytes, 32);
+    chunk_wire_len += 32;
     memcpy(chunk_buf + chunk_wire_len, slot->transfer.meta.file_id.bytes, CYXCHAT_FILE_ID_SIZE);
     chunk_wire_len += CYXCHAT_FILE_ID_SIZE;
 
@@ -413,12 +425,29 @@ static void send_next_chunk(cyxchat_file_ctx_t *ctx, file_transfer_slot_t *slot)
     memcpy(chunk_buf + chunk_wire_len, slot->data + offset, chunk_len);
     chunk_wire_len += chunk_len;
 
+    /* Debug: log destination peer ID */
+    {
+        char peer_hex[65];
+        for (int i = 0; i < 32; i++) {
+            snprintf(peer_hex + i*2, 3, "%02x", slot->transfer.peer.bytes[i]);
+        }
+        CYXWIZ_INFO("send_next_chunk: chunk %u to peer_id=%s", chunk_idx, peer_hex);
+    }
+
     cyxchat_error_t err;
     if (ctx->use_direct_mode && ctx->transport) {
         /* Direct P2P: send via transport directly (bypasses router peer check) */
         cyxwiz_error_t werr = ctx->transport->ops->send(
             ctx->transport, &slot->transfer.peer, chunk_buf, chunk_wire_len);
-        err = (werr == CYXWIZ_OK) ? CYXCHAT_OK : CYXCHAT_ERR_NETWORK;
+        if (werr == CYXWIZ_OK) {
+            err = CYXCHAT_OK;
+        } else if (werr == CYXWIZ_ERR_PEER_NOT_FOUND && ctx->chat_ctx) {
+            /* Peer not in transport's peer list - fall back to onion routing */
+            CYXWIZ_INFO("send_next_chunk: direct send failed (peer not found), falling back to onion");
+            err = cyxchat_send_raw(ctx->chat_ctx, &slot->transfer.peer, chunk_buf, chunk_wire_len);
+        } else {
+            err = CYXCHAT_ERR_NETWORK;
+        }
     } else {
         /* Onion routing: send via chat layer (slower, anonymous) */
         err = cyxchat_send_raw(ctx->chat_ctx, &slot->transfer.peer, chunk_buf, chunk_wire_len);
@@ -598,6 +627,15 @@ cyxchat_error_t cyxchat_file_send(
     /* Copy peer and state */
     memcpy(&slot->transfer.peer, to, sizeof(cyxwiz_node_id_t));
     slot->transfer.state = CYXCHAT_FILE_PENDING;
+
+    /* Debug: log destination peer ID */
+    {
+        char to_hex[65];
+        for (int i = 0; i < 32; i++) {
+            snprintf(to_hex + i*2, 3, "%02x", to->bytes[i]);
+        }
+        CYXWIZ_INFO("cyxchat_file_send: TO peer_id=%s", to_hex);
+    }
     slot->transfer.is_outgoing = 1;
     slot->transfer.started_at = cyxchat_timestamp_ms();
     slot->transfer.updated_at = slot->transfer.started_at;
@@ -625,12 +663,15 @@ cyxchat_error_t cyxchat_file_send(
     }
 
     /* Build and send metadata message using compact wire format */
-    /* Wire format: type(1) + file_id(8) + filename_len(1) + filename(N) +
+    /* Wire format: type(1) + sender_id(32) + file_id(8) + filename_len(1) + filename(N) +
      *              mime_len(1) + mime(N) + size(4) + chunk_count(2) + file_hash(32) */
     uint8_t wire_buf[250];
     size_t wire_len = 0;
 
     wire_buf[wire_len++] = CYXCHAT_MSG_FILE_META;
+    /* Add sender_id so receiver knows who sent the file (for onion routing) */
+    memcpy(wire_buf + wire_len, ctx->local_id.bytes, 32);
+    wire_len += 32;
     memcpy(wire_buf + wire_len, slot->transfer.meta.file_id.bytes, CYXCHAT_FILE_ID_SIZE);
     wire_len += CYXCHAT_FILE_ID_SIZE;
 
@@ -681,6 +722,9 @@ cyxchat_error_t cyxchat_file_send(
         size_t chunk_wire_len = 0;
 
         chunk_buf[chunk_wire_len++] = CYXCHAT_MSG_FILE_CHUNK;
+        /* Add sender_id for onion routing */
+        memcpy(chunk_buf + chunk_wire_len, ctx->local_id.bytes, 32);
+        chunk_wire_len += 32;
         memcpy(chunk_buf + chunk_wire_len, slot->transfer.meta.file_id.bytes, CYXCHAT_FILE_ID_SIZE);
         chunk_wire_len += CYXCHAT_FILE_ID_SIZE;
 
@@ -812,10 +856,13 @@ cyxchat_error_t cyxchat_file_accept(
 
     /* Send accept message to sender */
     {
-        uint8_t wire_buf[12];
+        uint8_t wire_buf[44];  /* 12 + 32 for sender_id */
         size_t wire_len = 0;
 
         wire_buf[wire_len++] = CYXCHAT_MSG_FILE_ACCEPT;
+        /* Add sender_id for onion routing */
+        memcpy(wire_buf + wire_len, ctx->local_id.bytes, 32);
+        wire_len += 32;
         memcpy(wire_buf + wire_len, file_id->bytes, CYXCHAT_FILE_ID_SIZE);
         wire_len += CYXCHAT_FILE_ID_SIZE;
         wire_buf[wire_len++] = (uint8_t)slot->transfer.mode;
@@ -848,10 +895,13 @@ cyxchat_error_t cyxchat_file_reject(
 
     /* Send reject message to sender */
     {
-        uint8_t wire_buf[10];
+        uint8_t wire_buf[42];  /* 10 + 32 for sender_id */
         size_t wire_len = 0;
 
         wire_buf[wire_len++] = CYXCHAT_MSG_FILE_REJECT;
+        /* Add sender_id for onion routing */
+        memcpy(wire_buf + wire_len, ctx->local_id.bytes, 32);
+        wire_len += 32;
         memcpy(wire_buf + wire_len, file_id->bytes, CYXCHAT_FILE_ID_SIZE);
         wire_len += CYXCHAT_FILE_ID_SIZE;
         wire_buf[wire_len++] = 0; /* CYXCHAT_FILE_REJECT_DECLINED */
@@ -888,10 +938,13 @@ cyxchat_error_t cyxchat_file_cancel(
 
     /* Send cancel message to peer */
     {
-        uint8_t wire_buf[9];
+        uint8_t wire_buf[41];  /* 9 + 32 for sender_id */
         size_t wire_len = 0;
 
         wire_buf[wire_len++] = CYXCHAT_MSG_FILE_CANCEL;
+        /* Add sender_id for onion routing */
+        memcpy(wire_buf + wire_len, ctx->local_id.bytes, 32);
+        wire_len += 32;
         memcpy(wire_buf + wire_len, file_id->bytes, CYXCHAT_FILE_ID_SIZE);
         wire_len += CYXCHAT_FILE_ID_SIZE;
 
@@ -1752,12 +1805,13 @@ static cyxchat_error_t handle_peer_addr(
     const uint8_t *data,
     size_t data_len
 ) {
-    if (data_len < sizeof(cyxchat_peer_addr_msg_t) - 1) {  /* -1 for type byte already consumed */
-        CYXWIZ_WARN("file: peer addr message too short");
+    /* Expected: file_id(8) + ip(4) + port(2) = 14 bytes (type+sender_id already stripped) */
+    if (data_len < CYXCHAT_FILE_ID_SIZE + sizeof(uint32_t) + sizeof(uint16_t)) {
+        CYXWIZ_WARN("file: peer addr message too short (%zu bytes)", data_len);
         return CYXCHAT_ERR_INVALID;
     }
 
-    /* Parse the message (type byte already consumed, data points to file_id) */
+    /* Parse the message (type+sender_id already consumed, data points to file_id) */
     const uint8_t *file_id = data;
     uint32_t public_ip;
     uint16_t public_port;
@@ -1803,9 +1857,11 @@ static cyxchat_error_t handle_peer_addr(
     }
 
     /* Send acknowledgment */
-    uint8_t ack[1 + CYXCHAT_FILE_ID_SIZE];
+    uint8_t ack[1 + 32 + CYXCHAT_FILE_ID_SIZE];  /* type + sender_id + file_id */
     ack[0] = CYXCHAT_MSG_PEER_ADDR_ACK;
-    memcpy(ack + 1, file_id, CYXCHAT_FILE_ID_SIZE);
+    /* Add sender_id for onion routing */
+    memcpy(ack + 1, ctx->local_id.bytes, 32);
+    memcpy(ack + 33, file_id, CYXCHAT_FILE_ID_SIZE);
     cyxchat_send_raw(ctx->chat_ctx, from, ack, sizeof(ack));
 
     return CYXCHAT_OK;
@@ -1967,6 +2023,8 @@ static cyxchat_error_t send_peer_addr_to_peer(
     cyxchat_peer_addr_msg_t msg;
     memset(&msg, 0, sizeof(msg));
     msg.type = CYXCHAT_MSG_PEER_ADDR;
+    /* Add sender_id for onion routing */
+    memcpy(msg.sender_id, ctx->local_id.bytes, 32);
     if (file_id) {
         memcpy(msg.file_id, file_id->bytes, CYXCHAT_FILE_ID_SIZE);
     }

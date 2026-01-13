@@ -7,6 +7,7 @@ import '../providers/identity_provider.dart';
 import '../providers/dns_provider.dart';
 import '../providers/settings_provider.dart';
 import '../providers/network_provider.dart';
+import '../providers/connection_provider.dart';
 import '../providers/file_provider.dart';
 import '../providers/chat_provider.dart';
 import '../services/identity_service.dart';
@@ -131,13 +132,7 @@ class SettingsScreen extends ConsumerWidget {
                   icon: Icons.hub_rounded,
                   iconGradient: const [AppColors.accentGreen, AppColors.accent],
                   children: [
-                    _SettingsTile(
-                      icon: Icons.cell_tower_rounded,
-                      title: 'Internet Relay',
-                      subtitle: 'Connected to 3 relays',
-                      trailing: _StatusChip(label: '3 Peers', isActive: true),
-                      onTap: () {},
-                    ),
+                    const _NetworkStatusTile(),
                     const _ServerConfigTile(),
                   ],
                 ),
@@ -1251,6 +1246,116 @@ class _UsernameSectionState extends ConsumerState<_UsernameSection> {
         _error = 'Error: ${e.toString()}';
       });
     }
+  }
+}
+
+/// Network status tile showing real-time connection info
+class _NetworkStatusTile extends ConsumerWidget {
+  const _NetworkStatusTile();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final connection = ref.watch(connectionNotifierProvider);
+    final networkStatus = connection.networkStatus;
+    final peerCount = networkStatus.activeConnections;
+    final directCount = networkStatus.directConnections;
+    final relayCount = networkStatus.relayConnections;
+    final isConnected = connection.initialized;
+
+    String subtitle;
+    if (!isConnected) {
+      subtitle = 'Not connected';
+    } else if (peerCount == 0) {
+      subtitle = 'Waiting for peers...';
+    } else {
+      subtitle = directCount > 0 && relayCount > 0
+          ? '$directCount direct, $relayCount relay'
+          : directCount > 0
+              ? '$directCount direct connection${directCount > 1 ? 's' : ''}'
+              : '$relayCount relay connection${relayCount > 1 ? 's' : ''}';
+    }
+
+    return _SettingsTile(
+      icon: Icons.cell_tower_rounded,
+      title: 'P2P Network',
+      subtitle: subtitle,
+      trailing: _StatusChip(
+        label: peerCount > 0 ? '$peerCount Peer${peerCount > 1 ? 's' : ''}' : 'Offline',
+        isActive: peerCount > 0,
+      ),
+      onTap: () {
+        // Show network details dialog
+        showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: AppColors.bgDarkSecondary,
+            title: const Text('Network Status'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _NetworkInfoRow(
+                  label: 'Public Address',
+                  value: networkStatus.publicAddress ?? 'Discovering...',
+                ),
+                _NetworkInfoRow(
+                  label: 'NAT Type',
+                  value: networkStatus.natTypeName,
+                ),
+                _NetworkInfoRow(
+                  label: 'Connected Peers',
+                  value: '$peerCount',
+                ),
+                _NetworkInfoRow(
+                  label: 'Direct Connections',
+                  value: '$directCount',
+                ),
+                _NetworkInfoRow(
+                  label: 'Relay Connections',
+                  value: '$relayCount',
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Close'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _NetworkInfoRow extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _NetworkInfoRow({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(color: AppColors.textDarkSecondary),
+          ),
+          Text(
+            value,
+            style: const TextStyle(
+              color: AppColors.textDark,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 

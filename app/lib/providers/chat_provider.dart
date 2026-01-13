@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:ffi/ffi.dart';
 import '../ffi/bindings.dart';
+import '../services/log_service.dart';
 import '../utils/node_id_utils.dart';
 
 /// Received message from native layer
@@ -295,12 +296,15 @@ class ChatProvider extends ChangeNotifier {
     required String text,
     String? replyToMsgId,
   }) async {
+    final log = LogService.instance;
     if (!_initialized) {
+      log.error('Cannot send: chat not initialized', source: 'Chat');
       return SendResult.failure('Chat not initialized');
     }
 
     final peerIdBytes = NodeIdUtils.toBytesAsList(toPeerId);
     final peerIdPtr = calloc<Uint8>(32);
+    final shortPeerId = toPeerId.length > 8 ? toPeerId.substring(0, 8) : toPeerId;
 
     try {
       for (int i = 0; i < 32 && i < peerIdBytes.length; i++) {
@@ -314,8 +318,10 @@ class ChatProvider extends ChangeNotifier {
       );
 
       if (msgIdHex != null) {
+        log.info('Message sent to $shortPeerId... (${text.length} chars)', source: 'Chat');
         return SendResult.success(msgIdHex);
       } else {
+        log.error('Failed to send message to $shortPeerId...', source: 'Chat');
         return SendResult.failure('Send failed');
       }
     } finally {
@@ -478,11 +484,13 @@ class ChatProvider extends ChangeNotifier {
   }
 
   void _processReceivedMessage(Map<String, dynamic> msg) {
+    final log = LogService.instance;
     final fromBytes = msg['from'] as List<int>;
     final type = msg['type'] as int;
     final data = msg['data'] as List<int>;
 
     final fromNodeId = NodeIdUtils.bytesToNodeId(fromBytes, fromBytes.length);
+    final shortFromId = fromNodeId.length > 8 ? fromNodeId.substring(0, 8) : fromNodeId;
 
     final received = ReceivedMessage(
       fromNodeId: fromNodeId,
@@ -492,6 +500,12 @@ class ChatProvider extends ChangeNotifier {
 
     switch (type) {
       case CyxChatMsgType.text:
+        final textData = received.parseTextMessage();
+        final textLen = textData?.text.length ?? 0;
+        final preview = textLen > 20
+            ? '${textData?.text.substring(0, 20)}...'
+            : textData?.text ?? '';
+        log.info('Message received from $shortFromId... "$preview"', source: 'Chat');
         _messageController.add(received);
         break;
 

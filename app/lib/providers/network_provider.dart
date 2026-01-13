@@ -10,6 +10,7 @@ import 'file_provider.dart';
 import 'settings_provider.dart';
 import '../services/identity_service.dart';
 import '../services/chat_service.dart';
+import '../services/log_service.dart';
 import '../utils/node_id_utils.dart';
 import '../ffi/bindings.dart';
 
@@ -142,16 +143,24 @@ class ConnectionActions {
   }
 
   Future<bool> connect({String? bootstrapServer}) async {
+    final log = LogService.instance;
     final connectionProvider = _ref.read(connectionNotifierProvider);
     final dnsProvider = _ref.read(dnsNotifierProvider);
     final identity = IdentityService.instance.currentIdentity;
     if (identity == null) {
-      debugPrint('Cannot connect: no identity');
+      log.error('Cannot connect: no identity loaded', source: 'Network');
       return false;
     }
     final settings = _ref.read(settingsProvider);
     final bootstrap = bootstrapServer ?? (settings.bootstrapServer.isNotEmpty ? settings.bootstrapServer : '');
     final nodeIdBytes = NodeIdUtils.toBytesAsList(identity.nodeId);
+
+    log.info('Connecting to network...', source: 'Network');
+    if (bootstrap.isNotEmpty) {
+      log.info('Bootstrap server: $bootstrap', source: 'Network');
+    } else {
+      log.warning('No bootstrap server configured', source: 'Network');
+    }
 
     // Initialize connection first
     final connResult = await connectionProvider.initialize(
@@ -160,9 +169,10 @@ class ConnectionActions {
     );
 
     if (!connResult) {
-      debugPrint('Connection initialization failed');
+      log.error('Connection initialization failed', source: 'Network');
       return false;
     }
+    log.info('Connection initialized - STUN discovery starting', source: 'Network');
 
     // Initialize DNS with the same identity
     // Note: DNS will use node ID for identification without signing for now
@@ -173,8 +183,10 @@ class ConnectionActions {
     );
 
     if (!dnsResult) {
-      debugPrint('DNS initialization failed (continuing anyway)');
+      log.warning('DNS initialization failed (usernames unavailable)', source: 'Network');
       // Don't fail - DNS is optional for basic messaging
+    } else {
+      log.info('DNS initialized for username resolution', source: 'Network');
     }
 
     // Initialize Chat provider for P2P messaging
@@ -182,11 +194,12 @@ class ConnectionActions {
     final chatResult = await chatProvider.initialize(localId: nodeIdBytes);
 
     if (!chatResult) {
-      debugPrint('Chat initialization failed (continuing anyway)');
+      log.error('Chat initialization failed', source: 'Network');
       // Don't fail - chat can be retried
     } else {
       // Connect ChatService to ChatProvider for message handling
       ChatService.instance.connectProvider(chatProvider);
+      log.info('Chat service ready for messaging', source: 'Network');
     }
 
     // Initialize DHT for decentralized peer discovery
@@ -195,9 +208,9 @@ class ConnectionActions {
     dhtProvider.initialize();
 
     if (dhtProvider.isReady) {
-      debugPrint('DHT initialized and ready');
+      log.info('DHT ready for peer discovery', source: 'Network');
     } else {
-      debugPrint('DHT initialized (no seed nodes yet)');
+      log.info('DHT initialized (waiting for peers)', source: 'Network');
     }
 
     // Initialize File provider for file transfers
@@ -205,10 +218,10 @@ class ConnectionActions {
     final fileResult = await fileProvider.initialize();
 
     if (!fileResult) {
-      debugPrint('File provider initialization failed (continuing anyway)');
+      log.warning('File transfer unavailable', source: 'Network');
       // Don't fail - file transfer is optional
     } else {
-      debugPrint('File provider initialized');
+      log.info('File transfer ready', source: 'Network');
       // Wire up file receive callback to create messages
       fileProvider.onFileReceived = (fromPeerId, filename, fileSize, fileId) {
         ChatService.instance.handleReceivedFile(
@@ -233,15 +246,14 @@ class ConnectionActions {
       final transport = CyxChatBindings.instance.connGetTransport();
       if (transport != null) {
         CyxChatBindings.instance.fileSetTransport(transport);
-        debugPrint('File transport set for direct P2P transfers');
       }
 
       // Set connection context on file context for peer address exchange
       // This allows file module to get our public IP:port and add peer addresses
       CyxChatBindings.instance.fileSetConnCtx();
-      debugPrint('File connection context set for peer address exchange');
     }
 
+    log.info('Network connection complete', source: 'Network');
     return true;
   }
 

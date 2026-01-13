@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../services/identity_service.dart';
+import '../services/log_service.dart';
 import '../utils/node_id_utils.dart';
 import 'dart:async';
 import 'dart:ffi';
@@ -237,6 +238,7 @@ class ConnectionProvider extends ChangeNotifier {
   }
 
   void _updateNetworkStatus() {
+    final log = LogService.instance;
     final publicAddr = _bindings.connGetPublicAddr();
 
     final newStatus = NetworkStatus(
@@ -249,6 +251,19 @@ class ConnectionProvider extends ChangeNotifier {
           .where((p) => p.isConnected && p.isRelayed)
           .length,
     );
+
+    // Log significant changes
+    if (newStatus.publicAddress != _networkStatus.publicAddress && newStatus.publicAddress != null) {
+      log.info('Public address discovered: ${newStatus.publicAddress}', source: 'Network');
+    }
+
+    if (newStatus.activeConnections != _networkStatus.activeConnections) {
+      final direct = newStatus.directConnections;
+      final relay = newStatus.relayConnections;
+      if (newStatus.activeConnections > 0) {
+        log.info('Connected peers: ${newStatus.activeConnections} ($direct direct, $relay relay)', source: 'Network');
+      }
+    }
 
     if (newStatus.publicAddress != _networkStatus.publicAddress ||
         newStatus.activeConnections != _networkStatus.activeConnections ||

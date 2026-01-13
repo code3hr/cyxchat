@@ -12,6 +12,7 @@ import '../providers/file_provider.dart';
 import '../providers/voice_provider.dart';
 import '../providers/call_provider.dart';
 import '../providers/settings_provider.dart';
+import '../providers/contact_provider.dart';
 import '../ffi/bindings.dart' show CyxChatFileState, CyxChatFileConst;
 import '../models/models.dart';
 import 'active_call_screen.dart';
@@ -101,11 +102,23 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             tooltip: 'Video call',
             onPressed: () => _startCall(context, ref, video: true),
           ),
-          IconButton(
+          PopupMenuButton<String>(
             icon: const Icon(Icons.more_vert),
-            onPressed: () {
-              // TODO: Chat options
+            onSelected: (value) async {
+              if (value == 'save_contact') {
+                _showSaveContactDialog(context, ref);
+              }
             },
+            itemBuilder: (context) => [
+              const PopupMenuItem(
+                value: 'save_contact',
+                child: ListTile(
+                  leading: Icon(Icons.person_add),
+                  title: Text('Save Contact'),
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -263,6 +276,95 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           TextButton(
             onPressed: () => Navigator.pop(ctx),
             child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showSaveContactDialog(BuildContext context, WidgetRef ref) {
+    final conversationAsync = ref.read(conversationProvider(widget.conversationId));
+    final conversation = conversationAsync.value;
+
+    if (conversation == null || conversation.peerId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Cannot save contact: peer not found')),
+      );
+      return;
+    }
+
+    final displayNameController = TextEditingController(text: conversation.title);
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Save Contact'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Node ID: ${conversation.peerId!.length > 16 ? "${conversation.peerId!.substring(0, 16)}..." : conversation.peerId!}',
+              style: const TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: displayNameController,
+              decoration: const InputDecoration(
+                labelText: 'Display Name',
+                hintText: 'Enter a name for this contact',
+                border: OutlineInputBorder(),
+              ),
+              autofocus: true,
+              textCapitalization: TextCapitalization.words,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              final displayName = displayNameController.text.trim();
+
+              try {
+                // Add/update contact
+                await ref.read(contactActionsProvider).addContact(
+                  nodeId: conversation.peerId!,
+                  displayName: displayName.isEmpty ? null : displayName,
+                );
+
+                // Also update the conversation's display name directly
+                if (displayName.isNotEmpty) {
+                  await ref.read(chatActionsProvider).updateConversationDisplayName(
+                    widget.conversationId,
+                    displayName,
+                  );
+                }
+
+                if (ctx.mounted) {
+                  Navigator.pop(ctx);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Contact saved${displayName.isNotEmpty ? " as $displayName" : ""}'),
+                    ),
+                  );
+                }
+
+                // Refresh conversation to update the title
+                ref.invalidate(conversationProvider(widget.conversationId));
+                ref.invalidate(conversationsProvider);
+              } catch (e) {
+                if (ctx.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Failed to save contact: $e')),
+                  );
+                }
+              }
+            },
+            child: const Text('Save'),
           ),
         ],
       ),

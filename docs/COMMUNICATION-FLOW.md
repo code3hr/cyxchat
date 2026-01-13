@@ -424,6 +424,82 @@ Discovery (0x01-0x05):
   0x05 GOODBYE      - Graceful disconnect
 ```
 
+### File Transfer Message Types (0x14-0x16, 0x40-0x45, 0x60-0x61)
+
+**Important:** File messages include `sender_id` in the wire format to support onion routing.
+When messages are relayed via onion routing, the transport-layer `from` address is the
+relay node, not the original sender. File messages embed the sender's node ID directly
+in the payload so receivers can identify the true sender.
+
+```
+FILE_META (0x14) - File metadata/offer:
+┌──────┬───────────┬─────────┬───────────┬──────────┬──────────┬──────┬─────────────┬───────────┐
+│ type │ sender_id │ file_id │ fname_len │ filename │ mime_len │ mime │ size (LE32) │ chunks    │
+│ 1B   │ 32B       │ 8B      │ 1B        │ N bytes  │ 1B       │ N    │ 4B          │ 2B + 32B  │
+└──────┴───────────┴─────────┴───────────┴──────────┴──────────┴──────┴─────────────┴───────────┘
+Note: chunks = chunk_count(2B) + file_hash(32B)
+
+FILE_CHUNK (0x15) - File data chunk:
+┌──────┬───────────┬─────────┬───────────┬───────────┬────────────┐
+│ type │ sender_id │ file_id │ chunk_idx │ chunk_len │ chunk_data │
+│ 1B   │ 32B       │ 8B      │ 2B (LE)   │ 2B (LE)   │ N bytes    │
+└──────┴───────────┴─────────┴───────────┴───────────┴────────────┘
+
+FILE_ACK (0x16) - Chunk acknowledgment:
+┌──────┬───────────┬─────────┬───────────┐
+│ type │ sender_id │ file_id │ chunk_idx │
+│ 1B   │ 32B       │ 8B      │ 2B        │
+└──────┴───────────┴─────────┴───────────┘
+
+FILE_ACCEPT (0x41) - Accept file transfer:
+┌──────┬───────────┬─────────┬──────┬─────────────┐
+│ type │ sender_id │ file_id │ mode │ start_chunk │
+│ 1B   │ 32B       │ 8B      │ 1B   │ 2B          │
+└──────┴───────────┴─────────┴──────┴─────────────┘
+
+FILE_REJECT (0x42) - Reject file transfer:
+┌──────┬───────────┬─────────┬────────┐
+│ type │ sender_id │ file_id │ reason │
+│ 1B   │ 32B       │ 8B      │ 1B     │
+└──────┴───────────┴─────────┴────────┘
+
+FILE_CANCEL (0x44) - Cancel transfer:
+┌──────┬───────────┬─────────┐
+│ type │ sender_id │ file_id │
+│ 1B   │ 32B       │ 8B      │
+└──────┴───────────┴─────────┘
+
+PEER_ADDR (0x60) - Peer address for direct P2P:
+┌──────┬───────────┬─────────┬───────────┬─────────────┐
+│ type │ sender_id │ file_id │ public_ip │ public_port │
+│ 1B   │ 32B       │ 8B      │ 4B        │ 2B          │
+└──────┴───────────┴─────────┴───────────┴─────────────┘
+
+PEER_ADDR_ACK (0x61) - Peer address acknowledgment:
+┌──────┬───────────┬─────────┐
+│ type │ sender_id │ file_id │
+│ 1B   │ 32B       │ 8B      │
+└──────┴───────────┴─────────┘
+```
+
+#### Why sender_id is Required in File Messages
+
+Unlike text messages which use a wire header containing `sender_id`, file messages
+originally used a simpler format without sender identification. This caused issues
+with onion routing:
+
+```
+Problem (before fix):
+  Alice ──onion──▶ Bob (relay) ──onion──▶ Carol
+
+  Carol's on_delivery callback receives:
+    from = Bob's ID (the relay node)  ❌ WRONG
+
+Solution (after fix):
+  File messages now embed sender_id in wire format:
+    from = parsed from message payload = Alice's ID  ✓ CORRECT
+```
+
 ## Encryption
 
 ### Onion Routing Encryption

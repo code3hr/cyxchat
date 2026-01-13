@@ -119,6 +119,13 @@ class ChatActions {
     _ref.invalidate(conversationsProvider);
   }
 
+  /// Update conversation display name (alias)
+  Future<void> updateConversationDisplayName(String conversationId, String displayName) async {
+    await ChatService.instance.updateConversationDisplayName(conversationId, displayName);
+    _ref.invalidate(conversationProvider(conversationId));
+    _ref.invalidate(conversationsProvider);
+  }
+
   /// Retry sending a failed message
   Future<bool> retryMessage(String messageId, String conversationId) async {
     final success = await ChatService.instance.retryMessage(messageId, conversationId);

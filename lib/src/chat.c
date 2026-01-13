@@ -526,29 +526,74 @@ static void on_onion_delivery(
     void *user_data
 ) {
     cyxchat_ctx_t *ctx = (cyxchat_ctx_t *)user_data;
-    if (!ctx || !from || !data || len < WIRE_HEADER_SIZE) {
+    if (!ctx || !from || !data || len < 1) {
         return;
     }
 
-    /* Parse wire header and extract sender from payload */
+    /* Check message type first (byte 0) to determine format */
+    uint8_t msg_type = data[0];
+
+    /* File messages use simple format without wire header:
+     * - byte 0: type
+     * - remaining: file-specific payload
+     * For these, use 'from' parameter as the sender.
+     *
+     * File message types:
+     * - 0x14-0x16: FILE_META, FILE_CHUNK, FILE_ACK
+     * - 0x40-0x45: FILE v2 (OFFER, ACCEPT, REJECT, COMPLETE, CANCEL, DHT_READY)
+     * - 0x60-0x61: PEER_ADDR, PEER_ADDR_ACK
+     */
+    int is_file_msg = ((msg_type >= 0x14 && msg_type <= 0x16) ||
+                       (msg_type >= 0x40 && msg_type <= 0x45) ||
+                       (msg_type >= 0x60 && msg_type <= 0x61));
+
     uint8_t type;
-    uint16_t flags;
+    uint16_t flags = 0;
     cyxchat_msg_id_t msg_id;
     cyxwiz_node_id_t sender_id;
+    size_t offset;
+    const cyxwiz_node_id_t *actual_sender;
 
-    size_t offset = deserialize_wire_header(data, len, &type, &flags, &msg_id, &sender_id);
-    if (offset == 0) return;
-    
-    /* Use sender from payload (not transport 'from' which is the relay in onion routing) */
-    const cyxwiz_node_id_t *actual_sender = &sender_id;
-    
-    /* Log received message with actual sender */
-    char hex_id[17];
-    for (int i = 0; i < 8; i++) {
-        snprintf(hex_id + i*2, 3, "%02x", actual_sender->bytes[i]);
+    if (is_file_msg) {
+        /* File messages: type(1) + sender_id(32) + payload
+         * Parse sender_id from wire format (for onion routing support) */
+        if (len < 33) {  /* Need type(1) + sender_id(32) minimum */
+            CYXWIZ_WARN("File message too short: %zu bytes", len);
+            return;
+        }
+        type = msg_type;
+        /* Parse sender_id from bytes 1-32 */
+        memcpy(&sender_id, data + 1, 32);
+        offset = 33;  /* Skip type(1) + sender_id(32) */
+        actual_sender = &sender_id;
+        memset(&msg_id, 0, sizeof(msg_id));
+
+        char hex_id[17];
+        for (int i = 0; i < 8; i++) {
+            snprintf(hex_id + i*2, 3, "%02x", sender_id.bytes[i]);
+        }
+        CYXWIZ_INFO("Received file message (type=0x%02x) from %.16s... (%zu bytes)",
+                    type, hex_id, len);
+    } else {
+        /* Text/control messages: parse wire header with embedded sender_id */
+        if (len < WIRE_HEADER_SIZE) {
+            return;
+        }
+
+        offset = deserialize_wire_header(data, len, &type, &flags, &msg_id, &sender_id);
+        if (offset == 0) return;
+
+        /* Use sender from payload (text messages embed sender in wire header) */
+        actual_sender = &sender_id;
+
+        /* Log received message with actual sender */
+        char hex_id[17];
+        for (int i = 0; i < 8; i++) {
+            snprintf(hex_id + i*2, 3, "%02x", actual_sender->bytes[i]);
+        }
+        CYXWIZ_INFO("Received message from peer %.16s... (%zu bytes, type=0x%02x)",
+                    hex_id, len, data[0]);
     }
-    CYXWIZ_INFO("Received message from peer %.16s... (%zu bytes, type=0x%02x)",
-                hex_id, len, data[0]);
 
     /* Handle fragmented TEXT messages */
     if (type == CYXCHAT_MSG_TEXT && (flags & CYXCHAT_FLAG_FRAGMENTED)) {
@@ -561,8 +606,12 @@ static void on_onion_delivery(
 
         if (len < offset + text_len) return;  /* Truncated */
 
+        char frag_hex_id[17];
+        for (int i = 0; i < 8; i++) {
+            snprintf(frag_hex_id + i*2, 3, "%02x", actual_sender->bytes[i]);
+        }
         CYXWIZ_INFO("Received fragment %u/%u from %.16s... (%u bytes)",
-                    frag_idx + 1, total_frags, hex_id, text_len);
+                    frag_idx + 1, total_frags, frag_hex_id, text_len);
 
         /* Get current timestamp */
         uint64_t now_ms = cyxchat_timestamp_ms();
@@ -710,8 +759,8 @@ static void on_onion_delivery(
             /* Route to file module if registered */
             if (ctx->file_ctx) {
                 CYXWIZ_INFO("Routing file message (type=0x%02x) to file module", type);
-                /* Pass data after the type byte (offset already points past header) */
-                cyxchat_file_handle_message(ctx->file_ctx, actual_sender, type, data + 1, len - 1);
+                /* Pass payload data after wire header (offset points past header) */
+                cyxchat_file_handle_message(ctx->file_ctx, actual_sender, type, data + offset, len - offset);
             } else {
                 CYXWIZ_WARN("Received file message but no file context registered");
             }
@@ -1275,6 +1324,18 @@ cyxchat_error_t cyxchat_send_raw(
 ) {
     if (!ctx || !to || !data || data_len == 0) {
         return CYXCHAT_ERR_NULL;
+    }
+
+    /* Debug: log destination peer ID for file messages */
+    /* File messages: 0x14-0x16, 0x40-0x45, 0x60-0x61 */
+    if ((data[0] >= 0x14 && data[0] <= 0x16) ||
+        (data[0] >= 0x40 && data[0] <= 0x45) ||
+        (data[0] >= 0x60 && data[0] <= 0x61)) {
+        char to_hex[65];
+        for (int i = 0; i < 32; i++) {
+            snprintf(to_hex + i*2, 3, "%02x", to->bytes[i]);
+        }
+        CYXWIZ_INFO("cyxchat_send_raw: FILE msg type=0x%02x to peer_id=%s", data[0], to_hex);
     }
 
     CYXWIZ_DEBUG("cyxchat_send_raw: sending %zu bytes (type=0x%02x)", data_len, data[0]);

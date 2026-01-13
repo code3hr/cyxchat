@@ -491,6 +491,18 @@ class ChatService {
     );
   }
 
+  /// Update conversation display name (alias)
+  Future<void> updateConversationDisplayName(String conversationId, String displayName) async {
+    final db = await DatabaseService.instance.database;
+
+    await db.update(
+      'conversations',
+      {'display_name': displayName},
+      where: 'id = ?',
+      whereArgs: [conversationId],
+    );
+  }
+
   // ============================================================
   // Incoming Message Handlers
   // ============================================================
