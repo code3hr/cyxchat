@@ -33,9 +33,6 @@
 /* DNS (human-readable names) */
 #include "dns.h"
 
-/* Mail (CyxMail) */
-#include "mail.h"
-
 #ifdef __cplusplus
 extern "C" {
 #endif

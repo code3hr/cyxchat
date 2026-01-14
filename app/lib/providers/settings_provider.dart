@@ -17,11 +17,11 @@ const String _bootstrapServerOverride = String.fromEnvironment('BOOTSTRAP_SERVER
 
 /// Default values
 class SettingsDefaults {
-  // Default to localhost for local development
-  // Users can change to public server (e.g., 147.185.221.16:50841) in settings
+  // Default to public CyxChat server
+  // Users can change in Settings → Network → Bootstrap Server
   static String get bootstrapServer => _bootstrapServerOverride.isNotEmpty
       ? _bootstrapServerOverride
-      : '127.0.0.1:7777';
+      : '129.151.146.219:7777';
   static const String relayServer = '';
   static const bool directFileTransfer = false;
   static const bool videoCallsEnabled = false; // Off by default for privacy

@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../main.dart';
 import '../providers/conversation_provider.dart';
-import '../providers/mail_provider.dart';
 import '../providers/network_provider.dart';
 import '../providers/settings_provider.dart';
 import '../models/models.dart';
@@ -11,7 +10,6 @@ import 'group_chat_screen.dart';
 import 'create_group_screen.dart';
 import 'contacts_screen.dart';
 import 'settings_screen.dart';
-import 'mail_inbox_screen.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -56,15 +54,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final totalUnreadAsync = ref.watch(totalUnreadProvider);
-    final unreadCount = totalUnreadAsync.valueOrNull ?? 0;
-
     return Scaffold(
       body: IndexedStack(
         index: _selectedIndex,
         children: const [
           _ChatsTab(),
-          MailInboxScreen(),
           ContactsScreen(),
           SettingsScreen(),
         ],
@@ -86,47 +80,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               _selectedIndex = index;
             });
           },
-          destinations: [
-            const NavigationDestination(
+          destinations: const [
+            NavigationDestination(
               icon: Icon(Icons.chat_bubble_outline_rounded),
               selectedIcon: Icon(Icons.chat_bubble_rounded),
               label: 'Chats',
             ),
             NavigationDestination(
-              icon: Badge(
-                isLabelVisible: unreadCount > 0,
-                backgroundColor: AppColors.accent,
-                label: Text(
-                  unreadCount > 99 ? '99+' : unreadCount.toString(),
-                  style: const TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.black,
-                  ),
-                ),
-                child: const Icon(Icons.mail_outline_rounded),
-              ),
-              selectedIcon: Badge(
-                isLabelVisible: unreadCount > 0,
-                backgroundColor: AppColors.accent,
-                label: Text(
-                  unreadCount > 99 ? '99+' : unreadCount.toString(),
-                  style: const TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.black,
-                  ),
-                ),
-                child: const Icon(Icons.mail_rounded),
-              ),
-              label: 'Mail',
-            ),
-            const NavigationDestination(
               icon: Icon(Icons.people_outline_rounded),
               selectedIcon: Icon(Icons.people_rounded),
               label: 'Contacts',
             ),
-            const NavigationDestination(
+            NavigationDestination(
               icon: Icon(Icons.settings_outlined),
               selectedIcon: Icon(Icons.settings_rounded),
               label: 'Settings',

@@ -178,7 +178,6 @@ set(CYXCHAT_SOURCES
     src/connection.c
     src/relay.c
     src/dns.c
-    src/mail.c
 )
 
 # Header files
@@ -193,7 +192,6 @@ set(CYXCHAT_HEADERS
     include/cyxchat/connection.h
     include/cyxchat/relay.h
     include/cyxchat/dns.h
-    include/cyxchat/mail.h
 )
 
 # Shared library

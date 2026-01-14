@@ -6,7 +6,7 @@ This file provides guidance to Claude Code when working with the CyxChat codebas
 
 CyxChat is a decentralized, privacy-first messaging application built on the CyxWiz protocol.
 
-**Vision**: "WhatsApp + Gmail without servers"
+**Vision**: "WhatsApp without servers"
 - No central servers - all peer-to-peer
 - Works from any location (behind NAT, firewalls, mobile networks)
 - End-to-end encrypted (X25519 + XChaCha20-Poly1305)
@@ -194,9 +194,7 @@ cyxchat/
     ├── ARCHITECTURE.md     # System design
     ├── NAT-TRAVERSAL.md    # UDP hole punching
     ├── DNS.md              # Internal naming
-    ├── LABELS.md           # MPLS-style routing
-    ├── EMAIL.md            # CyxMail protocol
-    └── GATEWAY.md          # Email gateway
+    └── LABELS.md           # MPLS-style routing
 ```
 
 ## Build Commands
