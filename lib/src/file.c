@@ -49,6 +49,12 @@ typedef struct {
     size_t chunk_size;                      /* Chunk size used for this transfer */
     int peer_addr_sent;                     /* 1 if we sent our address for this transfer */
     int peer_addr_received;                 /* 1 if we received peer's address */
+    /* ACK/retry fields */
+    uint64_t last_chunk_received_ms;        /* When last chunk was received (receiver) */
+    uint64_t last_ack_sent_ms;              /* When last ACK was sent (receiver) */
+    int ack_requested;                      /* 1 if we requested missing chunks (receiver) */
+    int retries;                            /* Number of retransmit attempts (sender) */
+    int waiting_for_ack;                    /* 1 if sender is waiting for ACK */
 } file_transfer_slot_t;
 
 /* Forward declare connection context for peer address exchange */
@@ -293,6 +299,70 @@ CYXWIZ_MAYBE_UNUSED static cyxchat_file_transfer_mode_t select_transfer_mode(
 }
 
 /* ============================================================
+ * FILE_META Send Helper
+ * ============================================================ */
+
+/**
+ * Send FILE_META message for a transfer slot.
+ * Used both for initial send and ACK timeout retries.
+ */
+static cyxchat_error_t send_file_meta(cyxchat_file_ctx_t *ctx, file_transfer_slot_t *slot)
+{
+    if (!ctx || !slot || !ctx->chat_ctx) {
+        return CYXCHAT_ERR_NULL;
+    }
+
+    /* Build and send metadata message using compact wire format */
+    uint8_t wire_buf[250];
+    size_t wire_len = 0;
+
+    wire_buf[wire_len++] = CYXCHAT_MSG_FILE_META;
+    memcpy(wire_buf + wire_len, ctx->local_id.bytes, 32);
+    wire_len += 32;
+    memcpy(wire_buf + wire_len, slot->transfer.meta.file_id.bytes, CYXCHAT_FILE_ID_SIZE);
+    wire_len += CYXCHAT_FILE_ID_SIZE;
+
+    /* Filename (length-prefixed) */
+    size_t fname_len = strlen(slot->transfer.meta.filename);
+    if (fname_len > 127) fname_len = 127;
+    wire_buf[wire_len++] = (uint8_t)fname_len;
+    memcpy(wire_buf + wire_len, slot->transfer.meta.filename, fname_len);
+    wire_len += fname_len;
+
+    /* MIME type (length-prefixed) */
+    size_t mime_len = strlen(slot->transfer.meta.mime_type);
+    if (mime_len > 63) mime_len = 63;
+    wire_buf[wire_len++] = (uint8_t)mime_len;
+    memcpy(wire_buf + wire_len, slot->transfer.meta.mime_type, mime_len);
+    wire_len += mime_len;
+
+    /* Size (4 bytes little-endian) */
+    wire_buf[wire_len++] = (uint8_t)(slot->transfer.meta.size & 0xFF);
+    wire_buf[wire_len++] = (uint8_t)((slot->transfer.meta.size >> 8) & 0xFF);
+    wire_buf[wire_len++] = (uint8_t)((slot->transfer.meta.size >> 16) & 0xFF);
+    wire_buf[wire_len++] = (uint8_t)((slot->transfer.meta.size >> 24) & 0xFF);
+
+    /* Chunk count (2 bytes little-endian) */
+    wire_buf[wire_len++] = (uint8_t)(slot->transfer.meta.chunk_count & 0xFF);
+    wire_buf[wire_len++] = (uint8_t)((slot->transfer.meta.chunk_count >> 8) & 0xFF);
+
+    /* File hash (32 bytes) */
+    memcpy(wire_buf + wire_len, slot->transfer.meta.file_hash, 32);
+    wire_len += 32;
+
+    /* Send metadata via chat layer */
+    CYXWIZ_INFO("send_file_meta: sending FILE_META (%zu bytes)", wire_len);
+    cyxchat_error_t send_err = cyxchat_send_raw(ctx->chat_ctx, &slot->transfer.peer, wire_buf, wire_len);
+    if (send_err != CYXCHAT_OK) {
+        CYXWIZ_ERROR("send_file_meta: failed to send FILE_META, error %d", send_err);
+        return send_err;
+    }
+    CYXWIZ_INFO("send_file_meta: FILE_META sent successfully");
+
+    return CYXCHAT_OK;
+}
+
+/* ============================================================
  * DHT Key Derivation
  * ============================================================ */
 
@@ -506,15 +576,54 @@ int cyxchat_file_poll(cyxchat_file_ctx_t *ctx, uint64_t now_ms) {
                         events++;
                     }
                 }
-            } else {
-                /* All chunks sent, mark as completed */
-                slot->transfer.state = CYXCHAT_FILE_COMPLETED;
-                if (ctx->on_complete) {
-                    ctx->on_complete(ctx, &slot->transfer.meta.file_id,
-                                    slot->data, slot->transfer.meta.size,
-                                    ctx->on_complete_data);
-                }
+            } else if (!slot->waiting_for_ack) {
+                /* All chunks sent, wait for ACK from receiver */
+                slot->waiting_for_ack = 1;
+                slot->transfer.updated_at = now_ms;
+                CYXWIZ_INFO("file_poll: All chunks sent, waiting for ACK");
                 events++;
+            } else {
+                /* Waiting for ACK - check for timeout */
+                uint64_t since_waiting = now_ms - slot->transfer.updated_at;
+                if (since_waiting > 10000) {
+                    slot->retries++;
+                    if (slot->retries >= 3) {
+                        CYXWIZ_WARN("file_poll: ACK timeout after retries, failing");
+                        slot->transfer.state = CYXCHAT_FILE_FAILED;
+                        if (ctx->on_error) {
+                            ctx->on_error(ctx, &slot->transfer.meta.file_id, CYXCHAT_ERR_TIMEOUT, ctx->on_error_data);
+                        }
+                    } else {
+                        CYXWIZ_INFO("file_poll: ACK timeout (retry %d), resending META + chunks", slot->retries);
+                        /* Resend FILE_META in case it was lost */
+                        send_file_meta(ctx, slot);
+                        /* Reset to resend all chunks */
+                        slot->transfer.chunks_done = 0;
+                        slot->waiting_for_ack = 0;
+                        slot->transfer.updated_at = now_ms;
+                        events++;
+                    }
+                }
+            }
+        }
+
+        /* For incoming transfers, check if we need to request missing chunks */
+        if (!slot->transfer.is_outgoing && slot->transfer.state == CYXCHAT_FILE_RECEIVING) {
+            uint64_t since_last_chunk = now_ms - slot->last_chunk_received_ms;
+            uint64_t since_last_ack = now_ms - slot->last_ack_sent_ms;
+
+            /* If no chunk received for 3 seconds and ACK not sent recently, send ACK */
+            if (since_last_chunk > 3000 && since_last_ack > 5000 &&
+                slot->transfer.chunks_done < slot->transfer.meta.chunk_count) {
+
+                /* Limit retries */
+                if (slot->retries < 5) {
+                    CYXWIZ_INFO("file_poll: Requesting missing chunks (retry %d)", slot->retries + 1);
+                    send_file_ack(ctx, &slot->transfer.peer, &slot->transfer.meta.file_id, slot, 0);
+                    slot->retries++;
+                    slot->ack_requested = 1;
+                    events++;
+                }
             }
         }
 
@@ -525,8 +634,9 @@ int cyxchat_file_poll(cyxchat_file_ctx_t *ctx, uint64_t now_ms) {
             if (now_ms > slot->transfer.updated_at) {
                 uint64_t elapsed = now_ms - slot->transfer.updated_at;
                 /* Direct mode: 5 minute timeout (large files take time)
-                 * Onion mode: 60 second timeout (smaller files) */
+                 * Onion mode: 60 second timeout, but extend if ACK retry in progress */
                 uint64_t timeout_ms = (ctx->use_direct_mode && ctx->router) ? 300000 : 60000;
+                if (slot->ack_requested) timeout_ms = 120000;  /* Extend to 2 min if retrying */
                 if (elapsed > timeout_ms) {
                     CYXWIZ_WARN("file_poll: Transfer timeout after %llu ms", (unsigned long long)elapsed);
                     slot->transfer.state = CYXCHAT_FILE_FAILED;
@@ -1399,28 +1509,196 @@ static cyxchat_error_t handle_file_chunk(
     /* Copy chunk data to buffer using the calculated chunk_size */
     size_t data_offset = (size_t)chunk_idx * slot->chunk_size;
     if (data_offset + chunk_len <= slot->data_capacity) {
-        memcpy(slot->data + data_offset, data + offset, chunk_len);
-        slot->transfer.chunks_done++;
-        slot->transfer.updated_at = cyxchat_timestamp_ms();
+        /* Check if this chunk was already received (duplicate) */
+        if (!is_chunk_received(slot, chunk_idx)) {
+            memcpy(slot->data + data_offset, data + offset, chunk_len);
+            set_chunk_received(slot, chunk_idx);
+            slot->transfer.chunks_done++;
+            slot->transfer.updated_at = cyxchat_timestamp_ms();
+            slot->last_chunk_received_ms = cyxchat_timestamp_ms();
+            slot->ack_requested = 0;  /* Reset ACK request since we got new data */
 
-        /* Notify progress */
-        if (ctx->on_progress) {
-            ctx->on_progress(ctx, &file_id,
-                            slot->transfer.chunks_done,
-                            slot->transfer.meta.chunk_count,
-                            ctx->on_progress_data);
+            /* Notify progress */
+            if (ctx->on_progress) {
+                ctx->on_progress(ctx, &file_id,
+                                slot->transfer.chunks_done,
+                                slot->transfer.meta.chunk_count,
+                                ctx->on_progress_data);
+            }
+
+            /* Check if complete */
+            if (slot->transfer.chunks_done >= slot->transfer.meta.chunk_count) {
+                slot->transfer.state = CYXCHAT_FILE_COMPLETED;
+
+                /* Send completion ACK to sender */
+                send_file_ack(ctx, &slot->transfer.peer, &file_id, slot, 1);
+
+                /* Notify completion */
+                if (ctx->on_complete) {
+                    ctx->on_complete(ctx, &file_id, slot->data,
+                                    slot->transfer.meta.size, ctx->on_complete_data);
+                }
+            }
+        } else {
+            CYXWIZ_DEBUG("handle_file_chunk: duplicate chunk %u ignored", chunk_idx);
         }
+    }
 
-        /* Check if complete */
-        if (slot->transfer.chunks_done >= slot->transfer.meta.chunk_count) {
-            slot->transfer.state = CYXCHAT_FILE_COMPLETED;
+    return CYXCHAT_OK;
+}
 
-            /* Notify completion */
-            if (ctx->on_complete) {
-                ctx->on_complete(ctx, &file_id, slot->data,
-                                slot->transfer.meta.size, ctx->on_complete_data);
+/* ============================================================
+ * ACK/Retry Functions
+ * ============================================================ */
+
+/**
+ * Send FILE_ACK message to peer
+ * @param complete 1 if all chunks received, 0 to request missing chunks
+ */
+static cyxchat_error_t send_file_ack(
+    cyxchat_file_ctx_t *ctx,
+    const cyxwiz_node_id_t *to,
+    const cyxchat_file_id_t *file_id,
+    file_transfer_slot_t *slot,
+    int complete
+) {
+    /* Wire format: type(1) + sender_id(32) + file_id(8) + complete(1) + chunks_received(2) + bitmap(N) */
+    size_t bitmap_len = complete ? 0 : slot->bitmap_size;
+    size_t msg_len = 1 + 32 + CYXCHAT_FILE_ID_SIZE + 1 + 2 + bitmap_len;
+    uint8_t *msg = calloc(1, msg_len);
+    if (!msg) return CYXCHAT_ERR_MEMORY;
+
+    size_t offset = 0;
+    msg[offset++] = CYXCHAT_MSG_FILE_ACK;
+    memcpy(msg + offset, ctx->local_id.bytes, 32);
+    offset += 32;
+    memcpy(msg + offset, file_id->bytes, CYXCHAT_FILE_ID_SIZE);
+    offset += CYXCHAT_FILE_ID_SIZE;
+    msg[offset++] = complete ? 1 : 0;
+    uint16_t chunks_received = slot->transfer.chunks_done;
+    msg[offset++] = chunks_received & 0xFF;
+    msg[offset++] = (chunks_received >> 8) & 0xFF;
+
+    if (!complete && slot->chunk_bitmap && bitmap_len > 0) {
+        memcpy(msg + offset, slot->chunk_bitmap, bitmap_len);
+    }
+
+    CYXWIZ_INFO("send_file_ack: complete=%d, chunks=%u/%u", complete, chunks_received,
+                slot->transfer.meta.chunk_count);
+
+    cyxchat_error_t err = cyxchat_send_raw(ctx->chat_ctx, to, msg, msg_len);
+    free(msg);
+
+    slot->last_ack_sent_ms = cyxchat_timestamp_ms();
+    return err;
+}
+
+/**
+ * Handle FILE_ACK message from receiver
+ * Either marks transfer complete or retransmits missing chunks
+ */
+static cyxchat_error_t handle_file_ack(
+    cyxchat_file_ctx_t *ctx,
+    const cyxwiz_node_id_t *from,
+    const uint8_t *data,
+    size_t data_len
+) {
+    /* Wire format: file_id(8) + complete(1) + chunks_received(2) + bitmap(N) */
+    if (data_len < CYXCHAT_FILE_ID_SIZE + 1 + 2) {
+        CYXWIZ_WARN("handle_file_ack: message too short");
+        return CYXCHAT_ERR_INVALID;
+    }
+
+    size_t offset = 0;
+    cyxchat_file_id_t file_id;
+    memcpy(file_id.bytes, data + offset, CYXCHAT_FILE_ID_SIZE);
+    offset += CYXCHAT_FILE_ID_SIZE;
+
+    int complete = data[offset++];
+    uint16_t chunks_received = (uint16_t)data[offset] | ((uint16_t)data[offset + 1] << 8);
+    offset += 2;
+
+    CYXWIZ_INFO("handle_file_ack: complete=%d, chunks=%u", complete, chunks_received);
+
+    /* Find the outgoing transfer */
+    file_transfer_slot_t *slot = find_transfer(ctx, &file_id);
+    if (!slot || !slot->transfer.is_outgoing) {
+        CYXWIZ_WARN("handle_file_ack: transfer not found or not outgoing");
+        return CYXCHAT_ERR_NOT_FOUND;
+    }
+
+    /* Verify sender matches */
+    if (memcmp(from->bytes, slot->transfer.peer.bytes, sizeof(cyxwiz_node_id_t)) != 0) {
+        CYXWIZ_WARN("handle_file_ack: sender mismatch");
+        return CYXCHAT_ERR_INVALID;
+    }
+
+    if (complete) {
+        /* Receiver confirmed all chunks received */
+        slot->transfer.state = CYXCHAT_FILE_COMPLETED;
+        slot->waiting_for_ack = 0;
+        CYXWIZ_INFO("handle_file_ack: Transfer complete confirmed by receiver");
+
+        if (ctx->on_complete) {
+            ctx->on_complete(ctx, &file_id, slot->data, slot->transfer.meta.size,
+                            ctx->on_complete_data);
+        }
+    } else {
+        /* Receiver needs missing chunks - retransmit them */
+        size_t bitmap_len = data_len - offset;
+        const uint8_t *bitmap = (bitmap_len > 0) ? (data + offset) : NULL;
+
+        CYXWIZ_INFO("handle_file_ack: Retransmitting missing chunks (have bitmap: %d)", bitmap != NULL);
+
+        /* Limit retries */
+        if (slot->retries >= 10) {
+            CYXWIZ_WARN("handle_file_ack: Max retries exceeded");
+            slot->transfer.state = CYXCHAT_FILE_FAILED;
+            if (ctx->on_error) {
+                ctx->on_error(ctx, &file_id, CYXCHAT_ERR_TIMEOUT, ctx->on_error_data);
+            }
+            return CYXCHAT_ERR_TIMEOUT;
+        }
+        slot->retries++;
+
+        /* Retransmit missing chunks based on bitmap */
+        for (uint16_t i = 0; i < slot->transfer.meta.chunk_count; i++) {
+            int chunk_received = 0;
+            if (bitmap && (i / 8) < bitmap_len) {
+                chunk_received = (bitmap[i / 8] >> (i % 8)) & 1;
+            }
+
+            if (!chunk_received) {
+                /* Resend this chunk */
+                size_t chunk_size = slot->chunk_size;
+                size_t chunk_offset = (size_t)i * chunk_size;
+                size_t remaining = slot->transfer.meta.size - chunk_offset;
+                size_t chunk_len = (remaining < chunk_size) ? remaining : chunk_size;
+
+                /* Build chunk message */
+                size_t msg_len = 1 + 32 + CYXCHAT_FILE_ID_SIZE + 2 + 2 + chunk_len;
+                uint8_t *msg = calloc(1, msg_len);
+                if (!msg) continue;
+
+                size_t pos = 0;
+                msg[pos++] = CYXCHAT_MSG_FILE_CHUNK;
+                memcpy(msg + pos, ctx->local_id.bytes, 32);
+                pos += 32;
+                memcpy(msg + pos, file_id.bytes, CYXCHAT_FILE_ID_SIZE);
+                pos += CYXCHAT_FILE_ID_SIZE;
+                msg[pos++] = i & 0xFF;
+                msg[pos++] = (i >> 8) & 0xFF;
+                msg[pos++] = chunk_len & 0xFF;
+                msg[pos++] = (chunk_len >> 8) & 0xFF;
+                memcpy(msg + pos, slot->data + chunk_offset, chunk_len);
+
+                CYXWIZ_INFO("handle_file_ack: Resending chunk %u", i);
+                cyxchat_send_raw(ctx->chat_ctx, from, msg, msg_len);
+                free(msg);
             }
         }
+
+        slot->transfer.updated_at = cyxchat_timestamp_ms();
     }
 
     return CYXCHAT_OK;
@@ -1922,8 +2200,7 @@ cyxchat_error_t cyxchat_file_handle_message(
             return handle_file_chunk(ctx, from, data, data_len);
 
         case CYXCHAT_MSG_FILE_ACK:
-            /* TODO: Handle acknowledgments for reliable transfer */
-            return CYXCHAT_OK;
+            return handle_file_ack(ctx, from, data, data_len);
 
         /* Protocol v2 */
         case CYXCHAT_MSG_FILE_OFFER:
@@ -2401,3 +2678,4 @@ int cyxchat_file_get_transfer_mode(
 
     return (int)slot->transfer.mode;
 }
+
