@@ -530,7 +530,12 @@ cyxchat_announce_t;
 static void send_announce_to_peer(cyxchat_conn_ctx_t *ctx,
                                    const cyxwiz_node_id_t *peer_id)
 {
-    if (!ctx || !ctx->transport || !ctx->onion || !peer_id) return;
+    if (!ctx || !ctx->transport || !ctx->onion || !peer_id) {
+        CYXWIZ_WARN("send_announce_to_peer: null check failed (ctx=%p, transport=%p, onion=%p, peer_id=%p)",
+                    (void*)ctx, ctx ? (void*)ctx->transport : NULL,
+                    ctx ? (void*)ctx->onion : NULL, (void*)peer_id);
+        return;
+    }
 
     /* Get our X25519 public key */
     uint8_t our_pubkey[32];
@@ -564,7 +569,7 @@ static void send_announce_to_peer(cyxchat_conn_ctx_t *ctx,
         for (int i = 0; i < 8; i++) {
             snprintf(hex_id + i*2, 3, "%02x", peer_id->bytes[i]);
         }
-        CYXWIZ_DEBUG("Failed to send announce to %.16s... (err=%d)", hex_id, err);
+        CYXWIZ_INFO("Failed to send announce to %.16s... (err=%d)", hex_id, err);
     }
 }
 
@@ -818,6 +823,11 @@ int cyxchat_conn_poll(cyxchat_conn_ctx_t *ctx, uint64_t now_ms)
         if (ctx->nat_type != CYXWIZ_NAT_UNKNOWN) {
             ctx->stun_complete = 1;
         }
+    }
+
+    /* Update bootstrap connection status from transport */
+    if (!ctx->bootstrap_connected) {
+        ctx->bootstrap_connected = cyxwiz_transport_is_bootstrap_connected(ctx->transport) ? 1 : 0;
     }
 
     /* Check pending connections for timeout */
@@ -1109,6 +1119,18 @@ cyxchat_error_t cyxchat_conn_get_public_addr(cyxchat_conn_ctx_t *ctx,
              ntohs(ctx->public_port));
 
     return CYXCHAT_OK;
+}
+
+int cyxchat_conn_is_bootstrap_connected(cyxchat_conn_ctx_t *ctx)
+{
+    if (!ctx) return 0;
+    return ctx->bootstrap_connected;
+}
+
+int cyxchat_conn_has_peer_key(cyxchat_conn_ctx_t *ctx, const cyxwiz_node_id_t *peer_id)
+{
+    if (!ctx || !peer_id || !ctx->onion) return 0;
+    return cyxwiz_onion_has_key(ctx->onion, peer_id) ? 1 : 0;
 }
 
 const char* cyxchat_conn_nat_type_name(cyxwiz_nat_type_t nat_type)

@@ -188,6 +188,24 @@ class ConnectionProvider extends ChangeNotifier {
     return _peerStates[peerIdHex]?.isRelayed ?? false;
   }
 
+  /// Check if we have established secure key with peer
+  /// Key exchange must complete before messages can be sent
+  bool hasPeerKey(String peerIdHex) {
+    if (!_initialized) return false;
+
+    final peerId = NodeIdUtils.toBytesAsList(peerIdHex);
+    final peerIdPtr = calloc<Uint8>(32);
+
+    try {
+      for (int i = 0; i < 32 && i < peerId.length; i++) {
+        peerIdPtr[i] = peerId[i];
+      }
+      return _bindings.connHasPeerKey(peerIdPtr);
+    } finally {
+      calloc.free(peerIdPtr);
+    }
+  }
+
   /// Add relay server
   int addRelayServer(String address) {
     if (!_initialized) return CyxChatError.errNull;
@@ -240,10 +258,12 @@ class ConnectionProvider extends ChangeNotifier {
   void _updateNetworkStatus() {
     final log = LogService.instance;
     final publicAddr = _bindings.connGetPublicAddr();
+    final bootstrapConnected = _bindings.connIsBootstrapConnected();
 
     final newStatus = NetworkStatus(
       publicAddress: publicAddr,
       stunComplete: publicAddr != null,
+      bootstrapConnected: bootstrapConnected,
       activeConnections: _peerStates.values
           .where((p) => p.isConnected)
           .length,
@@ -267,7 +287,8 @@ class ConnectionProvider extends ChangeNotifier {
 
     if (newStatus.publicAddress != _networkStatus.publicAddress ||
         newStatus.activeConnections != _networkStatus.activeConnections ||
-        newStatus.relayConnections != _networkStatus.relayConnections) {
+        newStatus.relayConnections != _networkStatus.relayConnections ||
+        newStatus.bootstrapConnected != _networkStatus.bootstrapConnected) {
       _networkStatus = newStatus;
       notifyListeners();
     }

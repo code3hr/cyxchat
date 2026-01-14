@@ -447,6 +447,19 @@ class CyxChatBindings {
     }
   }
 
+  /// Check if connected to bootstrap server (received register ACK)
+  bool connIsBootstrapConnected() {
+    if (_connCtx == null) return false;
+    return _native.cyxchat_conn_is_bootstrap_connected(_connCtx!) != 0;
+  }
+
+  /// Check if we have established a secure key with a peer
+  /// Key exchange must complete before messages can be sent
+  bool connHasPeerKey(Pointer<Uint8> peerId) {
+    if (_connCtx == null) return false;
+    return _native.cyxchat_conn_has_peer_key(_connCtx!, peerId) != 0;
+  }
+
   /// Get connection state name
   String connStateName(int state) {
     final ptr = _native.cyxchat_conn_state_name(state);
@@ -1618,6 +1631,14 @@ class CyxChatNative {
       Int32 Function(Pointer<Void>, Pointer<Int8>, Size),
       int Function(Pointer<Void>, Pointer<Int8>, int)>(
       'cyxchat_conn_get_public_addr');
+
+  late final cyxchat_conn_is_bootstrap_connected = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>),
+      int Function(Pointer<Void>)>('cyxchat_conn_is_bootstrap_connected');
+
+  late final cyxchat_conn_has_peer_key = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>),
+      int Function(Pointer<Void>, Pointer<Uint8>)>('cyxchat_conn_has_peer_key');
 
   late final cyxchat_conn_state_name = _lib.lookupFunction<
       Pointer<Int8> Function(Int32),

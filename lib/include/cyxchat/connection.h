@@ -258,6 +258,27 @@ CYXCHAT_API cyxchat_error_t cyxchat_conn_get_public_addr(
 );
 
 /**
+ * Check if connected to bootstrap server (received register ACK)
+ *
+ * @param ctx           Connection context
+ * @return              1 if connected, 0 if not
+ */
+CYXCHAT_API int cyxchat_conn_is_bootstrap_connected(cyxchat_conn_ctx_t *ctx);
+
+/**
+ * Check if we have established a secure key with a peer
+ * Key exchange must complete before messages can be sent.
+ *
+ * @param ctx           Connection context
+ * @param peer_id       Peer node ID
+ * @return              1 if key exists, 0 if not
+ */
+CYXCHAT_API int cyxchat_conn_has_peer_key(
+    cyxchat_conn_ctx_t *ctx,
+    const cyxwiz_node_id_t *peer_id
+);
+
+/**
  * Get NAT type name string
  */
 CYXCHAT_API const char* cyxchat_conn_nat_type_name(cyxwiz_nat_type_t nat_type);

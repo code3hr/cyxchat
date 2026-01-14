@@ -82,10 +82,40 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final conversationAsync = ref.watch(conversationProvider(widget.conversationId));
     final messagesAsync = ref.watch(messagesProvider(widget.conversationId));
 
+
+    // Get connection status for this peer
+    final connectionProvider = ref.watch(connectionNotifierProvider);
+
     return Scaffold(
       appBar: AppBar(
         title: conversationAsync.when(
-          data: (conv) => Text(conv?.title ?? 'Chat'),
+          data: (conv) {
+            // Use the actual peer ID from the conversation, not the conversation ID
+            final peerId = conv?.peerId;
+            final hasKey = peerId != null &&
+                connectionProvider.initialized &&
+                connectionProvider.hasPeerKey(peerId);
+            final isConnecting = peerId != null &&
+                connectionProvider.initialized &&
+                !hasKey;
+
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(conv?.title ?? 'Chat'),
+                if (isConnecting)
+                  const Text(
+                    'Establishing secure connection...',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.normal),
+                  )
+                else if (hasKey)
+                  const Text(
+                    'Secured',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.normal, color: Colors.green),
+                  ),
+              ],
+            );
+          },
           loading: () => const Text('Loading...'),
           error: (_, __) => const Text('Error'),
         ),
@@ -204,11 +234,35 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     // Pre-connect to peer before sending (ensures route is established)
     final conversationAsync = ref.read(conversationProvider(widget.conversationId));
     final conversation = conversationAsync.value;
-    if (conversation?.peerId != null && connectionProvider.initialized) {
+    final peerId = conversation?.peerId ?? widget.conversationId;
+
+    if (connectionProvider.initialized) {
       debugPrint('ChatScreen: Ensuring connection to peer before sending...');
-      await connectionProvider.connect(conversation!.peerId!);
-      // Brief wait for route discovery
-      await Future.delayed(const Duration(milliseconds: 300));
+      await connectionProvider.connect(peerId);
+
+      // Wait for key exchange to complete (up to 5 seconds)
+      int waited = 0;
+      const maxWait = 5000;
+      const checkInterval = 100;
+
+      while (!connectionProvider.hasPeerKey(peerId) && waited < maxWait) {
+        await Future.delayed(const Duration(milliseconds: checkInterval));
+        waited += checkInterval;
+      }
+
+      if (!connectionProvider.hasPeerKey(peerId)) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Could not establish secure connection. Try again.'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+        return;
+      }
+
+      debugPrint('ChatScreen: Key exchange complete, sending message');
     }
 
     await ref.read(chatActionsProvider).sendMessage(
