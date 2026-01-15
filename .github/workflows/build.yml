@@ -1,0 +1,271 @@
+name: Build CyxChat
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  FLUTTER_VERSION: '3.24.0'
+
+jobs:
+  # ============================================================
+  # Windows Build
+  # ============================================================
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Install vcpkg and libsodium
+        run: |
+          git clone https://github.com/microsoft/vcpkg.git C:\vcpkg
+          C:\vcpkg\bootstrap-vcpkg.bat
+          C:\vcpkg\vcpkg install libsodium:x64-windows
+        shell: cmd
+
+      - name: Build C Library
+        run: |
+          cd lib
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake
+          cmake --build build --config Release
+        shell: cmd
+
+      - name: Build Flutter App
+        run: |
+          cd app
+          flutter pub get
+          flutter build windows --release
+
+      - name: Copy DLL to Release
+        run: |
+          copy lib\build\Release\cyxchat.dll app\build\windows\x64\runner\Release\
+        shell: cmd
+
+      - name: Package Windows Build
+        run: |
+          Compress-Archive -Path app\build\windows\x64\runner\Release\* -DestinationPath CyxChat-Windows-x64.zip
+        shell: pwsh
+
+      - name: Upload Windows Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CyxChat-Windows-x64
+          path: CyxChat-Windows-x64.zip
+
+  # ============================================================
+  # macOS Build
+  # ============================================================
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Install libsodium
+        run: brew install libsodium
+
+      - name: Build C Library
+        run: |
+          cd lib
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --config Release
+
+      - name: Build Flutter App
+        run: |
+          cd app
+          flutter pub get
+          flutter build macos --release
+
+      - name: Copy dylib to App Bundle
+        run: |
+          cp lib/build/libcyxchat.dylib app/build/macos/Build/Products/Release/cyxchat.app/Contents/Frameworks/
+
+      - name: Package macOS Build
+        run: |
+          cd app/build/macos/Build/Products/Release
+          zip -r ../../../../../CyxChat-macOS.zip cyxchat.app
+
+      - name: Upload macOS Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CyxChat-macOS
+          path: app/CyxChat-macOS.zip
+
+  # ============================================================
+  # Linux Build
+  # ============================================================
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Linux Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang cmake ninja-build pkg-config \
+            libgtk-3-dev liblzma-dev libstdc++-12-dev \
+            libsodium-dev \
+            libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+            gstreamer1.0-plugins-good
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Build C Library
+        run: |
+          cd lib
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --config Release
+
+      - name: Build Flutter App
+        run: |
+          cd app
+          flutter pub get
+          flutter build linux --release
+
+      - name: Copy .so to Release
+        run: |
+          cp lib/build/libcyxchat.so app/build/linux/x64/release/bundle/lib/
+
+      - name: Package Linux Build
+        run: |
+          cd app/build/linux/x64/release
+          tar -czvf ../../../../../CyxChat-Linux-x64.tar.gz bundle
+
+      - name: Upload Linux Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CyxChat-Linux-x64
+          path: app/CyxChat-Linux-x64.tar.gz
+
+  # ============================================================
+  # Android Build
+  # ============================================================
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK
+        run: |
+          sdkmanager --install "ndk;25.2.9519653"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/25.2.9519653" >> $GITHUB_ENV
+
+      - name: Build C Library for Android
+        run: |
+          cd lib
+          # Build for arm64-v8a
+          cmake -B build-android-arm64 \
+            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-24 \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-android-arm64 --config Release
+
+          # Build for armeabi-v7a
+          cmake -B build-android-arm \
+            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=armeabi-v7a \
+            -DANDROID_PLATFORM=android-24 \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-android-arm --config Release
+
+          # Build for x86_64 (emulator)
+          cmake -B build-android-x64 \
+            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=x86_64 \
+            -DANDROID_PLATFORM=android-24 \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-android-x64 --config Release
+
+      - name: Copy .so files to Android project
+        run: |
+          mkdir -p app/android/app/src/main/jniLibs/arm64-v8a
+          mkdir -p app/android/app/src/main/jniLibs/armeabi-v7a
+          mkdir -p app/android/app/src/main/jniLibs/x86_64
+          cp lib/build-android-arm64/libcyxchat.so app/android/app/src/main/jniLibs/arm64-v8a/
+          cp lib/build-android-arm/libcyxchat.so app/android/app/src/main/jniLibs/armeabi-v7a/
+          cp lib/build-android-x64/libcyxchat.so app/android/app/src/main/jniLibs/x86_64/
+
+      - name: Build Flutter APK
+        run: |
+          cd app
+          flutter pub get
+          flutter build apk --release
+
+      - name: Upload Android Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CyxChat-Android
+          path: app/build/app/outputs/flutter-apk/app-release.apk
+
+  # ============================================================
+  # Create Release (on tag push)
+  # ============================================================
+  release:
+    needs: [build-windows, build-macos, build-linux, build-android]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            artifacts/CyxChat-Windows-x64/CyxChat-Windows-x64.zip
+            artifacts/CyxChat-macOS/CyxChat-macOS.zip
+            artifacts/CyxChat-Linux-x64/CyxChat-Linux-x64.tar.gz
+            artifacts/CyxChat-Android/app-release.apk
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
