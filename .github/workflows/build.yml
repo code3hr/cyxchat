@@ -18,9 +18,24 @@ jobs:
   build-windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout CyxChat
+        uses: actions/checkout@v4
         with:
-          submodules: recursive
+          path: cyxchat
+
+      - name: Checkout CyxWiz (parent project)
+        uses: actions/checkout@v4
+        with:
+          repository: code3hr/conspiracy
+          path: conspiracy
+
+      - name: Setup project structure
+        run: |
+          # CyxChat expects cyxwiz at ../../include and ../../src
+          # Move cyxchat into conspiracy directory
+          if (Test-Path conspiracy/cyxchat) { Remove-Item -Recurse -Force conspiracy/cyxchat }
+          Move-Item cyxchat conspiracy/cyxchat
+        shell: pwsh
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -36,27 +51,35 @@ jobs:
           C:\vcpkg\vcpkg install libsodium:x64-windows
         shell: cmd
 
-      - name: Build C Library
+      - name: Build CyxWiz Library
         run: |
-          cd lib
+          cd conspiracy
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake
+          cmake --build build --config Release
+        shell: cmd
+
+      - name: Build CyxChat C Library
+        run: |
+          cd conspiracy/cyxchat/lib
           cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake
           cmake --build build --config Release
         shell: cmd
 
       - name: Build Flutter App
         run: |
-          cd app
+          cd conspiracy/cyxchat/app
           flutter pub get
           flutter build windows --release
 
-      - name: Copy DLL to Release
+      - name: Copy DLLs to Release
         run: |
-          copy lib\build\Release\cyxchat.dll app\build\windows\x64\runner\Release\
+          copy conspiracy\cyxchat\lib\build\Release\cyxchat.dll conspiracy\cyxchat\app\build\windows\x64\runner\Release\
+          if exist conspiracy\build\Release\cyxwiz.dll copy conspiracy\build\Release\cyxwiz.dll conspiracy\cyxchat\app\build\windows\x64\runner\Release\
         shell: cmd
 
       - name: Package Windows Build
         run: |
-          Compress-Archive -Path app\build\windows\x64\runner\Release\* -DestinationPath CyxChat-Windows-x64.zip
+          Compress-Archive -Path conspiracy\cyxchat\app\build\windows\x64\runner\Release\* -DestinationPath CyxChat-Windows-x64.zip
         shell: pwsh
 
       - name: Upload Windows Artifact
@@ -71,9 +94,21 @@ jobs:
   build-macos:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout CyxChat
+        uses: actions/checkout@v4
         with:
-          submodules: recursive
+          path: cyxchat
+
+      - name: Checkout CyxWiz (parent project)
+        uses: actions/checkout@v4
+        with:
+          repository: code3hr/conspiracy
+          path: conspiracy
+
+      - name: Setup project structure
+        run: |
+          rm -rf conspiracy/cyxchat 2>/dev/null || true
+          mv cyxchat conspiracy/cyxchat
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
@@ -85,32 +120,39 @@ jobs:
       - name: Install libsodium
         run: brew install libsodium
 
-      - name: Build C Library
+      - name: Build CyxWiz Library
         run: |
-          cd lib
+          cd conspiracy
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --config Release
+
+      - name: Build CyxChat C Library
+        run: |
+          cd conspiracy/cyxchat/lib
           cmake -B build -DCMAKE_BUILD_TYPE=Release
           cmake --build build --config Release
 
       - name: Build Flutter App
         run: |
-          cd app
+          cd conspiracy/cyxchat/app
           flutter pub get
           flutter build macos --release
 
       - name: Copy dylib to App Bundle
         run: |
-          cp lib/build/libcyxchat.dylib app/build/macos/Build/Products/Release/cyxchat.app/Contents/Frameworks/
+          mkdir -p conspiracy/cyxchat/app/build/macos/Build/Products/Release/cyxchat.app/Contents/Frameworks/
+          cp conspiracy/cyxchat/lib/build/libcyxchat.dylib conspiracy/cyxchat/app/build/macos/Build/Products/Release/cyxchat.app/Contents/Frameworks/
 
       - name: Package macOS Build
         run: |
-          cd app/build/macos/Build/Products/Release
-          zip -r ../../../../../CyxChat-macOS.zip cyxchat.app
+          cd conspiracy/cyxchat/app/build/macos/Build/Products/Release
+          zip -r ../../../../../../CyxChat-macOS.zip cyxchat.app
 
       - name: Upload macOS Artifact
         uses: actions/upload-artifact@v4
         with:
           name: CyxChat-macOS
-          path: app/CyxChat-macOS.zip
+          path: conspiracy/cyxchat/app/CyxChat-macOS.zip
 
   # ============================================================
   # Linux Build
@@ -118,9 +160,21 @@ jobs:
   build-linux:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout CyxChat
+        uses: actions/checkout@v4
         with:
-          submodules: recursive
+          path: cyxchat
+
+      - name: Checkout CyxWiz (parent project)
+        uses: actions/checkout@v4
+        with:
+          repository: code3hr/conspiracy
+          path: conspiracy
+
+      - name: Setup project structure
+        run: |
+          rm -rf conspiracy/cyxchat 2>/dev/null || true
+          mv cyxchat conspiracy/cyxchat
 
       - name: Install Linux Dependencies
         run: |
@@ -139,32 +193,38 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Build C Library
+      - name: Build CyxWiz Library
         run: |
-          cd lib
+          cd conspiracy
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --config Release
+
+      - name: Build CyxChat C Library
+        run: |
+          cd conspiracy/cyxchat/lib
           cmake -B build -DCMAKE_BUILD_TYPE=Release
           cmake --build build --config Release
 
       - name: Build Flutter App
         run: |
-          cd app
+          cd conspiracy/cyxchat/app
           flutter pub get
           flutter build linux --release
 
       - name: Copy .so to Release
         run: |
-          cp lib/build/libcyxchat.so app/build/linux/x64/release/bundle/lib/
+          cp conspiracy/cyxchat/lib/build/libcyxchat.so conspiracy/cyxchat/app/build/linux/x64/release/bundle/lib/
 
       - name: Package Linux Build
         run: |
-          cd app/build/linux/x64/release
-          tar -czvf ../../../../../CyxChat-Linux-x64.tar.gz bundle
+          cd conspiracy/cyxchat/app/build/linux/x64/release
+          tar -czvf ../../../../../../CyxChat-Linux-x64.tar.gz bundle
 
       - name: Upload Linux Artifact
         uses: actions/upload-artifact@v4
         with:
           name: CyxChat-Linux-x64
-          path: app/CyxChat-Linux-x64.tar.gz
+          path: conspiracy/cyxchat/app/CyxChat-Linux-x64.tar.gz
 
   # ============================================================
   # Android Build
@@ -172,9 +232,21 @@ jobs:
   build-android:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout CyxChat
+        uses: actions/checkout@v4
         with:
-          submodules: recursive
+          path: cyxchat
+
+      - name: Checkout CyxWiz (parent project)
+        uses: actions/checkout@v4
+        with:
+          repository: code3hr/conspiracy
+          path: conspiracy
+
+      - name: Setup project structure
+        run: |
+          rm -rf conspiracy/cyxchat 2>/dev/null || true
+          mv cyxchat conspiracy/cyxchat
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -192,14 +264,45 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install NDK
+      - name: Install NDK and libsodium
         run: |
           sdkmanager --install "ndk;25.2.9519653"
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/25.2.9519653" >> $GITHUB_ENV
+          sudo apt-get update && sudo apt-get install -y libsodium-dev
 
-      - name: Build C Library for Android
+      - name: Build CyxWiz for Android
         run: |
-          cd lib
+          cd conspiracy
+          # Build cyxwiz for arm64-v8a
+          cmake -B build-android-arm64 \
+            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-24 \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCYXWIZ_BUILD_TESTS=OFF
+          cmake --build build-android-arm64 --config Release
+
+          # Build for armeabi-v7a
+          cmake -B build-android-arm \
+            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=armeabi-v7a \
+            -DANDROID_PLATFORM=android-24 \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCYXWIZ_BUILD_TESTS=OFF
+          cmake --build build-android-arm --config Release
+
+          # Build for x86_64 (emulator)
+          cmake -B build-android-x64 \
+            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=x86_64 \
+            -DANDROID_PLATFORM=android-24 \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCYXWIZ_BUILD_TESTS=OFF
+          cmake --build build-android-x64 --config Release
+
+      - name: Build CyxChat C Library for Android
+        run: |
+          cd conspiracy/cyxchat/lib
           # Build for arm64-v8a
           cmake -B build-android-arm64 \
             -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
@@ -226,16 +329,16 @@ jobs:
 
       - name: Copy .so files to Android project
         run: |
-          mkdir -p app/android/app/src/main/jniLibs/arm64-v8a
-          mkdir -p app/android/app/src/main/jniLibs/armeabi-v7a
-          mkdir -p app/android/app/src/main/jniLibs/x86_64
-          cp lib/build-android-arm64/libcyxchat.so app/android/app/src/main/jniLibs/arm64-v8a/
-          cp lib/build-android-arm/libcyxchat.so app/android/app/src/main/jniLibs/armeabi-v7a/
-          cp lib/build-android-x64/libcyxchat.so app/android/app/src/main/jniLibs/x86_64/
+          mkdir -p conspiracy/cyxchat/app/android/app/src/main/jniLibs/arm64-v8a
+          mkdir -p conspiracy/cyxchat/app/android/app/src/main/jniLibs/armeabi-v7a
+          mkdir -p conspiracy/cyxchat/app/android/app/src/main/jniLibs/x86_64
+          cp conspiracy/cyxchat/lib/build-android-arm64/libcyxchat.so conspiracy/cyxchat/app/android/app/src/main/jniLibs/arm64-v8a/
+          cp conspiracy/cyxchat/lib/build-android-arm/libcyxchat.so conspiracy/cyxchat/app/android/app/src/main/jniLibs/armeabi-v7a/
+          cp conspiracy/cyxchat/lib/build-android-x64/libcyxchat.so conspiracy/cyxchat/app/android/app/src/main/jniLibs/x86_64/
 
       - name: Build Flutter APK
         run: |
-          cd app
+          cd conspiracy/cyxchat/app
           flutter pub get
           flutter build apk --release
 
@@ -243,7 +346,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: CyxChat-Android
-          path: app/build/app/outputs/flutter-apk/app-release.apk
+          path: conspiracy/cyxchat/app/build/app/outputs/flutter-apk/app-release.apk
 
   # ============================================================
   # Create Release (on tag push)
