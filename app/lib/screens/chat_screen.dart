@@ -98,20 +98,35 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             final isConnecting = peerId != null &&
                 connectionProvider.initialized &&
                 !hasKey;
+            final isRelayed = peerId != null &&
+                connectionProvider.initialized &&
+                connectionProvider.isRelayed(peerId);
+
+            // Determine connection status text and color
+            String statusText;
+            Color statusColor;
+            if (isConnecting) {
+              statusText = 'Establishing secure connection...';
+              statusColor = Colors.orange;
+            } else if (hasKey && isRelayed) {
+              statusText = 'Secured (via relay)';
+              statusColor = Colors.blue;
+            } else if (hasKey) {
+              statusText = 'Secured (direct P2P)';
+              statusColor = Colors.green;
+            } else {
+              statusText = '';
+              statusColor = Colors.grey;
+            }
 
             return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(conv?.title ?? 'Chat'),
-                if (isConnecting)
-                  const Text(
-                    'Establishing secure connection...',
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.normal),
-                  )
-                else if (hasKey)
-                  const Text(
-                    'Secured',
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.normal, color: Colors.green),
+                if (statusText.isNotEmpty)
+                  Text(
+                    statusText,
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.normal, color: statusColor),
                   ),
               ],
             );

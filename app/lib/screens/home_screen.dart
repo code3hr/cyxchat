@@ -810,9 +810,24 @@ class _NetworkStatusChip extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final connectionState = ref.watch(connectionNotifierProvider);
-    final isConnected = connectionState.initialized;
-    final statusColor = isConnected ? AppColors.accentGreen : AppColors.textDarkSecondary;
-    final statusText = isConnected ? 'Online' : 'Offline';
+    final isInitialized = connectionState.initialized;
+    final isBootstrapConnected = connectionState.networkStatus.bootstrapConnected;
+
+    // Three states: Offline, Connecting, Online
+    final Color statusColor;
+    final String statusText;
+    if (!isInitialized) {
+      statusColor = AppColors.textDarkSecondary;
+      statusText = 'Offline';
+    } else if (!isBootstrapConnected) {
+      statusColor = AppColors.warning;
+      statusText = 'Connecting';
+    } else {
+      statusColor = AppColors.accentGreen;
+      statusText = 'Online';
+    }
+
+    final isConnected = isInitialized && isBootstrapConnected;
 
     return GestureDetector(
       onTap: () => _showNetworkDetails(context, ref),
@@ -863,8 +878,29 @@ class _NetworkStatusChip extends ConsumerWidget {
 
   void _showNetworkDetails(BuildContext context, WidgetRef ref) {
     final connectionState = ref.read(connectionNotifierProvider);
-    final isConnected = connectionState.initialized;
+    final isInitialized = connectionState.initialized;
+    final isBootstrapConnected = connectionState.networkStatus.bootstrapConnected;
     final networkStatus = connectionState.networkStatus;
+
+    // Determine status display
+    final String statusText;
+    final Color statusColor;
+    final IconData statusIcon;
+    if (!isInitialized) {
+      statusText = 'Disconnected';
+      statusColor = AppColors.textDarkSecondary;
+      statusIcon = Icons.wifi_off_rounded;
+    } else if (!isBootstrapConnected) {
+      statusText = 'Connecting...';
+      statusColor = AppColors.warning;
+      statusIcon = Icons.wifi_rounded;
+    } else {
+      statusText = 'Connected';
+      statusColor = AppColors.accentGreen;
+      statusIcon = Icons.wifi_rounded;
+    }
+
+    final isConnected = isInitialized && isBootstrapConnected;
 
     showDialog(
       context: context,
@@ -874,15 +910,13 @@ class _NetworkStatusChip extends ConsumerWidget {
             Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: isConnected
-                    ? AppColors.accentGreen.withOpacity(0.2)
-                    : AppColors.bgDarkTertiary,
+                color: statusColor.withOpacity(0.2),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Icon(
-                isConnected ? Icons.wifi_rounded : Icons.wifi_off_rounded,
+                statusIcon,
                 size: 24,
-                color: isConnected ? AppColors.accentGreen : AppColors.textDarkSecondary,
+                color: statusColor,
               ),
             ),
             const SizedBox(width: 14),
@@ -897,8 +931,8 @@ class _NetworkStatusChip extends ConsumerWidget {
           children: [
             _NetworkInfoRow(
               label: 'Status',
-              value: isConnected ? 'Connected' : 'Disconnected',
-              valueColor: isConnected ? AppColors.accentGreen : AppColors.textDarkSecondary,
+              value: statusText,
+              valueColor: statusColor,
             ),
             const SizedBox(height: 12),
             _NetworkInfoRow(

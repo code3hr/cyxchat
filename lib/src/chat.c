@@ -64,6 +64,23 @@ typedef struct {
 #define FRAG_MAX_TEXT        4096  /* Max reassembled message size */
 #define FRAG_TIMEOUT_MS      30000 /* Discard after 30 seconds */
 
+/* ============================================================
+ * Message Deduplication Buffer
+ * ============================================================
+ * Tracks recently seen message IDs to prevent duplicates when
+ * messages arrive via both direct and relay paths.
+ */
+
+#define SEEN_MSG_BUFFER_SIZE 64
+#define SEEN_MSG_EXPIRE_MS   30000 /* Expire after 30 seconds */
+
+typedef struct {
+    cyxchat_msg_id_t msg_id;
+    cyxwiz_node_id_t from;
+    uint64_t timestamp_ms;
+    int valid;
+} cyxchat_seen_msg_t;
+
 typedef struct {
     cyxwiz_node_id_t from;
     cyxchat_msg_id_t msg_id;
@@ -92,6 +109,10 @@ struct cyxchat_ctx {
 
     /* Fragment reassembly buffer */
     cyxchat_frag_entry_t frag_buffer[FRAG_BUFFER_SIZE];
+
+    /* Message deduplication buffer */
+    cyxchat_seen_msg_t seen_msgs[SEEN_MSG_BUFFER_SIZE];
+    size_t seen_msgs_idx;  /* Next write position (circular) */
 
     /* File module context (for message routing) */
     cyxchat_file_ctx_t *file_ctx;
@@ -513,6 +534,52 @@ static int queue_pop(
 }
 
 /* ============================================================
+ * Message Deduplication
+ * ============================================================ */
+
+/**
+ * Check if message was already seen. If not, mark as seen.
+ * Returns 1 if duplicate (already seen), 0 if new.
+ */
+static int is_duplicate_msg(
+    cyxchat_ctx_t *ctx,
+    const cyxwiz_node_id_t *from,
+    const cyxchat_msg_id_t *msg_id,
+    uint64_t now_ms
+) {
+    /* Check if we've seen this message ID from this sender */
+    for (int i = 0; i < SEEN_MSG_BUFFER_SIZE; i++) {
+        cyxchat_seen_msg_t *entry = &ctx->seen_msgs[i];
+        if (!entry->valid) continue;
+
+        /* Expire old entries */
+        if (now_ms - entry->timestamp_ms > SEEN_MSG_EXPIRE_MS) {
+            entry->valid = 0;
+            continue;
+        }
+
+        /* Check for match */
+        if (memcmp(&entry->msg_id, msg_id, sizeof(cyxchat_msg_id_t)) == 0 &&
+            memcmp(&entry->from, from, sizeof(cyxwiz_node_id_t)) == 0) {
+            CYXWIZ_INFO("Duplicate message detected from %02x%02x... (via backup path), ignoring",
+                        from->bytes[0], from->bytes[1]);
+            return 1;  /* Duplicate */
+        }
+    }
+
+    /* Not seen - add to buffer */
+    cyxchat_seen_msg_t *new_entry = &ctx->seen_msgs[ctx->seen_msgs_idx];
+    memcpy(&new_entry->msg_id, msg_id, sizeof(cyxchat_msg_id_t));
+    memcpy(&new_entry->from, from, sizeof(cyxwiz_node_id_t));
+    new_entry->timestamp_ms = now_ms;
+    new_entry->valid = 1;
+
+    ctx->seen_msgs_idx = (ctx->seen_msgs_idx + 1) % SEEN_MSG_BUFFER_SIZE;
+
+    return 0;  /* New message */
+}
+
+/* ============================================================
  * Onion Delivery Callback
  * ============================================================ */
 
@@ -656,6 +723,12 @@ static void on_onion_delivery(
             entry->valid = 0;
         }
         return;  /* Fragment handled, don't fall through */
+    }
+
+    /* Check for duplicate messages (can arrive via both direct and relay paths) */
+    uint64_t now_ms = cyxchat_timestamp_ms();
+    if (!is_file_msg && is_duplicate_msg(ctx, actual_sender, &msg_id, now_ms)) {
+        return;  /* Duplicate - already processed */
     }
 
     /* Non-fragmented message - convert to 2-byte length format for TEXT messages */

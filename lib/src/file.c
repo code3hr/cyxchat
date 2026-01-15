@@ -1439,7 +1439,9 @@ static cyxchat_error_t handle_file_meta(
     /* Notify callback */
     if (ctx->on_request) {
         CYXWIZ_INFO("handle_file_meta: calling on_request callback");
-        ctx->on_request(ctx, from, &slot->transfer.meta, ctx->on_request_data);
+        /* Pass slot->transfer.peer (persistent) instead of from (stack variable)
+         * because Dart FFI callback is async and from may be freed by then */
+        ctx->on_request(ctx, &slot->transfer.peer, &slot->transfer.meta, ctx->on_request_data);
     } else {
         CYXWIZ_WARN("handle_file_meta: no on_request callback registered");
     }
@@ -1520,7 +1522,9 @@ static cyxchat_error_t handle_file_chunk(
 
             /* Notify progress */
             if (ctx->on_progress) {
-                ctx->on_progress(ctx, &file_id,
+                /* Use slot->transfer.meta.file_id (persistent) instead of file_id (stack)
+                 * because Dart FFI callback is async */
+                ctx->on_progress(ctx, &slot->transfer.meta.file_id,
                                 slot->transfer.chunks_done,
                                 slot->transfer.meta.chunk_count,
                                 ctx->on_progress_data);
@@ -1535,7 +1539,9 @@ static cyxchat_error_t handle_file_chunk(
 
                 /* Notify completion */
                 if (ctx->on_complete) {
-                    ctx->on_complete(ctx, &file_id, slot->data,
+                    /* Use slot->transfer.meta.file_id (persistent) instead of file_id (stack)
+                     * because Dart FFI callback is async */
+                    ctx->on_complete(ctx, &slot->transfer.meta.file_id, slot->data,
                                     slot->transfer.meta.size, ctx->on_complete_data);
                 }
             }
@@ -1640,7 +1646,9 @@ static cyxchat_error_t handle_file_ack(
         CYXWIZ_INFO("handle_file_ack: Transfer complete confirmed by receiver");
 
         if (ctx->on_complete) {
-            ctx->on_complete(ctx, &file_id, slot->data, slot->transfer.meta.size,
+            /* Use slot->transfer.meta.file_id (persistent) instead of file_id (stack)
+             * because Dart FFI callback is async */
+            ctx->on_complete(ctx, &slot->transfer.meta.file_id, slot->data, slot->transfer.meta.size,
                             ctx->on_complete_data);
         }
     } else {
@@ -1804,7 +1812,9 @@ static cyxchat_error_t handle_file_offer(
 
     /* Notify callback */
     if (ctx->on_request) {
-        ctx->on_request(ctx, from, &slot->transfer.meta, ctx->on_request_data);
+        /* Pass slot->transfer.peer (persistent) instead of from (stack variable)
+         * because Dart FFI callback is async and from may be freed by then */
+        ctx->on_request(ctx, &slot->transfer.peer, &slot->transfer.meta, ctx->on_request_data);
     }
 
     return CYXCHAT_OK;
@@ -1969,7 +1979,9 @@ static cyxchat_error_t handle_file_complete(
         /* Success */
         slot->transfer.state = CYXCHAT_FILE_COMPLETED;
         if (ctx->on_complete) {
-            ctx->on_complete(ctx, &file_id, slot->data,
+            /* Use slot->transfer.meta.file_id (persistent) instead of file_id (stack)
+             * because Dart FFI callback is async */
+            ctx->on_complete(ctx, &slot->transfer.meta.file_id, slot->data,
                             slot->transfer.meta.size, ctx->on_complete_data);
         }
     } else {

@@ -140,4 +140,22 @@ class NodeIdUtils {
   static String normalize(String nodeId) {
     return nodeId.toLowerCase();
   }
+
+  /// Convert hex node ID to UUID display format.
+  /// Takes 64-char hex and returns UUID format (8-4-4-4-12).
+  /// If already UUID format, returns as-is.
+  static String toDisplayFormat(String nodeId) {
+    if (isUuidFormat(nodeId)) {
+      return nodeId;
+    }
+
+    // Convert 64-char hex to UUID format using first 32 chars (16 bytes)
+    if (nodeId.length >= 32) {
+      final hex = nodeId.substring(0, 32).toLowerCase();
+      return '${hex.substring(0, 8)}-${hex.substring(8, 12)}-${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20, 32)}';
+    }
+
+    // Fallback for short IDs
+    return nodeId;
+  }
 }

@@ -13,6 +13,7 @@ import '../providers/chat_provider.dart';
 import '../services/identity_service.dart';
 import '../services/log_service.dart';
 import '../models/identity.dart';
+import '../utils/node_id_utils.dart';
 import 'onboarding_screen.dart';
 import 'log_viewer_screen.dart';
 
@@ -543,7 +544,7 @@ class _ProfileCard extends ConsumerWidget {
                 borderRadius: BorderRadius.circular(12),
               ),
               child: SelectableText(
-                identity.nodeId,
+                NodeIdUtils.toDisplayFormat(identity.nodeId),
                 style: const TextStyle(
                   fontFamily: 'monospace',
                   fontSize: 12,
@@ -556,7 +557,7 @@ class _ProfileCard extends ConsumerWidget {
               width: double.infinity,
               child: ElevatedButton.icon(
                 onPressed: () {
-                  Clipboard.setData(ClipboardData(text: identity.nodeId));
+                  Clipboard.setData(ClipboardData(text: NodeIdUtils.toDisplayFormat(identity.nodeId)));
                   Navigator.pop(context);
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
