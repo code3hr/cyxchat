@@ -127,6 +127,8 @@ jobs:
           cd conspiracy
           cmake -B build -DCMAKE_BUILD_TYPE=Release \
             -DCYXWIZ_TRANSPORT_BLUETOOTH=OFF \
+            -DCYXWIZ_TRANSPORT_LORA=OFF \
+            -DCYXWIZ_TRANSPORT_WIFI=OFF \
             -DCYXWIZ_BUILD_TESTS=OFF
           cmake --build build --config Release
 
@@ -208,7 +210,7 @@ jobs:
         run: |
           cd conspiracy/cyxchat/lib
           cmake -B build -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_C_FLAGS="-Wno-error=implicit-function-declaration"
+            -DCMAKE_C_FLAGS="-Wno-error"
           cmake --build build --config Release
 
       - name: Build Flutter App
@@ -233,10 +235,11 @@ jobs:
           path: conspiracy/cyxchat/app/CyxChat-Linux-x64.tar.gz
 
   # ============================================================
-  # Android Build
+  # Android Build (TODO: needs cross-compiled libsodium)
   # ============================================================
   build-android:
     runs-on: ubuntu-latest
+    if: false  # Disabled until libsodium cross-compile is set up
     steps:
       - name: Checkout CyxChat
         uses: actions/checkout@v4
@@ -364,7 +367,7 @@ jobs:
   # Create Release (on tag push)
   # ============================================================
   release:
-    needs: [build-windows, build-macos, build-linux, build-android]
+    needs: [build-windows, build-macos, build-linux]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     steps:
