@@ -62,8 +62,8 @@ jobs:
 
       - name: Build CyxChat C Library
         run: |
-          cd conspiracy/cyxchat/lib
-          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake
+          cd conspiracy\cyxchat\lib
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake -DSODIUM_INCLUDE_DIR=C:/vcpkg/installed/x64-windows/include -DSODIUM_LIBRARY=C:/vcpkg/installed/x64-windows/lib/libsodium.lib
           cmake --build build --config Release
         shell: cmd
 
@@ -125,7 +125,9 @@ jobs:
       - name: Build CyxWiz Library
         run: |
           cd conspiracy
-          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          cmake -B build -DCMAKE_BUILD_TYPE=Release \
+            -DCYXWIZ_TRANSPORT_BLUETOOTH=OFF \
+            -DCYXWIZ_BUILD_TESTS=OFF
           cmake --build build --config Release
 
       - name: Build CyxChat C Library
@@ -198,13 +200,15 @@ jobs:
       - name: Build CyxWiz Library
         run: |
           cd conspiracy
-          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          cmake -B build -DCMAKE_BUILD_TYPE=Release \
+            -DCYXWIZ_BUILD_TESTS=OFF
           cmake --build build --config Release
 
       - name: Build CyxChat C Library
         run: |
           cd conspiracy/cyxchat/lib
-          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          cmake -B build -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_FLAGS="-Wno-error=implicit-function-declaration"
           cmake --build build --config Release
 
       - name: Build Flutter App
@@ -275,14 +279,15 @@ jobs:
       - name: Build CyxWiz for Android
         run: |
           cd conspiracy
-          # Build cyxwiz for arm64-v8a (disable Bluetooth - no BlueZ on Android)
+          # Build cyxwiz for arm64-v8a (disable Bluetooth and Crypto - no BlueZ/libsodium on Android NDK)
           cmake -B build-android-arm64 \
             -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
             -DANDROID_ABI=arm64-v8a \
             -DANDROID_PLATFORM=android-24 \
             -DCMAKE_BUILD_TYPE=Release \
             -DCYXWIZ_BUILD_TESTS=OFF \
-            -DCYXWIZ_TRANSPORT_BLUETOOTH=OFF
+            -DCYXWIZ_TRANSPORT_BLUETOOTH=OFF \
+            -DCYXWIZ_HAS_CRYPTO=OFF
           cmake --build build-android-arm64 --config Release
 
           # Build for armeabi-v7a
@@ -292,7 +297,8 @@ jobs:
             -DANDROID_PLATFORM=android-24 \
             -DCMAKE_BUILD_TYPE=Release \
             -DCYXWIZ_BUILD_TESTS=OFF \
-            -DCYXWIZ_TRANSPORT_BLUETOOTH=OFF
+            -DCYXWIZ_TRANSPORT_BLUETOOTH=OFF \
+            -DCYXWIZ_HAS_CRYPTO=OFF
           cmake --build build-android-arm --config Release
 
           # Build for x86_64 (emulator)
@@ -302,7 +308,8 @@ jobs:
             -DANDROID_PLATFORM=android-24 \
             -DCMAKE_BUILD_TYPE=Release \
             -DCYXWIZ_BUILD_TESTS=OFF \
-            -DCYXWIZ_TRANSPORT_BLUETOOTH=OFF
+            -DCYXWIZ_TRANSPORT_BLUETOOTH=OFF \
+            -DCYXWIZ_HAS_CRYPTO=OFF
           cmake --build build-android-x64 --config Release
 
       - name: Build CyxChat C Library for Android
