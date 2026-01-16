@@ -1,16 +1,23 @@
 import 'dart:async';
 import 'package:uuid/uuid.dart';
 import '../models/models.dart';
+import '../providers/group_ffi_provider.dart';
 import 'database_service.dart';
 import 'identity_service.dart';
+import 'log_service.dart';
 
 /// Service for group chat operations
+/// Combines database persistence with FFI network operations
 class GroupService {
   static final GroupService instance = GroupService._();
 
   final _uuid = const Uuid();
   final _messageController = StreamController<Message>.broadcast();
   final _groupUpdateController = StreamController<Group>.broadcast();
+  final _log = LogService.instance;
+
+  GroupFFIProvider? _ffiProvider;
+  final List<StreamSubscription> _subscriptions = [];
 
   GroupService._();
 
@@ -19,6 +26,232 @@ class GroupService {
 
   /// Stream of group updates (member changes, etc)
   Stream<Group> get groupUpdateStream => _groupUpdateController.stream;
+
+  /// Connect to the FFI provider for network operations
+  void connectProvider(GroupFFIProvider provider) {
+    if (_ffiProvider != null) {
+      _log.warning('GroupService already connected to FFI provider',
+          source: 'GroupService');
+      return;
+    }
+
+    _ffiProvider = provider;
+    _setupStreamSubscriptions();
+    _log.info('Connected to GroupFFIProvider', source: 'GroupService');
+  }
+
+  /// Disconnect from FFI provider
+  void disconnectProvider() {
+    for (final sub in _subscriptions) {
+      sub.cancel();
+    }
+    _subscriptions.clear();
+    _ffiProvider = null;
+    _log.info('Disconnected from GroupFFIProvider', source: 'GroupService');
+  }
+
+  /// Set up subscriptions to FFI streams
+  void _setupStreamSubscriptions() {
+    final provider = _ffiProvider;
+    if (provider == null) return;
+
+    // Subscribe to incoming messages
+    _subscriptions.add(
+      provider.messageStream.listen(_handleIncomingMessage),
+    );
+
+    // Subscribe to member events (join/leave)
+    _subscriptions.add(
+      provider.memberEventStream.listen(_handleMemberEvent),
+    );
+
+    // Subscribe to key update events
+    _subscriptions.add(
+      provider.keyUpdateStream.listen(_handleKeyUpdate),
+    );
+
+    // Subscribe to group invites
+    _subscriptions.add(
+      provider.inviteStream.listen(_handleGroupInvite),
+    );
+  }
+
+  /// Handle incoming group message from FFI
+  Future<void> _handleIncomingMessage(GroupMessageReceived msg) async {
+    _log.info(
+        'Received group message from ${msg.fromNodeId.substring(0, 8)}...',
+        source: 'GroupService');
+
+    final db = await DatabaseService.instance.database;
+
+    // Check if group exists in our database
+    final groupRows = await db.query(
+      'groups',
+      where: 'id = ?',
+      whereArgs: [msg.groupId],
+    );
+    if (groupRows.isEmpty) {
+      _log.warning('Received message for unknown group ${msg.groupId}',
+          source: 'GroupService');
+      return;
+    }
+
+    // Create message record
+    final message = Message(
+      id: msg.msgId,
+      conversationId: msg.groupId,
+      senderId: msg.fromNodeId,
+      content: msg.text,
+      timestamp: msg.receivedAt,
+      status: MessageStatus.delivered,
+      isOutgoing: false,
+    );
+
+    // Save to database
+    await db.insert('messages', message.toMap());
+
+    // Update conversation timestamp and unread count
+    await db.rawUpdate('''
+      UPDATE conversations
+      SET last_activity_at = ?,
+          unread_count = unread_count + 1
+      WHERE id = ?
+    ''', [message.timestamp.millisecondsSinceEpoch, msg.groupId]);
+
+    // Update group timestamp
+    await db.update(
+      'groups',
+      {'updated_at': message.timestamp.millisecondsSinceEpoch},
+      where: 'id = ?',
+      whereArgs: [msg.groupId],
+    );
+
+    _messageController.add(message);
+  }
+
+  /// Handle member event (join or leave) from FFI
+  Future<void> _handleMemberEvent(MemberEvent event) async {
+    if (event.isJoin) {
+      await _handleMemberJoin(event);
+    } else {
+      await _handleMemberLeave(event);
+    }
+  }
+
+  /// Handle member join
+  Future<void> _handleMemberJoin(MemberEvent event) async {
+    _log.info('Member ${event.memberId.substring(0, 8)}... joined group',
+        source: 'GroupService');
+
+    final db = await DatabaseService.instance.database;
+
+    // Check if already member
+    final existing = await db.query(
+      'group_members',
+      where: 'group_id = ? AND node_id = ?',
+      whereArgs: [event.groupId, event.memberId],
+    );
+    if (existing.isNotEmpty) return;
+
+    // Get contact info for display name
+    final contacts = await db.query(
+      'contacts',
+      where: 'node_id = ?',
+      whereArgs: [event.memberId],
+    );
+    final displayName = contacts.isNotEmpty
+        ? contacts.first['display_name'] as String?
+        : null;
+
+    final member = GroupMember(
+      groupId: event.groupId,
+      nodeId: event.memberId,
+      role: GroupRole.member,
+      displayName: displayName,
+      joinedAt: event.timestamp,
+    );
+
+    await db.insert('group_members', member.toMap());
+
+    // Update group timestamp
+    await db.update(
+      'groups',
+      {'updated_at': event.timestamp.millisecondsSinceEpoch},
+      where: 'id = ?',
+      whereArgs: [event.groupId],
+    );
+
+    // Notify update
+    final group = await getGroup(event.groupId);
+    if (group != null) {
+      _groupUpdateController.add(group);
+    }
+  }
+
+  /// Handle member leave
+  Future<void> _handleMemberLeave(MemberEvent event) async {
+    _log.info(
+        'Member ${event.memberId.substring(0, 8)}... left group (kicked: ${event.wasKicked})',
+        source: 'GroupService');
+
+    final db = await DatabaseService.instance.database;
+
+    await db.delete(
+      'group_members',
+      where: 'group_id = ? AND node_id = ?',
+      whereArgs: [event.groupId, event.memberId],
+    );
+
+    // Update group timestamp
+    await db.update(
+      'groups',
+      {'updated_at': event.timestamp.millisecondsSinceEpoch},
+      where: 'id = ?',
+      whereArgs: [event.groupId],
+    );
+
+    // Notify update
+    final group = await getGroup(event.groupId);
+    if (group != null) {
+      _groupUpdateController.add(group);
+    }
+  }
+
+  /// Handle key update event from FFI
+  Future<void> _handleKeyUpdate(KeyUpdateEvent event) async {
+    _log.info('Group key updated to version ${event.newVersion}',
+        source: 'GroupService');
+
+    final db = await DatabaseService.instance.database;
+
+    await db.update(
+      'groups',
+      {
+        'key_version': event.newVersion,
+        'updated_at': event.timestamp.millisecondsSinceEpoch,
+      },
+      where: 'id = ?',
+      whereArgs: [event.groupId],
+    );
+
+    // Notify update
+    final group = await getGroup(event.groupId);
+    if (group != null) {
+      _groupUpdateController.add(group);
+    }
+  }
+
+  /// Handle group invite from FFI
+  Future<void> _handleGroupInvite(GroupInvite invite) async {
+    _log.info('Received invite to group "${invite.groupName}"',
+        source: 'GroupService');
+    // Invites are managed by GroupFFIProvider.pendingInvites
+    // UI can listen to that provider for invite list
+  }
+
+  // ============================================================
+  // Public API - Database Queries
+  // ============================================================
 
   /// Get all groups
   Future<List<Group>> getGroups() async {
@@ -77,6 +310,30 @@ class GroupService {
     return rows.map((row) => GroupMember.fromMap(row)).toList();
   }
 
+  /// Get messages for group
+  Future<List<Message>> getMessages(
+    String groupId, {
+    int limit = 50,
+    int offset = 0,
+  }) async {
+    final db = await DatabaseService.instance.database;
+
+    final rows = await db.query(
+      'messages',
+      where: 'conversation_id = ?',
+      whereArgs: [groupId],
+      orderBy: 'timestamp DESC',
+      limit: limit,
+      offset: offset,
+    );
+
+    return rows.map((row) => Message.fromMap(row)).toList().reversed.toList();
+  }
+
+  // ============================================================
+  // Public API - Group Operations (Database + FFI)
+  // ============================================================
+
   /// Create new group
   Future<Group> createGroup(String name, {String? description}) async {
     final db = await DatabaseService.instance.database;
@@ -85,11 +342,24 @@ class GroupService {
       throw StateError('No identity');
     }
 
-    final id = _uuid.v4();
-    final now = DateTime.now();
+    // Create group via FFI first (if connected)
+    String groupId;
+    if (_ffiProvider != null && _ffiProvider!.initialized) {
+      final result = await _ffiProvider!.createGroup(name);
+      if (!result.success || result.groupId == null) {
+        throw StateError('Failed to create group via FFI: ${result.error}');
+      }
+      groupId = result.groupId!;
+    } else {
+      // Fallback to local-only group (for testing/offline)
+      groupId = _uuid.v4();
+      _log.warning('Creating local-only group (FFI not connected)',
+          source: 'GroupService');
+    }
 
+    final now = DateTime.now();
     final group = Group(
-      id: id,
+      id: groupId,
       name: name,
       description: description,
       creatorId: identity.nodeId,
@@ -98,12 +368,12 @@ class GroupService {
       updatedAt: now,
     );
 
-    // Save group
+    // Save group to database
     await db.insert('groups', group.toMap());
 
     // Add ourselves as owner
     final selfMember = GroupMember(
-      groupId: id,
+      groupId: groupId,
       nodeId: identity.nodeId,
       role: GroupRole.owner,
       displayName: identity.displayName,
@@ -113,9 +383,9 @@ class GroupService {
 
     // Create corresponding conversation entry for unified inbox
     await db.insert('conversations', {
-      'id': id,
+      'id': groupId,
       'type': 1, // ConversationType.group
-      'group_id': id,
+      'group_id': groupId,
       'title': name,
       'is_pinned': 0,
       'is_muted': 0,
@@ -124,13 +394,22 @@ class GroupService {
       'last_activity_at': now.millisecondsSinceEpoch,
     });
 
+    // Set description via FFI if provided
+    if (description != null && _ffiProvider != null) {
+      await _ffiProvider!.setGroupDescription(groupId, description);
+    }
+
     final result = group.copyWith(members: [selfMember]);
     _groupUpdateController.add(result);
     return result;
   }
 
   /// Invite contact to group
-  Future<void> inviteMember(String groupId, String nodeId) async {
+  Future<bool> inviteMember(
+    String groupId,
+    String nodeId, {
+    List<int>? memberPubkey,
+  }) async {
     final db = await DatabaseService.instance.database;
     final now = DateTime.now();
 
@@ -140,9 +419,12 @@ class GroupService {
       where: 'group_id = ? AND node_id = ?',
       whereArgs: [groupId, nodeId],
     );
-    if (existing.isNotEmpty) return;
+    if (existing.isNotEmpty) {
+      _log.warning('Member already in group', source: 'GroupService');
+      return false;
+    }
 
-    // Get contact info for display name
+    // Get contact info for display name and pubkey
     final contacts = await db.query(
       'contacts',
       where: 'node_id = ?',
@@ -152,6 +434,34 @@ class GroupService {
         ? contacts.first['display_name'] as String?
         : null;
 
+    // Get pubkey from contact if not provided
+    List<int>? pubkey = memberPubkey;
+    if (pubkey == null && contacts.isNotEmpty) {
+      final pubkeyStr = contacts.first['public_key'] as String?;
+      if (pubkeyStr != null) {
+        pubkey = _hexToBytes(pubkeyStr);
+      }
+    }
+
+    // Send invite via FFI
+    if (_ffiProvider != null && _ffiProvider!.initialized) {
+      if (pubkey == null || pubkey.length != 32) {
+        _log.error('Cannot invite: missing public key for member',
+            source: 'GroupService');
+        return false;
+      }
+
+      final success = await _ffiProvider!.inviteMember(
+        groupId: groupId,
+        memberId: nodeId,
+        memberPubkey: pubkey,
+      );
+      if (!success) {
+        return false;
+      }
+    }
+
+    // Add to local database (they'll be marked as pending until they accept)
     final member = GroupMember(
       groupId: groupId,
       nodeId: nodeId,
@@ -176,13 +486,25 @@ class GroupService {
       _groupUpdateController.add(group);
     }
 
-    // TODO: Send invite via libcyxchat FFI
+    return true;
   }
 
-  /// Remove member from group
-  Future<void> removeMember(String groupId, String nodeId) async {
+  /// Remove member from group (admin only)
+  Future<bool> removeMember(String groupId, String nodeId) async {
     final db = await DatabaseService.instance.database;
 
+    // Remove via FFI
+    if (_ffiProvider != null && _ffiProvider!.initialized) {
+      final success = await _ffiProvider!.removeMember(
+        groupId: groupId,
+        memberId: nodeId,
+      );
+      if (!success) {
+        return false;
+      }
+    }
+
+    // Remove from local database
     await db.delete(
       'group_members',
       where: 'group_id = ? AND node_id = ?',
@@ -203,14 +525,22 @@ class GroupService {
       _groupUpdateController.add(group);
     }
 
-    // TODO: Send kick notification via libcyxchat FFI
+    return true;
   }
 
   /// Leave group
-  Future<void> leaveGroup(String groupId) async {
+  Future<bool> leaveGroup(String groupId) async {
     final db = await DatabaseService.instance.database;
     final identity = IdentityService.instance.currentIdentity;
-    if (identity == null) return;
+    if (identity == null) return false;
+
+    // Leave via FFI
+    if (_ffiProvider != null && _ffiProvider!.initialized) {
+      final success = await _ffiProvider!.leaveGroup(groupId);
+      if (!success) {
+        return false;
+      }
+    }
 
     // Remove self from members
     await db.delete(
@@ -226,12 +556,30 @@ class GroupService {
       whereArgs: [groupId],
     );
 
-    // TODO: Send leave notification via libcyxchat FFI
+    // Remove the group itself
+    await db.delete(
+      'groups',
+      where: 'id = ?',
+      whereArgs: [groupId],
+    );
+
+    return true;
   }
 
-  /// Promote member to admin
-  Future<void> promoteAdmin(String groupId, String nodeId) async {
+  /// Promote member to admin (owner only)
+  Future<bool> promoteAdmin(String groupId, String nodeId) async {
     final db = await DatabaseService.instance.database;
+
+    // Promote via FFI
+    if (_ffiProvider != null && _ffiProvider!.initialized) {
+      final success = await _ffiProvider!.addAdmin(
+        groupId: groupId,
+        memberId: nodeId,
+      );
+      if (!success) {
+        return false;
+      }
+    }
 
     await db.update(
       'group_members',
@@ -246,12 +594,23 @@ class GroupService {
       _groupUpdateController.add(group);
     }
 
-    // TODO: Broadcast admin change via libcyxchat FFI
+    return true;
   }
 
-  /// Demote admin to member
-  Future<void> demoteAdmin(String groupId, String nodeId) async {
+  /// Demote admin to member (owner only)
+  Future<bool> demoteAdmin(String groupId, String nodeId) async {
     final db = await DatabaseService.instance.database;
+
+    // Demote via FFI
+    if (_ffiProvider != null && _ffiProvider!.initialized) {
+      final success = await _ffiProvider!.removeAdmin(
+        groupId: groupId,
+        memberId: nodeId,
+      );
+      if (!success) {
+        return false;
+      }
+    }
 
     await db.update(
       'group_members',
@@ -266,12 +625,20 @@ class GroupService {
       _groupUpdateController.add(group);
     }
 
-    // TODO: Broadcast admin change via libcyxchat FFI
+    return true;
   }
 
-  /// Update group name
-  Future<void> updateName(String groupId, String name) async {
+  /// Update group name (admin only)
+  Future<bool> updateName(String groupId, String name) async {
     final db = await DatabaseService.instance.database;
+
+    // Update via FFI
+    if (_ffiProvider != null && _ffiProvider!.initialized) {
+      final success = await _ffiProvider!.setGroupName(groupId, name);
+      if (!success) {
+        return false;
+      }
+    }
 
     await db.update(
       'groups',
@@ -296,11 +663,21 @@ class GroupService {
     if (group != null) {
       _groupUpdateController.add(group);
     }
+
+    return true;
   }
 
   /// Update group description
-  Future<void> updateDescription(String groupId, String? description) async {
+  Future<bool> updateDescription(String groupId, String? description) async {
     final db = await DatabaseService.instance.database;
+
+    // Update via FFI
+    if (_ffiProvider != null && _ffiProvider!.initialized && description != null) {
+      final success = await _ffiProvider!.setGroupDescription(groupId, description);
+      if (!success) {
+        return false;
+      }
+    }
 
     await db.update(
       'groups',
@@ -317,7 +694,13 @@ class GroupService {
     if (group != null) {
       _groupUpdateController.add(group);
     }
+
+    return true;
   }
+
+  // ============================================================
+  // Public API - Messaging (Database + FFI)
+  // ============================================================
 
   /// Send message to group
   Future<Message> sendMessage(
@@ -331,13 +714,37 @@ class GroupService {
       throw StateError('No identity');
     }
 
+    // Send via FFI first to get the message ID
+    String msgId;
+    MessageStatus status;
+
+    if (_ffiProvider != null && _ffiProvider!.initialized) {
+      final result = await _ffiProvider!.sendText(
+        groupId: groupId,
+        text: content,
+        replyToMsgId: replyToId,
+      );
+
+      if (!result.success || result.msgId == null) {
+        throw StateError('Failed to send message: ${result.error}');
+      }
+      msgId = result.msgId!;
+      status = MessageStatus.sent;
+    } else {
+      // Fallback for testing/offline
+      msgId = _uuid.v4();
+      status = MessageStatus.failed;
+      _log.warning('Sending local-only message (FFI not connected)',
+          source: 'GroupService');
+    }
+
     final message = Message(
-      id: _uuid.v4(),
+      id: msgId,
       conversationId: groupId,
       senderId: identity.nodeId,
       content: content,
       timestamp: DateTime.now(),
-      status: MessageStatus.sending,
+      status: status,
       replyToId: replyToId,
       isOutgoing: true,
     );
@@ -361,38 +768,8 @@ class GroupService {
       whereArgs: [groupId],
     );
 
-    // TODO: Send via libcyxchat FFI
-    // For now, mark as sent
-    final sentMessage = message.copyWith(status: MessageStatus.sent);
-    await db.update(
-      'messages',
-      {'status': MessageStatus.sent.index},
-      where: 'id = ?',
-      whereArgs: [message.id],
-    );
-
-    _messageController.add(sentMessage);
-    return sentMessage;
-  }
-
-  /// Get messages for group
-  Future<List<Message>> getMessages(
-    String groupId, {
-    int limit = 50,
-    int offset = 0,
-  }) async {
-    final db = await DatabaseService.instance.database;
-
-    final rows = await db.query(
-      'messages',
-      where: 'conversation_id = ?',
-      whereArgs: [groupId],
-      orderBy: 'timestamp DESC',
-      limit: limit,
-      offset: offset,
-    );
-
-    return rows.map((row) => Message.fromMap(row)).toList().reversed.toList();
+    _messageController.add(message);
+    return message;
   }
 
   /// Mark group messages as read
@@ -414,7 +791,142 @@ class GroupService {
     );
   }
 
+  // ============================================================
+  // Public API - Key Management (FFI)
+  // ============================================================
+
+  /// Rotate group key (admin only)
+  Future<bool> rotateKey(String groupId) async {
+    if (_ffiProvider == null || !_ffiProvider!.initialized) {
+      _log.error('Cannot rotate key: FFI not connected',
+          source: 'GroupService');
+      return false;
+    }
+
+    return _ffiProvider!.rotateKey(groupId);
+  }
+
+  /// Set auto-rotation on member leave
+  void setAutoRotateOnLeave(bool enable) {
+    _ffiProvider?.setAutoRotateOnLeave(enable);
+  }
+
+  /// Set auto-rotation on kick notification
+  void setAutoRotateOnKick(bool enable) {
+    _ffiProvider?.setAutoRotateOnKick(enable);
+  }
+
+  /// Get key distribution progress for a group
+  KeyDistProgress? getKeyDistProgress(String groupId) {
+    return _ffiProvider?.getKeyDistProgress(groupId);
+  }
+
+  // ============================================================
+  // Public API - Invitations (FFI)
+  // ============================================================
+
+  /// Get pending group invites
+  List<GroupInvite> get pendingInvites =>
+      _ffiProvider?.pendingInvites ?? [];
+
+  /// Accept a pending group invite
+  Future<bool> acceptInvite(String groupId) async {
+    if (_ffiProvider == null || !_ffiProvider!.initialized) {
+      _log.error('Cannot accept invite: FFI not connected',
+          source: 'GroupService');
+      return false;
+    }
+
+    // Get invite details before accepting
+    final invite = _ffiProvider!.pendingInvites
+        .where((i) => i.groupId == groupId)
+        .firstOrNull;
+
+    final success = await _ffiProvider!.acceptInvite(groupId);
+    if (!success) return false;
+
+    // Create local group and conversation entries
+    final db = await DatabaseService.instance.database;
+    final identity = IdentityService.instance.currentIdentity;
+    if (identity == null) return false;
+
+    final now = DateTime.now();
+    final groupName = invite?.groupName ?? 'Group';
+
+    // Check if group already exists
+    final existing = await db.query(
+      'groups',
+      where: 'id = ?',
+      whereArgs: [groupId],
+    );
+    if (existing.isEmpty) {
+      // Create group
+      await db.insert('groups', {
+        'id': groupId,
+        'name': groupName,
+        'creator_id': invite?.inviterId ?? '',
+        'key_version': 1,
+        'created_at': now.millisecondsSinceEpoch,
+        'updated_at': now.millisecondsSinceEpoch,
+      });
+
+      // Add ourselves as member
+      await db.insert('group_members', {
+        'group_id': groupId,
+        'node_id': identity.nodeId,
+        'role': GroupRole.member.index,
+        'display_name': identity.displayName,
+        'joined_at': now.millisecondsSinceEpoch,
+      });
+
+      // Create conversation entry
+      await db.insert('conversations', {
+        'id': groupId,
+        'type': 1, // ConversationType.group
+        'group_id': groupId,
+        'title': groupName,
+        'is_pinned': 0,
+        'is_muted': 0,
+        'is_archived': 0,
+        'unread_count': 0,
+        'last_activity_at': now.millisecondsSinceEpoch,
+      });
+    }
+
+    // Notify update
+    final group = await getGroup(groupId);
+    if (group != null) {
+      _groupUpdateController.add(group);
+    }
+
+    return true;
+  }
+
+  /// Decline a pending group invite
+  Future<bool> declineInvite(String groupId) async {
+    if (_ffiProvider == null || !_ffiProvider!.initialized) {
+      _log.error('Cannot decline invite: FFI not connected',
+          source: 'GroupService');
+      return false;
+    }
+
+    return _ffiProvider!.declineInvite(groupId);
+  }
+
+  // ============================================================
+  // Utilities
+  // ============================================================
+
+  List<int> _hexToBytes(String hex) {
+    final result = <int>[];
+    for (int i = 0; i < hex.length; i += 2) {
+      result.add(int.parse(hex.substring(i, i + 2), radix: 16));
+    }
+    return result;
+  }
+
   void dispose() {
+    disconnectProvider();
     _messageController.close();
     _groupUpdateController.close();
   }

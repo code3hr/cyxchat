@@ -32,6 +32,51 @@ typedef _FileErrorCallback = Void Function(
     Int32 error,
     Pointer<Void> userData);
 
+/// Native callback type for group message
+typedef _GroupMessageCallback = Void Function(
+    Pointer<Void> ctx,
+    Pointer<Uint8> groupId,
+    Pointer<Uint8> from,
+    Pointer<Void> msg,
+    Pointer<Void> userData);
+
+/// Native callback type for group invite
+typedef _GroupInviteCallback = Void Function(
+    Pointer<Void> ctx,
+    Pointer<Void> invite,
+    Pointer<Void> userData);
+
+/// Native callback type for member join
+typedef _MemberJoinCallback = Void Function(
+    Pointer<Void> ctx,
+    Pointer<Uint8> groupId,
+    Pointer<Uint8> member,
+    Pointer<Void> userData);
+
+/// Native callback type for member leave
+typedef _MemberLeaveCallback = Void Function(
+    Pointer<Void> ctx,
+    Pointer<Uint8> groupId,
+    Pointer<Uint8> member,
+    Int32 wasKicked,
+    Pointer<Void> userData);
+
+/// Native callback type for key update
+typedef _KeyUpdateCallback = Void Function(
+    Pointer<Void> ctx,
+    Pointer<Uint8> groupId,
+    Uint32 newVersion,
+    Pointer<Void> userData);
+
+/// Native callback type for key distribution complete
+typedef _KeyDistCompleteCallback = Void Function(
+    Pointer<Void> ctx,
+    Pointer<Uint8> groupId,
+    Uint32 newVersion,
+    Int32 success,
+    Size failedCount,
+    Pointer<Void> userData);
+
 /// Native file metadata structure
 final class _FileMetaNative extends Struct {
   @Array(8)
@@ -129,6 +174,9 @@ class CyxChatBindings {
 
   /// Chat context pointer (opaque)
   Pointer<Void>? _chatCtx;
+
+  /// Get chat context (for modules that depend on it)
+  Pointer<Void>? get chatCtx => _chatCtx;
 
   /// Create chat context
   /// Requires onion context from connection
@@ -1072,6 +1120,315 @@ class CyxChatBindings {
     }
   }
 
+  /// Get key distribution progress for a group
+  /// Returns map with 'sent', 'acked', 'total' keys, or null if no distribution in progress
+  Map<String, int>? groupKeyDistProgress(String groupIdHex) {
+    if (_groupCtx == null) return null;
+    final groupIdPtr = calloc<Uint8>(8);
+    final sentPtr = calloc<Size>(1);
+    final ackedPtr = calloc<Size>(1);
+    final totalPtr = calloc<Size>(1);
+    try {
+      final parseResult = groupIdFromHex(groupIdHex, groupIdPtr);
+      if (parseResult != 0) return null;
+      final inProgress = _native.cyxchat_group_key_dist_progress(
+        _groupCtx!,
+        groupIdPtr,
+        sentPtr,
+        ackedPtr,
+        totalPtr,
+      );
+      if (inProgress != 0) {
+        return {
+          'sent': sentPtr.value,
+          'acked': ackedPtr.value,
+          'total': totalPtr.value,
+        };
+      }
+      return null;
+    } finally {
+      calloc.free(groupIdPtr);
+      calloc.free(sentPtr);
+      calloc.free(ackedPtr);
+      calloc.free(totalPtr);
+    }
+  }
+
+  /// Set auto-rotation on member leave
+  void groupSetAutoRotateOnLeave(bool enable) {
+    if (_groupCtx == null) return;
+    _native.cyxchat_group_set_auto_rotate_on_leave(_groupCtx!, enable ? 1 : 0);
+  }
+
+  /// Set auto-rotation on kick notification
+  void groupSetAutoRotateOnKick(bool enable) {
+    if (_groupCtx == null) return;
+    _native.cyxchat_group_set_auto_rotate_on_kick(_groupCtx!, enable ? 1 : 0);
+  }
+
+  /// Get auto-rotation settings
+  /// Returns map with 'onLeave' and 'onKick' boolean values
+  Map<String, bool> groupGetAutoRotateSettings() {
+    if (_groupCtx == null) return {'onLeave': true, 'onKick': false};
+    final onLeavePtr = calloc<Int32>(1);
+    final onKickPtr = calloc<Int32>(1);
+    try {
+      _native.cyxchat_group_get_auto_rotate_settings(
+        _groupCtx!,
+        onLeavePtr,
+        onKickPtr,
+      );
+      return {
+        'onLeave': onLeavePtr.value != 0,
+        'onKick': onKickPtr.value != 0,
+      };
+    } finally {
+      calloc.free(onLeavePtr);
+      calloc.free(onKickPtr);
+    }
+  }
+
+  /// Group callback storage (prevent GC)
+  NativeCallable<_GroupMessageCallback>? _onGroupMessage;
+  NativeCallable<_GroupInviteCallback>? _onGroupInvite;
+  NativeCallable<_MemberJoinCallback>? _onMemberJoin;
+  NativeCallable<_MemberLeaveCallback>? _onMemberLeave;
+  NativeCallable<_KeyUpdateCallback>? _onKeyUpdate;
+  NativeCallable<_KeyDistCompleteCallback>? _onKeyDistComplete;
+
+  /// Dart callbacks for group events
+  void Function(String groupId, String from, String msgId, String text)? onGroupMessage;
+  void Function(String groupId, String groupName, String inviter)? onGroupInvite;
+  void Function(String groupId, String memberId)? onMemberJoin;
+  void Function(String groupId, String memberId, bool wasKicked)? onMemberLeave;
+  void Function(String groupId, int newVersion)? onKeyUpdate;
+  void Function(String groupId, int newVersion, bool success, int failedCount)? onKeyDistComplete;
+
+  /// Pending invites storage (by group ID hex)
+  final Map<String, Pointer<Void>> _pendingInvites = {};
+
+  /// Set up group callbacks
+  void groupSetupCallbacks() {
+    if (_groupCtx == null) return;
+
+    // Group message callback
+    _onGroupMessage = NativeCallable<_GroupMessageCallback>.listener(
+      _handleGroupMessage,
+    );
+    _native.cyxchat_group_set_on_message(
+      _groupCtx!,
+      _onGroupMessage!.nativeFunction,
+      nullptr,
+    );
+
+    // Group invite callback
+    _onGroupInvite = NativeCallable<_GroupInviteCallback>.listener(
+      _handleGroupInvite,
+    );
+    _native.cyxchat_group_set_on_invite(
+      _groupCtx!,
+      _onGroupInvite!.nativeFunction,
+      nullptr,
+    );
+
+    // Member join callback
+    _onMemberJoin = NativeCallable<_MemberJoinCallback>.listener(
+      _handleMemberJoin,
+    );
+    _native.cyxchat_group_set_on_member_join(
+      _groupCtx!,
+      _onMemberJoin!.nativeFunction,
+      nullptr,
+    );
+
+    // Member leave callback
+    _onMemberLeave = NativeCallable<_MemberLeaveCallback>.listener(
+      _handleMemberLeave,
+    );
+    _native.cyxchat_group_set_on_member_leave(
+      _groupCtx!,
+      _onMemberLeave!.nativeFunction,
+      nullptr,
+    );
+
+    // Key update callback
+    _onKeyUpdate = NativeCallable<_KeyUpdateCallback>.listener(
+      _handleKeyUpdate,
+    );
+    _native.cyxchat_group_set_on_key_update(
+      _groupCtx!,
+      _onKeyUpdate!.nativeFunction,
+      nullptr,
+    );
+
+    // Key distribution complete callback
+    _onKeyDistComplete = NativeCallable<_KeyDistCompleteCallback>.listener(
+      _handleKeyDistComplete,
+    );
+    _native.cyxchat_group_set_on_key_dist_complete(
+      _groupCtx!,
+      _onKeyDistComplete!.nativeFunction,
+      nullptr,
+    );
+  }
+
+  /// Clean up group callbacks
+  void groupCleanupCallbacks() {
+    _onGroupMessage?.close();
+    _onGroupInvite?.close();
+    _onMemberJoin?.close();
+    _onMemberLeave?.close();
+    _onKeyUpdate?.close();
+    _onKeyDistComplete?.close();
+    _onGroupMessage = null;
+    _onGroupInvite = null;
+    _onMemberJoin = null;
+    _onMemberLeave = null;
+    _onKeyUpdate = null;
+    _onKeyDistComplete = null;
+    _pendingInvites.clear();
+  }
+
+  /// Handle incoming group message
+  void _handleGroupMessage(
+    Pointer<Void> ctx,
+    Pointer<Uint8> groupId,
+    Pointer<Uint8> from,
+    Pointer<Void> msg,
+    Pointer<Void> userData,
+  ) {
+    if (onGroupMessage == null) return;
+
+    final groupIdHex = _bytesToHex(groupId, 8);
+    final fromHex = _bytesToHex(from, 32);
+
+    // Parse message structure: header(20) + group_id(8) + key_version(4) + text_len(2) + text + reply_to(8)
+    // We need to extract msg_id from header and text
+    final msgBytes = msg.cast<Uint8>();
+
+    // Header: version(1) + type(1) + flags(2) + timestamp(8) + msg_id(8) = 20 bytes
+    final msgIdHex = _bytesToHex(msgBytes.elementAt(12), 8);
+
+    // After header(20) + group_id(8) + key_version(4) = offset 32
+    final textLenLow = msgBytes[32];
+    final textLenHigh = msgBytes[33];
+    final textLen = textLenLow | (textLenHigh << 8);
+
+    // Text starts at offset 34
+    final textBytes = <int>[];
+    for (int i = 0; i < textLen && i < 4096; i++) {
+      textBytes.add(msgBytes[34 + i]);
+    }
+    final text = String.fromCharCodes(textBytes);
+
+    onGroupMessage!(groupIdHex, fromHex, msgIdHex, text);
+  }
+
+  /// Handle incoming group invite
+  void _handleGroupInvite(
+    Pointer<Void> ctx,
+    Pointer<Void> invite,
+    Pointer<Void> userData,
+  ) {
+    if (onGroupInvite == null) return;
+
+    // Parse invite structure
+    final inviteBytes = invite.cast<Uint8>();
+
+    // Header: version(1) + type(1) + flags(2) + timestamp(8) + msg_id(8) = 20 bytes
+    // Then: group_id(8) + group_name(64) + key_version(4) + encrypted_key(72) + inviter(32) + inviter_pubkey(32)
+
+    // Group ID at offset 20
+    final groupIdHex = _bytesToHex(inviteBytes.elementAt(20), 8);
+
+    // Group name at offset 28 (null-terminated, max 64 bytes)
+    final nameBytes = <int>[];
+    for (int i = 0; i < 64; i++) {
+      final c = inviteBytes[28 + i];
+      if (c == 0) break;
+      nameBytes.add(c);
+    }
+    final groupName = String.fromCharCodes(nameBytes);
+
+    // Inviter at offset 28 + 64 + 4 + 72 = 168
+    final inviterHex = _bytesToHex(inviteBytes.elementAt(168), 32);
+
+    // Store the invite pointer for accept/decline (we need to copy it since the original may be freed)
+    // For now, we'll store the pointer - caller must accept/decline before it's freed
+    _pendingInvites[groupIdHex] = invite;
+
+    onGroupInvite!(groupIdHex, groupName, inviterHex);
+  }
+
+  /// Accept a pending group invite
+  int groupAcceptInvite(String groupIdHex) {
+    if (_groupCtx == null) return CyxChatError.errNull;
+    final invite = _pendingInvites.remove(groupIdHex);
+    if (invite == null) return CyxChatError.errNotFound;
+    return _native.cyxchat_group_accept_invite(_groupCtx!, invite);
+  }
+
+  /// Decline a pending group invite
+  int groupDeclineInvite(String groupIdHex) {
+    if (_groupCtx == null) return CyxChatError.errNull;
+    final invite = _pendingInvites.remove(groupIdHex);
+    if (invite == null) return CyxChatError.errNotFound;
+    return _native.cyxchat_group_decline_invite(_groupCtx!, invite);
+  }
+
+  /// Handle member join
+  void _handleMemberJoin(
+    Pointer<Void> ctx,
+    Pointer<Uint8> groupId,
+    Pointer<Uint8> member,
+    Pointer<Void> userData,
+  ) {
+    if (onMemberJoin == null) return;
+    final groupIdHex = _bytesToHex(groupId, 8);
+    final memberHex = _bytesToHex(member, 32);
+    onMemberJoin!(groupIdHex, memberHex);
+  }
+
+  /// Handle member leave
+  void _handleMemberLeave(
+    Pointer<Void> ctx,
+    Pointer<Uint8> groupId,
+    Pointer<Uint8> member,
+    int wasKicked,
+    Pointer<Void> userData,
+  ) {
+    if (onMemberLeave == null) return;
+    final groupIdHex = _bytesToHex(groupId, 8);
+    final memberHex = _bytesToHex(member, 32);
+    onMemberLeave!(groupIdHex, memberHex, wasKicked != 0);
+  }
+
+  /// Handle key update
+  void _handleKeyUpdate(
+    Pointer<Void> ctx,
+    Pointer<Uint8> groupId,
+    int newVersion,
+    Pointer<Void> userData,
+  ) {
+    if (onKeyUpdate == null) return;
+    final groupIdHex = _bytesToHex(groupId, 8);
+    onKeyUpdate!(groupIdHex, newVersion);
+  }
+
+  /// Handle key distribution complete
+  void _handleKeyDistComplete(
+    Pointer<Void> ctx,
+    Pointer<Uint8> groupId,
+    int newVersion,
+    int success,
+    int failedCount,
+    Pointer<Void> userData,
+  ) {
+    if (onKeyDistComplete == null) return;
+    final groupIdHex = _bytesToHex(groupId, 8);
+    onKeyDistComplete!(groupIdHex, newVersion, success != 0, failedCount);
+  }
+
   // ============================================================
   // File Transfer Module
   // ============================================================
@@ -1931,6 +2288,63 @@ class CyxChatNative {
       Int32 Function(Pointer<Int8>, Pointer<Uint8>),
       int Function(Pointer<Int8>, Pointer<Uint8>)>('cyxchat_group_id_from_hex');
 
+  late final cyxchat_group_accept_invite = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Void>),
+      int Function(Pointer<Void>, Pointer<Void>)>('cyxchat_group_accept_invite');
+
+  late final cyxchat_group_decline_invite = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Void>),
+      int Function(Pointer<Void>, Pointer<Void>)>('cyxchat_group_decline_invite');
+
+  late final cyxchat_group_key_dist_progress = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>, Pointer<Size>, Pointer<Size>, Pointer<Size>),
+      int Function(Pointer<Void>, Pointer<Uint8>, Pointer<Size>, Pointer<Size>, Pointer<Size>)>(
+      'cyxchat_group_key_dist_progress');
+
+  late final cyxchat_group_set_auto_rotate_on_leave = _lib.lookupFunction<
+      Void Function(Pointer<Void>, Int32),
+      void Function(Pointer<Void>, int)>('cyxchat_group_set_auto_rotate_on_leave');
+
+  late final cyxchat_group_set_auto_rotate_on_kick = _lib.lookupFunction<
+      Void Function(Pointer<Void>, Int32),
+      void Function(Pointer<Void>, int)>('cyxchat_group_set_auto_rotate_on_kick');
+
+  late final cyxchat_group_get_auto_rotate_settings = _lib.lookupFunction<
+      Void Function(Pointer<Void>, Pointer<Int32>, Pointer<Int32>),
+      void Function(Pointer<Void>, Pointer<Int32>, Pointer<Int32>)>(
+      'cyxchat_group_get_auto_rotate_settings');
+
+  // Group callback setters
+  late final cyxchat_group_set_on_message = _lib.lookupFunction<
+      Void Function(Pointer<Void>, Pointer<NativeFunction<_GroupMessageCallback>>, Pointer<Void>),
+      void Function(Pointer<Void>, Pointer<NativeFunction<_GroupMessageCallback>>, Pointer<Void>)>(
+      'cyxchat_group_set_on_message');
+
+  late final cyxchat_group_set_on_invite = _lib.lookupFunction<
+      Void Function(Pointer<Void>, Pointer<NativeFunction<_GroupInviteCallback>>, Pointer<Void>),
+      void Function(Pointer<Void>, Pointer<NativeFunction<_GroupInviteCallback>>, Pointer<Void>)>(
+      'cyxchat_group_set_on_invite');
+
+  late final cyxchat_group_set_on_member_join = _lib.lookupFunction<
+      Void Function(Pointer<Void>, Pointer<NativeFunction<_MemberJoinCallback>>, Pointer<Void>),
+      void Function(Pointer<Void>, Pointer<NativeFunction<_MemberJoinCallback>>, Pointer<Void>)>(
+      'cyxchat_group_set_on_member_join');
+
+  late final cyxchat_group_set_on_member_leave = _lib.lookupFunction<
+      Void Function(Pointer<Void>, Pointer<NativeFunction<_MemberLeaveCallback>>, Pointer<Void>),
+      void Function(Pointer<Void>, Pointer<NativeFunction<_MemberLeaveCallback>>, Pointer<Void>)>(
+      'cyxchat_group_set_on_member_leave');
+
+  late final cyxchat_group_set_on_key_update = _lib.lookupFunction<
+      Void Function(Pointer<Void>, Pointer<NativeFunction<_KeyUpdateCallback>>, Pointer<Void>),
+      void Function(Pointer<Void>, Pointer<NativeFunction<_KeyUpdateCallback>>, Pointer<Void>)>(
+      'cyxchat_group_set_on_key_update');
+
+  late final cyxchat_group_set_on_key_dist_complete = _lib.lookupFunction<
+      Void Function(Pointer<Void>, Pointer<NativeFunction<_KeyDistCompleteCallback>>, Pointer<Void>),
+      void Function(Pointer<Void>, Pointer<NativeFunction<_KeyDistCompleteCallback>>, Pointer<Void>)>(
+      'cyxchat_group_set_on_key_dist_complete');
+
   late final cyxchat_msg_id_to_hex = _lib.lookupFunction<
       Void Function(Pointer<Uint8>, Pointer<Int8>),
       void Function(Pointer<Uint8>, Pointer<Int8>)>('cyxchat_msg_id_to_hex');
@@ -2159,6 +2573,7 @@ class CyxChatMsgType {
   static const groupKey = 0x25;
   static const groupInfo = 0x26;
   static const groupAdmin = 0x27;
+  static const groupKeyAck = 0x28;
   static const presence = 0x30;
   static const presenceReq = 0x31;
   // File transfer protocol v2 (hybrid with DHT support)
@@ -2265,4 +2680,45 @@ class CyxChatFileRejectReason {
       default: return 'Unknown';
     }
   }
+}
+
+// Group roles
+class CyxChatGroupRole {
+  static const member = 0;
+  static const admin = 1;
+  static const owner = 2;
+
+  static String name(int role) {
+    switch (role) {
+      case member: return 'Member';
+      case admin: return 'Admin';
+      case owner: return 'Owner';
+      default: return 'Unknown';
+    }
+  }
+
+  static bool canInvite(int role) {
+    return role >= admin;
+  }
+
+  static bool canKick(int role) {
+    return role >= admin;
+  }
+
+  static bool canRotateKey(int role) {
+    return role >= admin;
+  }
+
+  static bool canPromote(int role) {
+    return role == owner;
+  }
+}
+
+// Group constants
+class CyxChatGroupConst {
+  static const maxGroupMembers = 50;
+  static const maxGroupAdmins = 5;
+  static const maxDisplayName = 64;
+  static const maxStatusLen = 128;
+  static const groupIdSize = 8;
 }

@@ -7,3 +7,4 @@ export 'message.dart';
 export 'conversation.dart';
 export 'group.dart';
 export 'group_member.dart';
+export 'group_invite.dart';

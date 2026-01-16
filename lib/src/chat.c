@@ -98,6 +98,19 @@ typedef struct {
  * Internal Structures
  * ============================================================ */
 
+/* Forward declaration for group context */
+struct cyxchat_group_ctx;
+typedef struct cyxchat_group_ctx cyxchat_group_ctx_t;
+
+/* External function to handle group messages */
+extern void cyxchat_group_handle_message(
+    cyxchat_group_ctx_t *ctx,
+    const cyxwiz_node_id_t *from,
+    uint8_t type,
+    const uint8_t *data,
+    size_t len
+);
+
 struct cyxchat_ctx {
     cyxwiz_onion_ctx_t *onion;
     cyxwiz_node_id_t local_id;
@@ -116,6 +129,9 @@ struct cyxchat_ctx {
 
     /* File module context (for message routing) */
     cyxchat_file_ctx_t *file_ctx;
+
+    /* Group module context (for message routing) */
+    cyxchat_group_ctx_t *group_ctx;
 
     /* Callbacks */
     cyxchat_on_message_t on_message;
@@ -839,6 +855,26 @@ static void on_onion_delivery(
             }
             break;
 
+        /* Group messages (0x20-0x28) - route to group module */
+        case CYXCHAT_MSG_GROUP_TEXT:
+        case CYXCHAT_MSG_GROUP_INVITE:
+        case CYXCHAT_MSG_GROUP_JOIN:
+        case CYXCHAT_MSG_GROUP_LEAVE:
+        case CYXCHAT_MSG_GROUP_KICK:
+        case CYXCHAT_MSG_GROUP_KEY:
+        case CYXCHAT_MSG_GROUP_INFO:
+        case CYXCHAT_MSG_GROUP_ADMIN:
+        case CYXCHAT_MSG_GROUP_KEY_ACK:
+            /* Route to group module if registered */
+            if (ctx->group_ctx) {
+                CYXWIZ_INFO("Routing group message (type=0x%02x) to group module", type);
+                /* Pass full message data (group module handles wire format) */
+                cyxchat_group_handle_message(ctx->group_ctx, actual_sender, type, data, len);
+            } else {
+                CYXWIZ_WARN("Received group message but no group context registered");
+            }
+            break;
+
         default:
             /* Unknown message type, just queued for FFI */
             break;
@@ -1440,5 +1476,11 @@ uint8_t cyxchat_get_hop_count(cyxchat_ctx_t *ctx) {
 void cyxchat_set_file_ctx(cyxchat_ctx_t *ctx, cyxchat_file_ctx_t *file_ctx) {
     if (ctx) {
         ctx->file_ctx = file_ctx;
+    }
+}
+
+void cyxchat_set_group_ctx(cyxchat_ctx_t *ctx, cyxchat_group_ctx_t *group_ctx) {
+    if (ctx) {
+        ctx->group_ctx = group_ctx;
     }
 }

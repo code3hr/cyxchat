@@ -78,12 +78,17 @@ typedef struct {
  * Group Invitation
  * ============================================================ */
 
+/* Encrypted key size: nonce(24) + key(32) + tag(16) = 72 bytes */
+#define CYXCHAT_ENCRYPTED_GROUP_KEY_SIZE 72
+
 typedef struct {
     cyxchat_msg_header_t header;
     cyxchat_group_id_t group_id;
     char group_name[CYXCHAT_MAX_DISPLAY_NAME];
-    uint8_t encrypted_key[48];                  /* Encrypted group key */
+    uint32_t key_version;                       /* Group key version */
+    uint8_t encrypted_key[CYXCHAT_ENCRYPTED_GROUP_KEY_SIZE]; /* Encrypted group key */
     cyxwiz_node_id_t inviter;
+    uint8_t inviter_pubkey[32];                 /* Inviter's X25519 public key */
 } cyxchat_group_invite_t;
 
 /* ============================================================
@@ -129,6 +134,15 @@ typedef void (*cyxchat_on_group_key_update_t)(
     cyxchat_group_ctx_t *ctx,
     const cyxchat_group_id_t *group_id,
     uint32_t new_version,
+    void *user_data
+);
+
+typedef void (*cyxchat_on_key_dist_complete_t)(
+    cyxchat_group_ctx_t *ctx,
+    const cyxchat_group_id_t *group_id,
+    uint32_t new_version,
+    int success,           /* 1 = all members ACKed, 0 = some failed */
+    size_t failed_count,   /* Number of members who didn't ACK */
     void *user_data
 );
 
@@ -359,6 +373,97 @@ CYXCHAT_API void cyxchat_group_set_on_key_update(
     cyxchat_group_ctx_t *ctx,
     cyxchat_on_group_key_update_t callback,
     void *user_data
+);
+
+/**
+ * Set callback for key distribution completion
+ *
+ * Called when key distribution to all members finishes (success or failure).
+ */
+CYXCHAT_API void cyxchat_group_set_on_key_dist_complete(
+    cyxchat_group_ctx_t *ctx,
+    cyxchat_on_key_dist_complete_t callback,
+    void *user_data
+);
+
+/* ============================================================
+ * Key Distribution Progress
+ * ============================================================ */
+
+/**
+ * Get key distribution progress for a group
+ *
+ * @param ctx           Group context
+ * @param group_id      Group ID
+ * @param sent_out      Output: number of members key was sent to
+ * @param acked_out     Output: number of members who ACKed
+ * @param total_out     Output: total members to distribute to
+ * @return              1 if distribution in progress, 0 if not
+ */
+CYXCHAT_API int cyxchat_group_key_dist_progress(
+    cyxchat_group_ctx_t *ctx,
+    const cyxchat_group_id_t *group_id,
+    size_t *sent_out,
+    size_t *acked_out,
+    size_t *total_out
+);
+
+/* ============================================================
+ * Auto-Rotation Configuration
+ * ============================================================ */
+
+/**
+ * Enable or disable auto-rotation when a member voluntarily leaves
+ *
+ * When enabled (default), if we are admin and a member leaves,
+ * we automatically rotate the group key for forward secrecy.
+ */
+CYXCHAT_API void cyxchat_group_set_auto_rotate_on_leave(
+    cyxchat_group_ctx_t *ctx,
+    int enable
+);
+
+/**
+ * Enable or disable auto-rotation when receiving a kick notification
+ *
+ * When enabled, if we are admin and receive a kick notification from
+ * another admin, we also rotate the key (backup rotation).
+ * Disabled by default since the kicking admin already rotates.
+ */
+CYXCHAT_API void cyxchat_group_set_auto_rotate_on_kick(
+    cyxchat_group_ctx_t *ctx,
+    int enable
+);
+
+/**
+ * Get current auto-rotation settings
+ */
+CYXCHAT_API void cyxchat_group_get_auto_rotate_settings(
+    cyxchat_group_ctx_t *ctx,
+    int *on_leave_out,
+    int *on_kick_out
+);
+
+/* ============================================================
+ * Message Handling (Internal - called by chat module)
+ * ============================================================ */
+
+/**
+ * Handle incoming group message
+ * Called by chat module when group message (0x20-0x28) is received
+ *
+ * @param ctx       Group context
+ * @param from      Sender node ID
+ * @param type      Message type (CYXCHAT_MSG_GROUP_*)
+ * @param data      Raw message data
+ * @param len       Data length
+ */
+CYXCHAT_API void cyxchat_group_handle_message(
+    cyxchat_group_ctx_t *ctx,
+    const cyxwiz_node_id_t *from,
+    uint8_t type,
+    const uint8_t *data,
+    size_t len
 );
 
 /* ============================================================

@@ -7,9 +7,11 @@ import 'dns_provider.dart';
 import 'chat_provider.dart';
 import 'dht_provider.dart';
 import 'file_provider.dart';
+import 'group_ffi_provider.dart';
 import 'settings_provider.dart';
 import '../services/identity_service.dart';
 import '../services/chat_service.dart';
+import '../services/group_service.dart';
 import '../services/log_service.dart';
 import '../utils/node_id_utils.dart';
 import '../ffi/bindings.dart';
@@ -202,6 +204,19 @@ class ConnectionActions {
       log.info('Chat service ready for messaging', source: 'Network');
     }
 
+    // Initialize Group FFI provider for group chat (requires chat context)
+    final groupProvider = _ref.read(groupFFINotifierProvider);
+    final groupResult = await groupProvider.initialize(localId: nodeIdBytes);
+
+    if (!groupResult) {
+      log.warning('Group chat initialization failed', source: 'Network');
+      // Don't fail - group chat is optional
+    } else {
+      // Connect GroupService to GroupFFIProvider for group message handling
+      GroupService.instance.connectProvider(groupProvider);
+      log.info('Group chat service ready', source: 'Network');
+    }
+
     // Initialize DHT for decentralized peer discovery
     // DHT is created automatically with the connection, just initialize the provider
     final dhtProvider = _ref.read(dhtNotifierProvider);
@@ -259,9 +274,11 @@ class ConnectionActions {
 
   void disconnect() {
     ChatService.instance.disconnectProvider();
+    GroupService.instance.disconnectProvider();
     final fileProvider = _ref.read(fileNotifierProvider);
     fileProvider.onFileReceived = null;  // Clear callback before shutdown
     fileProvider.shutdown();
+    _ref.read(groupFFINotifierProvider).shutdown();
     _ref.read(chatNotifierProvider).shutdown();
     _ref.read(dnsNotifierProvider).shutdown();
     _ref.read(connectionNotifierProvider).shutdown();

@@ -85,9 +85,10 @@ extern "C" {
 #define CYXCHAT_MSG_GROUP_JOIN      0x22    /* Join notification */
 #define CYXCHAT_MSG_GROUP_LEAVE     0x23    /* Leave notification */
 #define CYXCHAT_MSG_GROUP_KICK      0x24    /* Kick notification */
-#define CYXCHAT_MSG_GROUP_KEY       0x25    /* Key update */
+#define CYXCHAT_MSG_GROUP_KEY       0x25    /* Key distribution */
 #define CYXCHAT_MSG_GROUP_INFO      0x26    /* Group info update */
 #define CYXCHAT_MSG_GROUP_ADMIN     0x27    /* Admin change */
+#define CYXCHAT_MSG_GROUP_KEY_ACK   0x28    /* Key distribution ACK */
 
 /* Presence (0x30-0x3F) */
 #define CYXCHAT_MSG_PRESENCE        0x30    /* Presence update */

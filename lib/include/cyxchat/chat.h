@@ -381,6 +381,19 @@ CYXCHAT_API void cyxchat_set_file_ctx(
     cyxchat_file_ctx_t *file_ctx
 );
 
+/* Forward declaration for group context */
+struct cyxchat_group_ctx;
+typedef struct cyxchat_group_ctx cyxchat_group_ctx_t;
+
+/**
+ * Register group context for automatic message routing
+ * Group messages (0x20-0x28) will be forwarded to the group module
+ */
+CYXCHAT_API void cyxchat_set_group_ctx(
+    cyxchat_ctx_t *ctx,
+    cyxchat_group_ctx_t *group_ctx
+);
+
 /**
  * Get the onion context (for modules that need direct access)
  */
