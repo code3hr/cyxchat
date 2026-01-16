@@ -48,7 +48,7 @@ jobs:
       - name: Build CyxWiz library
         run: |
           cd cyxwiz
-          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake -DCYXWIZ_BUILD_TOOLS=OFF
           cmake --build build --config Release
         shell: cmd
 
@@ -170,7 +170,7 @@ jobs:
       - name: Build CyxWiz library
         run: |
           cd cyxwiz
-          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCYXWIZ_BUILD_TOOLS=OFF
           cmake --build build --config Release
 
       - name: Build CyxChat library
@@ -249,6 +249,7 @@ jobs:
           SODIUM_PREFIX=$(brew --prefix libsodium)
           cmake -B build -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DCYXWIZ_BUILD_TOOLS=OFF \
             -DCYXWIZ_TRANSPORT_BLUETOOTH=OFF \
             -DCYXWIZ_TRANSPORT_LORA=OFF \
             "-DSODIUM_INCLUDE_DIR=${SODIUM_PREFIX}/include" \
@@ -394,6 +395,7 @@ jobs:
             -DANDROID_PLATFORM=android-${{ env.ANDROID_API_LEVEL }} \
             -DCMAKE_BUILD_TYPE=Release \
             -DCYXWIZ_BUILD_TESTS=OFF \
+            -DCYXWIZ_BUILD_TOOLS=OFF \
             -DCYXWIZ_HAS_CRYPTO=ON \
             -DCYXWIZ_TRANSPORT_BLUETOOTH=OFF \
             -DCYXWIZ_TRANSPORT_WIFI=OFF \
@@ -413,6 +415,7 @@ jobs:
             -DANDROID_PLATFORM=android-${{ env.ANDROID_API_LEVEL }} \
             -DCMAKE_BUILD_TYPE=Release \
             -DCYXWIZ_BUILD_TESTS=OFF \
+            -DCYXWIZ_BUILD_TOOLS=OFF \
             -DCYXWIZ_HAS_CRYPTO=ON \
             -DCYXWIZ_TRANSPORT_BLUETOOTH=OFF \
             -DCYXWIZ_TRANSPORT_WIFI=OFF \
@@ -432,6 +435,7 @@ jobs:
             -DANDROID_PLATFORM=android-${{ env.ANDROID_API_LEVEL }} \
             -DCMAKE_BUILD_TYPE=Release \
             -DCYXWIZ_BUILD_TESTS=OFF \
+            -DCYXWIZ_BUILD_TOOLS=OFF \
             -DCYXWIZ_HAS_CRYPTO=ON \
             -DCYXWIZ_TRANSPORT_BLUETOOTH=OFF \
             -DCYXWIZ_TRANSPORT_WIFI=OFF \
