@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../main.dart';
 import '../providers/conversation_provider.dart';
 import '../providers/network_provider.dart';
 import '../providers/settings_provider.dart';
+import '../providers/group_ffi_provider.dart';
+import '../services/group_service.dart';
 import '../models/models.dart';
 import 'chat_screen.dart';
 import 'group_chat_screen.dart';
@@ -223,13 +226,13 @@ class _ChatsTab extends ConsumerWidget {
       ),
       floatingActionButton: FloatingActionButton(
         heroTag: 'chats_fab',
-        onPressed: () => _showNewChatOptions(context),
+        onPressed: () => _showNewChatOptions(context, ref),
         child: const Icon(Icons.add_rounded),
       ),
     );
   }
 
-  void _showNewChatOptions(BuildContext context) {
+  void _showNewChatOptions(BuildContext context, WidgetRef ref) {
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
@@ -325,12 +328,178 @@ class _ChatsTab extends ConsumerWidget {
                   );
                 },
               ),
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16),
+                child: Divider(color: AppColors.bgDarkTertiary),
+              ),
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: AppColors.accentGreen.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    Icons.login_rounded,
+                    color: AppColors.accentGreen,
+                    size: 22,
+                  ),
+                ),
+                title: const Text(
+                  'Join Group',
+                  style: TextStyle(fontWeight: FontWeight.w500),
+                ),
+                subtitle: Text(
+                  'Join with group ID',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: AppColors.textDarkSecondary,
+                  ),
+                ),
+                onTap: () {
+                  Navigator.pop(context);
+                  _showJoinGroupDialog(context, ref);
+                },
+              ),
               const SizedBox(height: 16),
             ],
           ),
         );
       },
     );
+  }
+
+  void _showJoinGroupDialog(BuildContext context, WidgetRef ref) {
+    final controller = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Join Group'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Enter the group ID shared by the group admin:',
+              style: TextStyle(
+                color: AppColors.textDarkSecondary,
+                fontSize: 14,
+              ),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: controller,
+              decoration: InputDecoration(
+                hintText: 'Paste group ID',
+                suffixIcon: IconButton(
+                  icon: const Icon(Icons.paste),
+                  onPressed: () async {
+                    final data = await Clipboard.getData('text/plain');
+                    if (data?.text != null) {
+                      controller.text = data!.text!;
+                    }
+                  },
+                ),
+              ),
+              autofocus: true,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () async {
+              final groupId = controller.text.trim();
+              if (groupId.isEmpty) {
+                ScaffoldMessenger.of(dialogContext).showSnackBar(
+                  const SnackBar(content: Text('Please enter a group ID')),
+                );
+                return;
+              }
+              // Capture navigator and scaffold BEFORE closing dialog
+              final navigator = Navigator.of(context);
+              final scaffoldMessenger = ScaffoldMessenger.of(context);
+              Navigator.pop(dialogContext);
+              await _joinGroup(navigator, scaffoldMessenger, ref, groupId);
+            },
+            child: const Text('Join'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _joinGroup(NavigatorState navigator, ScaffoldMessengerState scaffoldMessenger, WidgetRef ref, String groupId) async {
+    // Check if we have a pending invite for this group
+    final pendingInvites = GroupService.instance.pendingInvites;
+    final invite = pendingInvites.where((i) => i.groupId == groupId).firstOrNull;
+
+    if (invite != null) {
+      // We have an invite, accept it
+      final success = await GroupService.instance.acceptInvite(groupId);
+      if (success) {
+        ref.invalidate(conversationsProvider);
+        scaffoldMessenger.showSnackBar(
+          SnackBar(content: Text('Joined "${invite.groupName}"!')),
+        );
+        // Navigate to the group chat
+        navigator.push(
+          MaterialPageRoute(
+            builder: (context) => GroupChatScreen(groupId: groupId),
+          ),
+        );
+      } else {
+        scaffoldMessenger.showSnackBar(
+          const SnackBar(content: Text('Failed to join group')),
+        );
+      }
+    } else {
+      // No invite found - show instructions using navigator's context
+      showDialog(
+        context: navigator.context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('No Invite Found'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'You need an invitation to join this group.',
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Ask the group admin to:',
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textDarkSecondary,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '1. Open the group\n'
+                '2. Go to Group Info\n'
+                '3. Tap "Add" in Members\n'
+                '4. Select your contact',
+                style: TextStyle(
+                  color: AppColors.textDarkSecondary,
+                  fontSize: 13,
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+    }
   }
 }
 

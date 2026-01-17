@@ -1,6 +1,72 @@
 import 'package:equatable/equatable.dart';
 import 'group_member.dart';
 
+/// Group type enum
+enum GroupType {
+  basic,      // Basic group: 200 members max, simpler features
+  supergroup; // Supergroup: unlimited members, full admin features
+
+  String get displayName {
+    switch (this) {
+      case GroupType.basic:
+        return 'Basic Group';
+      case GroupType.supergroup:
+        return 'Supergroup';
+    }
+  }
+
+  static GroupType fromInt(int value) {
+    if (value >= 0 && value < GroupType.values.length) {
+      return GroupType.values[value];
+    }
+    return GroupType.basic;
+  }
+}
+
+/// Who can add members setting
+enum WhoCanAddMembers {
+  everyone,   // All members can add members
+  adminsOnly; // Only admins can add members
+
+  String get displayName {
+    switch (this) {
+      case WhoCanAddMembers.everyone:
+        return 'Everyone';
+      case WhoCanAddMembers.adminsOnly:
+        return 'Admins Only';
+    }
+  }
+
+  static WhoCanAddMembers fromInt(int value) {
+    if (value >= 0 && value < WhoCanAddMembers.values.length) {
+      return WhoCanAddMembers.values[value];
+    }
+    return WhoCanAddMembers.everyone;
+  }
+}
+
+/// Who can change info setting
+enum WhoCanChangeInfo {
+  everyone,   // All members can edit group info
+  adminsOnly; // Only admins can edit group info
+
+  String get displayName {
+    switch (this) {
+      case WhoCanChangeInfo.everyone:
+        return 'Everyone';
+      case WhoCanChangeInfo.adminsOnly:
+        return 'Admins Only';
+    }
+  }
+
+  static WhoCanChangeInfo fromInt(int value) {
+    if (value >= 0 && value < WhoCanChangeInfo.values.length) {
+      return WhoCanChangeInfo.values[value];
+    }
+    return WhoCanChangeInfo.everyone;
+  }
+}
+
 /// Group chat entry
 class Group extends Equatable {
   final String id;
@@ -8,6 +74,12 @@ class Group extends Equatable {
   final String? description;
   final String creatorId;
   final int keyVersion;
+  final GroupType groupType;
+  final WhoCanAddMembers whoCanAddMembers;
+  final WhoCanChangeInfo whoCanChangeInfo;
+  final bool messageHistoryVisible;
+  final int slowModeSeconds;
+  final int maxMembers;
   final DateTime createdAt;
   final DateTime updatedAt;
   final List<GroupMember> members;
@@ -21,6 +93,12 @@ class Group extends Equatable {
     this.description,
     required this.creatorId,
     this.keyVersion = 1,
+    this.groupType = GroupType.basic,
+    this.whoCanAddMembers = WhoCanAddMembers.everyone,
+    this.whoCanChangeInfo = WhoCanChangeInfo.adminsOnly,
+    this.messageHistoryVisible = true,
+    this.slowModeSeconds = 0,
+    this.maxMembers = 200,
     required this.createdAt,
     required this.updatedAt,
     this.members = const [],
@@ -36,6 +114,12 @@ class Group extends Equatable {
       description: map['description'] as String?,
       creatorId: map['creator_id'] as String,
       keyVersion: map['key_version'] as int? ?? 1,
+      groupType: GroupType.fromInt(map['group_type'] as int? ?? 0),
+      whoCanAddMembers: WhoCanAddMembers.fromInt(map['who_can_add_members'] as int? ?? 0),
+      whoCanChangeInfo: WhoCanChangeInfo.fromInt(map['who_can_change_info'] as int? ?? 1),
+      messageHistoryVisible: (map['message_history_visible'] as int? ?? 1) == 1,
+      slowModeSeconds: map['slow_mode_seconds'] as int? ?? 0,
+      maxMembers: map['max_members'] as int? ?? 200,
       createdAt: DateTime.fromMillisecondsSinceEpoch(map['created_at'] as int),
       updatedAt: DateTime.fromMillisecondsSinceEpoch(map['updated_at'] as int),
       members: [],
@@ -47,6 +131,9 @@ class Group extends Equatable {
     );
   }
 
+  /// Convert to map for database insertion
+  /// Note: last_message_text, last_message_at, unread_count are computed from
+  /// messages table via JOIN query, not stored in groups table
   Map<String, dynamic> toMap() {
     return {
       'id': id,
@@ -54,13 +141,19 @@ class Group extends Equatable {
       'description': description,
       'creator_id': creatorId,
       'key_version': keyVersion,
+      'group_type': groupType.index,
+      'who_can_add_members': whoCanAddMembers.index,
+      'who_can_change_info': whoCanChangeInfo.index,
+      'message_history_visible': messageHistoryVisible ? 1 : 0,
+      'slow_mode_seconds': slowModeSeconds,
+      'max_members': maxMembers,
       'created_at': createdAt.millisecondsSinceEpoch,
       'updated_at': updatedAt.millisecondsSinceEpoch,
-      'last_message_text': lastMessageText,
-      'last_message_at': lastMessageAt?.millisecondsSinceEpoch,
-      'unread_count': unreadCount,
     };
   }
+
+  /// Check if this is a supergroup
+  bool get isSupergroup => groupType == GroupType.supergroup;
 
   int get memberCount => members.length;
 
@@ -105,6 +198,28 @@ class Group extends Equatable {
     }
   }
 
+  /// Check if a user can add members based on group settings
+  bool canUserAddMembers(String nodeId) {
+    if (isOwner(nodeId)) return true;
+    if (whoCanAddMembers == WhoCanAddMembers.everyone) return true;
+    return isAdmin(nodeId);
+  }
+
+  /// Check if a user can change group info based on group settings
+  bool canUserChangeInfo(String nodeId) {
+    if (isOwner(nodeId)) return true;
+    if (whoCanChangeInfo == WhoCanChangeInfo.everyone) return true;
+    return isAdmin(nodeId);
+  }
+
+  /// Format slow mode for display
+  String get slowModeDisplay {
+    if (slowModeSeconds == 0) return 'Off';
+    if (slowModeSeconds < 60) return '${slowModeSeconds}s';
+    if (slowModeSeconds < 3600) return '${slowModeSeconds ~/ 60}m';
+    return '${slowModeSeconds ~/ 3600}h';
+  }
+
   @override
   List<Object?> get props => [
         id,
@@ -112,6 +227,12 @@ class Group extends Equatable {
         description,
         creatorId,
         keyVersion,
+        groupType,
+        whoCanAddMembers,
+        whoCanChangeInfo,
+        messageHistoryVisible,
+        slowModeSeconds,
+        maxMembers,
         createdAt,
         updatedAt,
         members,
@@ -126,6 +247,12 @@ class Group extends Equatable {
     String? description,
     String? creatorId,
     int? keyVersion,
+    GroupType? groupType,
+    WhoCanAddMembers? whoCanAddMembers,
+    WhoCanChangeInfo? whoCanChangeInfo,
+    bool? messageHistoryVisible,
+    int? slowModeSeconds,
+    int? maxMembers,
     DateTime? createdAt,
     DateTime? updatedAt,
     List<GroupMember>? members,
@@ -139,6 +266,12 @@ class Group extends Equatable {
       description: description ?? this.description,
       creatorId: creatorId ?? this.creatorId,
       keyVersion: keyVersion ?? this.keyVersion,
+      groupType: groupType ?? this.groupType,
+      whoCanAddMembers: whoCanAddMembers ?? this.whoCanAddMembers,
+      whoCanChangeInfo: whoCanChangeInfo ?? this.whoCanChangeInfo,
+      messageHistoryVisible: messageHistoryVisible ?? this.messageHistoryVisible,
+      slowModeSeconds: slowModeSeconds ?? this.slowModeSeconds,
+      maxMembers: maxMembers ?? this.maxMembers,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       members: members ?? this.members,

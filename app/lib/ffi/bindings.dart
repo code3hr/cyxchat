@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io';
 import 'package:ffi/ffi.dart';
@@ -99,6 +100,66 @@ final class _FileMetaNative extends Struct {
 
   @Array(32)
   external Array<Uint8> fileHash;
+}
+
+/// Native invite link structure (matches cyxchat_invite_link_t)
+final class _InviteLinkNative extends Struct {
+  @Array(16)
+  external Array<Uint8> linkId;
+
+  @Array(8)
+  external Array<Uint8> groupId;
+
+  @Array(32)
+  external Array<Uint8> creatorId;
+
+  @Uint64()
+  external int createdAt;
+
+  @Uint64()
+  external int expiresAt;
+
+  @Uint32()
+  external int maxUses;
+
+  @Uint32()
+  external int useCount;
+
+  @Uint8()
+  external int isRevoked;
+
+  @Array(64)
+  external Array<Int8> name;
+}
+
+/// Native admin action structure (matches cyxchat_admin_action_t)
+final class _AdminActionNative extends Struct {
+  @Array(16)
+  external Array<Uint8> actionId;
+
+  @Array(8)
+  external Array<Uint8> groupId;
+
+  @Array(32)
+  external Array<Uint8> adminId;
+
+  @Int32()
+  external int actionType;
+
+  @Array(32)
+  external Array<Uint8> targetId;
+
+  @Array(8)
+  external Array<Uint8> targetMsgId;
+
+  @Uint64()
+  external int timestamp;
+
+  @Array(256)
+  external Array<Int8> oldValue;
+
+  @Array(256)
+  external Array<Int8> newValue;
 }
 
 /// FFI bindings for libcyxchat
@@ -1299,15 +1360,15 @@ class CyxChatBindings {
   ) {
     if (onGroupMessage == null) return;
 
-    final groupIdHex = _bytesToHex(groupId, 8);
-    final fromHex = _bytesToHex(from, 32);
+    final groupIdHex = _ptrToHex(groupId, 8);
+    final fromHex = _ptrToHex(from, 32);
 
     // Parse message structure: header(20) + group_id(8) + key_version(4) + text_len(2) + text + reply_to(8)
     // We need to extract msg_id from header and text
     final msgBytes = msg.cast<Uint8>();
 
     // Header: version(1) + type(1) + flags(2) + timestamp(8) + msg_id(8) = 20 bytes
-    final msgIdHex = _bytesToHex(msgBytes.elementAt(12), 8);
+    final msgIdHex = _ptrToHex(msgBytes.elementAt(12), 8);
 
     // After header(20) + group_id(8) + key_version(4) = offset 32
     final textLenLow = msgBytes[32];
@@ -1339,7 +1400,7 @@ class CyxChatBindings {
     // Then: group_id(8) + group_name(64) + key_version(4) + encrypted_key(72) + inviter(32) + inviter_pubkey(32)
 
     // Group ID at offset 20
-    final groupIdHex = _bytesToHex(inviteBytes.elementAt(20), 8);
+    final groupIdHex = _ptrToHex(inviteBytes.elementAt(20), 8);
 
     // Group name at offset 28 (null-terminated, max 64 bytes)
     final nameBytes = <int>[];
@@ -1351,7 +1412,7 @@ class CyxChatBindings {
     final groupName = String.fromCharCodes(nameBytes);
 
     // Inviter at offset 28 + 64 + 4 + 72 = 168
-    final inviterHex = _bytesToHex(inviteBytes.elementAt(168), 32);
+    final inviterHex = _ptrToHex(inviteBytes.elementAt(168), 32);
 
     // Store the invite pointer for accept/decline (we need to copy it since the original may be freed)
     // For now, we'll store the pointer - caller must accept/decline before it's freed
@@ -1384,8 +1445,8 @@ class CyxChatBindings {
     Pointer<Void> userData,
   ) {
     if (onMemberJoin == null) return;
-    final groupIdHex = _bytesToHex(groupId, 8);
-    final memberHex = _bytesToHex(member, 32);
+    final groupIdHex = _ptrToHex(groupId, 8);
+    final memberHex = _ptrToHex(member, 32);
     onMemberJoin!(groupIdHex, memberHex);
   }
 
@@ -1398,8 +1459,8 @@ class CyxChatBindings {
     Pointer<Void> userData,
   ) {
     if (onMemberLeave == null) return;
-    final groupIdHex = _bytesToHex(groupId, 8);
-    final memberHex = _bytesToHex(member, 32);
+    final groupIdHex = _ptrToHex(groupId, 8);
+    final memberHex = _ptrToHex(member, 32);
     onMemberLeave!(groupIdHex, memberHex, wasKicked != 0);
   }
 
@@ -1411,7 +1472,7 @@ class CyxChatBindings {
     Pointer<Void> userData,
   ) {
     if (onKeyUpdate == null) return;
-    final groupIdHex = _bytesToHex(groupId, 8);
+    final groupIdHex = _ptrToHex(groupId, 8);
     onKeyUpdate!(groupIdHex, newVersion);
   }
 
@@ -1425,8 +1486,1220 @@ class CyxChatBindings {
     Pointer<Void> userData,
   ) {
     if (onKeyDistComplete == null) return;
-    final groupIdHex = _bytesToHex(groupId, 8);
+    final groupIdHex = _ptrToHex(groupId, 8);
     onKeyDistComplete!(groupIdHex, newVersion, success != 0, failedCount);
+  }
+
+  // ============================================================
+  // Group Admin Permissions & Restrictions (Phase 1)
+  // ============================================================
+
+  /// Set admin permissions for a group member
+  int groupSetAdminPermissions(String groupIdHex, Pointer<Uint8> adminId, int permissions) {
+    if (_groupCtx == null) return CyxChatError.errNull;
+    final groupIdPtr = calloc<Uint8>(8);
+    try {
+      final parseResult = groupIdFromHex(groupIdHex, groupIdPtr);
+      if (parseResult != 0) return parseResult;
+      return _native.cyxchat_group_set_admin_permissions(
+        _groupCtx!,
+        groupIdPtr,
+        adminId,
+        permissions,
+      );
+    } finally {
+      calloc.free(groupIdPtr);
+    }
+  }
+
+  /// Get admin permissions for a group member
+  int groupGetAdminPermissions(String groupIdHex, Pointer<Uint8> adminId) {
+    if (_groupCtx == null) return 0;
+    final groupIdPtr = calloc<Uint8>(8);
+    try {
+      final parseResult = groupIdFromHex(groupIdHex, groupIdPtr);
+      if (parseResult != 0) return 0;
+      return _native.cyxchat_group_get_admin_permissions(
+        _groupCtx!,
+        groupIdPtr,
+        adminId,
+      );
+    } finally {
+      calloc.free(groupIdPtr);
+    }
+  }
+
+  /// Check if admin has a specific permission
+  bool groupHasPermission(String groupIdHex, String adminIdHex, int permission) {
+    if (_groupCtx == null) return false;
+    final groupIdPtr = calloc<Uint8>(8);
+    final adminIdPtr = calloc<Uint8>(32);
+    try {
+      final parseResult = groupIdFromHex(groupIdHex, groupIdPtr);
+      if (parseResult != 0) return false;
+
+      final adminBytes = _hexToBytes(adminIdHex);
+      for (int i = 0; i < 32 && i < adminBytes.length; i++) {
+        adminIdPtr[i] = adminBytes[i];
+      }
+
+      return _native.cyxchat_group_has_permission(
+        _groupCtx!,
+        groupIdPtr,
+        adminIdPtr,
+        permission,
+      ) != 0;
+    } finally {
+      calloc.free(groupIdPtr);
+      calloc.free(adminIdPtr);
+    }
+  }
+
+  /// Apply restrictions to a member
+  int groupRestrictMember(String groupIdHex, Pointer<Uint8> memberId, int restrictions, int untilMs) {
+    if (_groupCtx == null) return CyxChatError.errNull;
+    final groupIdPtr = calloc<Uint8>(8);
+    try {
+      final parseResult = groupIdFromHex(groupIdHex, groupIdPtr);
+      if (parseResult != 0) return parseResult;
+      return _native.cyxchat_group_restrict_member(
+        _groupCtx!,
+        groupIdPtr,
+        memberId,
+        restrictions,
+        untilMs,
+      );
+    } finally {
+      calloc.free(groupIdPtr);
+    }
+  }
+
+  /// Remove all restrictions from a member
+  int groupUnrestrictMember(String groupIdHex, Pointer<Uint8> memberId) {
+    if (_groupCtx == null) return CyxChatError.errNull;
+    final groupIdPtr = calloc<Uint8>(8);
+    try {
+      final parseResult = groupIdFromHex(groupIdHex, groupIdPtr);
+      if (parseResult != 0) return parseResult;
+      return _native.cyxchat_group_unrestrict_member(
+        _groupCtx!,
+        groupIdPtr,
+        memberId,
+      );
+    } finally {
+      calloc.free(groupIdPtr);
+    }
+  }
+
+  /// Get restrictions for a member
+  /// Returns (restrictions, untilMs) tuple
+  (int, int) groupGetMemberRestrictions(String groupIdHex, Pointer<Uint8> memberId) {
+    if (_groupCtx == null) return (0, 0);
+    final groupIdPtr = calloc<Uint8>(8);
+    final untilPtr = calloc<Uint64>(1);
+    try {
+      final parseResult = groupIdFromHex(groupIdHex, groupIdPtr);
+      if (parseResult != 0) return (0, 0);
+      final restrictions = _native.cyxchat_group_get_member_restrictions(
+        _groupCtx!,
+        groupIdPtr,
+        memberId,
+        untilPtr,
+      );
+      return (restrictions, untilPtr.value);
+    } finally {
+      calloc.free(groupIdPtr);
+      calloc.free(untilPtr);
+    }
+  }
+
+  /// Check if a member is currently muted
+  bool groupIsMemberMuted(String groupIdHex, Pointer<Uint8> memberId) {
+    if (_groupCtx == null) return false;
+    final groupIdPtr = calloc<Uint8>(8);
+    try {
+      final parseResult = groupIdFromHex(groupIdHex, groupIdPtr);
+      if (parseResult != 0) return false;
+      return _native.cyxchat_group_is_member_muted(
+        _groupCtx!,
+        groupIdPtr,
+        memberId,
+      ) != 0;
+    } finally {
+      calloc.free(groupIdPtr);
+    }
+  }
+
+  /// Set slow mode for the group (seconds between messages)
+  int groupSetSlowMode(String groupIdHex, int seconds) {
+    if (_groupCtx == null) return CyxChatError.errNull;
+    final groupIdPtr = calloc<Uint8>(8);
+    try {
+      final parseResult = groupIdFromHex(groupIdHex, groupIdPtr);
+      if (parseResult != 0) return parseResult;
+      return _native.cyxchat_group_set_slow_mode(
+        _groupCtx!,
+        groupIdPtr,
+        seconds,
+      );
+    } finally {
+      calloc.free(groupIdPtr);
+    }
+  }
+
+  /// Get slow mode setting for the group
+  int groupGetSlowMode(String groupIdHex) {
+    if (_groupCtx == null) return 0;
+    final groupIdPtr = calloc<Uint8>(8);
+    try {
+      final parseResult = groupIdFromHex(groupIdHex, groupIdPtr);
+      if (parseResult != 0) return 0;
+      return _native.cyxchat_group_get_slow_mode(
+        _groupCtx!,
+        groupIdPtr,
+      );
+    } finally {
+      calloc.free(groupIdPtr);
+    }
+  }
+
+  /// Set who can add members to the group
+  int groupSetWhoCanAdd(String groupIdHex, int setting) {
+    if (_groupCtx == null) return CyxChatError.errNull;
+    final groupIdPtr = calloc<Uint8>(8);
+    try {
+      final parseResult = groupIdFromHex(groupIdHex, groupIdPtr);
+      if (parseResult != 0) return parseResult;
+      return _native.cyxchat_group_set_who_can_add(
+        _groupCtx!,
+        groupIdPtr,
+        setting,
+      );
+    } finally {
+      calloc.free(groupIdPtr);
+    }
+  }
+
+  /// Set who can edit group info
+  int groupSetWhoCanEdit(String groupIdHex, int setting) {
+    if (_groupCtx == null) return CyxChatError.errNull;
+    final groupIdPtr = calloc<Uint8>(8);
+    try {
+      final parseResult = groupIdFromHex(groupIdHex, groupIdPtr);
+      if (parseResult != 0) return parseResult;
+      return _native.cyxchat_group_set_who_can_edit(
+        _groupCtx!,
+        groupIdPtr,
+        setting,
+      );
+    } finally {
+      calloc.free(groupIdPtr);
+    }
+  }
+
+  /// Get group type (basic or supergroup)
+  int groupGetType(String groupIdHex) {
+    if (_groupCtx == null) return 0;
+    final groupIdPtr = calloc<Uint8>(8);
+    try {
+      final parseResult = groupIdFromHex(groupIdHex, groupIdPtr);
+      if (parseResult != 0) return 0;
+      return _native.cyxchat_group_get_type(
+        _groupCtx!,
+        groupIdPtr,
+      );
+    } finally {
+      calloc.free(groupIdPtr);
+    }
+  }
+
+  /// Upgrade a basic group to supergroup
+  int groupUpgradeToSupergroup(String groupIdHex) {
+    if (_groupCtx == null) return CyxChatError.errNull;
+    final groupIdPtr = calloc<Uint8>(8);
+    try {
+      final parseResult = groupIdFromHex(groupIdHex, groupIdPtr);
+      if (parseResult != 0) return parseResult;
+      return _native.cyxchat_group_upgrade_to_supergroup(
+        _groupCtx!,
+        groupIdPtr,
+      );
+    } finally {
+      calloc.free(groupIdPtr);
+    }
+  }
+
+  // ============================================================
+  // Phase 2: Message Actions (Edit, Delete, Pin, Forward)
+  // ============================================================
+
+  /// Edit a group message
+  int groupEditMessage(String groupIdHex, String msgIdHex, String newText) {
+    if (_groupCtx == null) return CyxChatError.errNull;
+    final groupIdPtr = calloc<Uint8>(8);
+    final msgIdPtr = calloc<Uint8>(8);
+    try {
+      final parseResult = groupIdFromHex(groupIdHex, groupIdPtr);
+      if (parseResult != 0) return parseResult;
+
+      // Parse message ID from hex
+      final msgIdBytes = _hexToBytes(msgIdHex);
+      if (msgIdBytes.length != 8) return CyxChatError.errInvalid;
+      for (int i = 0; i < 8; i++) {
+        msgIdPtr[i] = msgIdBytes[i];
+      }
+
+      final textBytes = utf8.encode(newText);
+      final textPtr = calloc<Uint8>(textBytes.length);
+      try {
+        for (int i = 0; i < textBytes.length; i++) {
+          textPtr[i] = textBytes[i];
+        }
+        return _native.cyxchat_group_edit_message(
+          _groupCtx!,
+          groupIdPtr,
+          msgIdPtr,
+          textPtr.cast(),
+          textBytes.length,
+        );
+      } finally {
+        calloc.free(textPtr);
+      }
+    } finally {
+      calloc.free(groupIdPtr);
+      calloc.free(msgIdPtr);
+    }
+  }
+
+  /// Delete a group message
+  int groupDeleteMessage(String groupIdHex, String msgIdHex, bool deleteForAll) {
+    if (_groupCtx == null) return CyxChatError.errNull;
+    final groupIdPtr = calloc<Uint8>(8);
+    final msgIdPtr = calloc<Uint8>(8);
+    try {
+      final parseResult = groupIdFromHex(groupIdHex, groupIdPtr);
+      if (parseResult != 0) return parseResult;
+
+      final msgIdBytes = _hexToBytes(msgIdHex);
+      if (msgIdBytes.length != 8) return CyxChatError.errInvalid;
+      for (int i = 0; i < 8; i++) {
+        msgIdPtr[i] = msgIdBytes[i];
+      }
+
+      return _native.cyxchat_group_delete_message(
+        _groupCtx!,
+        groupIdPtr,
+        msgIdPtr,
+        deleteForAll ? 1 : 0,
+      );
+    } finally {
+      calloc.free(groupIdPtr);
+      calloc.free(msgIdPtr);
+    }
+  }
+
+  /// Pin a message in group
+  int groupPinMessage(String groupIdHex, String msgIdHex, {bool notify = true}) {
+    if (_groupCtx == null) return CyxChatError.errNull;
+    final groupIdPtr = calloc<Uint8>(8);
+    final msgIdPtr = calloc<Uint8>(8);
+    try {
+      final parseResult = groupIdFromHex(groupIdHex, groupIdPtr);
+      if (parseResult != 0) return parseResult;
+
+      final msgIdBytes = _hexToBytes(msgIdHex);
+      if (msgIdBytes.length != 8) return CyxChatError.errInvalid;
+      for (int i = 0; i < 8; i++) {
+        msgIdPtr[i] = msgIdBytes[i];
+      }
+
+      return _native.cyxchat_group_pin_message(
+        _groupCtx!,
+        groupIdPtr,
+        msgIdPtr,
+        notify ? 1 : 0,
+      );
+    } finally {
+      calloc.free(groupIdPtr);
+      calloc.free(msgIdPtr);
+    }
+  }
+
+  /// Unpin a message from group
+  int groupUnpinMessage(String groupIdHex, String msgIdHex) {
+    if (_groupCtx == null) return CyxChatError.errNull;
+    final groupIdPtr = calloc<Uint8>(8);
+    final msgIdPtr = calloc<Uint8>(8);
+    try {
+      final parseResult = groupIdFromHex(groupIdHex, groupIdPtr);
+      if (parseResult != 0) return parseResult;
+
+      final msgIdBytes = _hexToBytes(msgIdHex);
+      if (msgIdBytes.length != 8) return CyxChatError.errInvalid;
+      for (int i = 0; i < 8; i++) {
+        msgIdPtr[i] = msgIdBytes[i];
+      }
+
+      return _native.cyxchat_group_unpin_message(
+        _groupCtx!,
+        groupIdPtr,
+        msgIdPtr,
+      );
+    } finally {
+      calloc.free(groupIdPtr);
+      calloc.free(msgIdPtr);
+    }
+  }
+
+  /// Unpin all messages in group
+  int groupUnpinAll(String groupIdHex) {
+    if (_groupCtx == null) return CyxChatError.errNull;
+    final groupIdPtr = calloc<Uint8>(8);
+    try {
+      final parseResult = groupIdFromHex(groupIdHex, groupIdPtr);
+      if (parseResult != 0) return parseResult;
+      return _native.cyxchat_group_unpin_all(_groupCtx!, groupIdPtr);
+    } finally {
+      calloc.free(groupIdPtr);
+    }
+  }
+
+  /// Get count of pinned messages in group
+  int groupGetPinnedCount(String groupIdHex) {
+    if (_groupCtx == null) return 0;
+    final groupIdPtr = calloc<Uint8>(8);
+    try {
+      final parseResult = groupIdFromHex(groupIdHex, groupIdPtr);
+      if (parseResult != 0) return 0;
+      return _native.cyxchat_group_get_pinned_count(_groupCtx!, groupIdPtr);
+    } finally {
+      calloc.free(groupIdPtr);
+    }
+  }
+
+  /// Get list of pinned message IDs in group
+  List<String> groupGetPinnedMessages(String groupIdHex, {int maxCount = 50}) {
+    if (_groupCtx == null) return [];
+    final groupIdPtr = calloc<Uint8>(8);
+    final msgIdsPtr = calloc<Uint8>(8 * maxCount);
+    try {
+      final parseResult = groupIdFromHex(groupIdHex, groupIdPtr);
+      if (parseResult != 0) return [];
+
+      final count = _native.cyxchat_group_get_pinned_messages(
+        _groupCtx!,
+        groupIdPtr,
+        msgIdsPtr,
+        maxCount,
+      );
+
+      final result = <String>[];
+      for (int i = 0; i < count; i++) {
+        final msgIdBytes = <int>[];
+        for (int j = 0; j < 8; j++) {
+          msgIdBytes.add(msgIdsPtr[i * 8 + j]);
+        }
+        result.add(_bytesToHex(msgIdBytes));
+      }
+      return result;
+    } finally {
+      calloc.free(groupIdPtr);
+      calloc.free(msgIdsPtr);
+    }
+  }
+
+  /// Check if a message is pinned
+  bool groupIsMessagePinned(String groupIdHex, String msgIdHex) {
+    if (_groupCtx == null) return false;
+    final groupIdPtr = calloc<Uint8>(8);
+    final msgIdPtr = calloc<Uint8>(8);
+    try {
+      final parseResult = groupIdFromHex(groupIdHex, groupIdPtr);
+      if (parseResult != 0) return false;
+
+      final msgIdBytes = _hexToBytes(msgIdHex);
+      if (msgIdBytes.length != 8) return false;
+      for (int i = 0; i < 8; i++) {
+        msgIdPtr[i] = msgIdBytes[i];
+      }
+
+      return _native.cyxchat_group_is_message_pinned(
+        _groupCtx!,
+        groupIdPtr,
+        msgIdPtr,
+      ) != 0;
+    } finally {
+      calloc.free(groupIdPtr);
+      calloc.free(msgIdPtr);
+    }
+  }
+
+  /// Forward a message to another group
+  /// Returns [error, newMsgIdHex] tuple
+  (int, String?) groupForwardMessage(
+    String fromGroupIdHex,
+    String toGroupIdHex,
+    String msgIdHex,
+  ) {
+    if (_groupCtx == null) return (CyxChatError.errNull, null);
+    final fromGroupIdPtr = calloc<Uint8>(8);
+    final toGroupIdPtr = calloc<Uint8>(8);
+    final msgIdPtr = calloc<Uint8>(8);
+    final newMsgIdPtr = calloc<Uint8>(8);
+    try {
+      var parseResult = groupIdFromHex(fromGroupIdHex, fromGroupIdPtr);
+      if (parseResult != 0) return (parseResult, null);
+
+      parseResult = groupIdFromHex(toGroupIdHex, toGroupIdPtr);
+      if (parseResult != 0) return (parseResult, null);
+
+      final msgIdBytes = _hexToBytes(msgIdHex);
+      if (msgIdBytes.length != 8) return (CyxChatError.errInvalid, null);
+      for (int i = 0; i < 8; i++) {
+        msgIdPtr[i] = msgIdBytes[i];
+      }
+
+      final result = _native.cyxchat_group_forward_message(
+        _groupCtx!,
+        fromGroupIdPtr,
+        toGroupIdPtr,
+        msgIdPtr,
+        newMsgIdPtr,
+      );
+
+      if (result == 0) {
+        final newMsgIdBytes = <int>[];
+        for (int i = 0; i < 8; i++) {
+          newMsgIdBytes.add(newMsgIdPtr[i]);
+        }
+        return (0, _bytesToHex(newMsgIdBytes));
+      }
+      return (result, null);
+    } finally {
+      calloc.free(fromGroupIdPtr);
+      calloc.free(toGroupIdPtr);
+      calloc.free(msgIdPtr);
+      calloc.free(newMsgIdPtr);
+    }
+  }
+
+  /// Helper to convert hex string to bytes
+  List<int> _hexToBytes(String hex) {
+    final result = <int>[];
+    for (int i = 0; i < hex.length; i += 2) {
+      result.add(int.parse(hex.substring(i, i + 2), radix: 16));
+    }
+    return result;
+  }
+
+  /// Helper to convert bytes to hex string
+  String _bytesToHex(List<int> bytes) {
+    return bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+  }
+
+  /// Helper to convert pointer bytes to hex string
+  String _ptrToHex(Pointer<Uint8> ptr, int len) {
+    final bytes = <int>[];
+    for (int i = 0; i < len; i++) {
+      bytes.add(ptr[i]);
+    }
+    return _bytesToHex(bytes);
+  }
+
+  // ============================================================
+  // Invite Links Module (Phase 3)
+  // ============================================================
+
+  /// Create an invite link for a group
+  /// Returns (error, linkIdHex) tuple
+  (int, String?) groupCreateInviteLink(
+    String groupIdHex, {
+    String? name,
+    int? expiresAtMs,
+    int? maxUses,
+  }) {
+    if (_groupCtx == null) return (CyxChatError.errNull, null);
+    final groupIdPtr = calloc<Uint8>(8);
+    final namePtr = name != null ? name.toNativeUtf8() : nullptr;
+    final linkOut = calloc<_InviteLinkNative>();
+    try {
+      final parseResult = groupIdFromHex(groupIdHex, groupIdPtr);
+      if (parseResult != 0) return (parseResult, null);
+
+      final result = _native.cyxchat_group_create_invite_link(
+        _groupCtx!,
+        groupIdPtr,
+        namePtr.cast(),
+        expiresAtMs ?? 0,
+        maxUses ?? 0,
+        linkOut.cast(),
+      );
+
+      if (result == 0) {
+        final linkIdBytes = <int>[];
+        for (int i = 0; i < 16; i++) {
+          linkIdBytes.add(linkOut.ref.linkId[i]);
+        }
+        return (0, _bytesToHex(linkIdBytes));
+      }
+      return (result, null);
+    } finally {
+      calloc.free(groupIdPtr);
+      if (namePtr != nullptr) calloc.free(namePtr);
+      calloc.free(linkOut);
+    }
+  }
+
+  /// Revoke an invite link
+  int groupRevokeInviteLink(String groupIdHex, String linkIdHex) {
+    if (_groupCtx == null) return CyxChatError.errNull;
+    final groupIdPtr = calloc<Uint8>(8);
+    final linkIdPtr = calloc<Uint8>(16);
+    try {
+      final parseResult = groupIdFromHex(groupIdHex, groupIdPtr);
+      if (parseResult != 0) return parseResult;
+
+      final linkIdBytes = _hexToBytes(linkIdHex);
+      if (linkIdBytes.length != 16) return CyxChatError.errInvalid;
+      for (int i = 0; i < 16; i++) {
+        linkIdPtr[i] = linkIdBytes[i];
+      }
+
+      return _native.cyxchat_group_revoke_invite_link(
+        _groupCtx!,
+        groupIdPtr,
+        linkIdPtr,
+      );
+    } finally {
+      calloc.free(groupIdPtr);
+      calloc.free(linkIdPtr);
+    }
+  }
+
+  /// Join a group via invite link
+  int groupJoinViaLink(String groupIdHex, String linkIdHex) {
+    if (_groupCtx == null) return CyxChatError.errNull;
+    final groupIdPtr = calloc<Uint8>(8);
+    final linkIdPtr = calloc<Uint8>(16);
+    try {
+      final parseResult = groupIdFromHex(groupIdHex, groupIdPtr);
+      if (parseResult != 0) return parseResult;
+
+      final linkIdBytes = _hexToBytes(linkIdHex);
+      if (linkIdBytes.length != 16) return CyxChatError.errInvalid;
+      for (int i = 0; i < 16; i++) {
+        linkIdPtr[i] = linkIdBytes[i];
+      }
+
+      return _native.cyxchat_group_join_via_link(
+        _groupCtx!,
+        groupIdPtr,
+        linkIdPtr,
+      );
+    } finally {
+      calloc.free(groupIdPtr);
+      calloc.free(linkIdPtr);
+    }
+  }
+
+  /// Get all invite links for a group
+  /// Returns list of (linkIdHex, creatorIdHex, createdAt, expiresAt, maxUses, useCount, isRevoked, name)
+  List<Map<String, dynamic>> groupGetInviteLinks(String groupIdHex, {int maxLinks = 20}) {
+    if (_groupCtx == null) return [];
+    final groupIdPtr = calloc<Uint8>(8);
+    final linksOut = calloc<_InviteLinkNative>(maxLinks);
+    final countOut = calloc<Size>();
+    try {
+      final parseResult = groupIdFromHex(groupIdHex, groupIdPtr);
+      if (parseResult != 0) return [];
+
+      final result = _native.cyxchat_group_get_invite_links(
+        _groupCtx!,
+        groupIdPtr,
+        linksOut.cast(),
+        maxLinks,
+        countOut,
+      );
+
+      if (result != 0) return [];
+
+      final links = <Map<String, dynamic>>[];
+      final count = countOut.value;
+      for (int i = 0; i < count; i++) {
+        final link = linksOut[i];
+
+        // Extract link ID
+        final linkIdBytes = <int>[];
+        for (int j = 0; j < 16; j++) {
+          linkIdBytes.add(link.linkId[j]);
+        }
+
+        // Extract creator ID
+        final creatorIdBytes = <int>[];
+        for (int j = 0; j < 32; j++) {
+          creatorIdBytes.add(link.creatorId[j]);
+        }
+
+        // Extract name
+        final nameBytes = <int>[];
+        for (int j = 0; j < 64 && link.name[j] != 0; j++) {
+          nameBytes.add(link.name[j]);
+        }
+        final name = nameBytes.isEmpty ? null : String.fromCharCodes(nameBytes);
+
+        links.add({
+          'id': _bytesToHex(linkIdBytes),
+          'groupId': groupIdHex,
+          'createdBy': _bytesToHex(creatorIdBytes),
+          'createdAt': link.createdAt,
+          'expiresAt': link.expiresAt,
+          'maxUses': link.maxUses,
+          'useCount': link.useCount,
+          'isRevoked': link.isRevoked != 0,
+          'name': name,
+        });
+      }
+      return links;
+    } finally {
+      calloc.free(groupIdPtr);
+      calloc.free(linksOut);
+      calloc.free(countOut);
+    }
+  }
+
+  /// Get a specific invite link
+  /// Returns link data map or null if not found
+  Map<String, dynamic>? groupGetInviteLink(String groupIdHex, String linkIdHex) {
+    if (_groupCtx == null) return null;
+    final groupIdPtr = calloc<Uint8>(8);
+    final linkIdPtr = calloc<Uint8>(16);
+    final linkOut = calloc<_InviteLinkNative>();
+    try {
+      final parseResult = groupIdFromHex(groupIdHex, groupIdPtr);
+      if (parseResult != 0) return null;
+
+      final linkIdBytes = _hexToBytes(linkIdHex);
+      if (linkIdBytes.length != 16) return null;
+      for (int i = 0; i < 16; i++) {
+        linkIdPtr[i] = linkIdBytes[i];
+      }
+
+      final result = _native.cyxchat_group_get_invite_link(
+        _groupCtx!,
+        groupIdPtr,
+        linkIdPtr,
+        linkOut.cast(),
+      );
+
+      if (result != 0) return null;
+
+      // Extract creator ID
+      final creatorIdBytes = <int>[];
+      for (int j = 0; j < 32; j++) {
+        creatorIdBytes.add(linkOut.ref.creatorId[j]);
+      }
+
+      // Extract name
+      final nameBytes = <int>[];
+      for (int j = 0; j < 64 && linkOut.ref.name[j] != 0; j++) {
+        nameBytes.add(linkOut.ref.name[j]);
+      }
+      final name = nameBytes.isEmpty ? null : String.fromCharCodes(nameBytes);
+
+      return {
+        'id': linkIdHex,
+        'groupId': groupIdHex,
+        'createdBy': _bytesToHex(creatorIdBytes),
+        'createdAt': linkOut.ref.createdAt,
+        'expiresAt': linkOut.ref.expiresAt,
+        'maxUses': linkOut.ref.maxUses,
+        'useCount': linkOut.ref.useCount,
+        'isRevoked': linkOut.ref.isRevoked != 0,
+        'name': name,
+      };
+    } finally {
+      calloc.free(groupIdPtr);
+      calloc.free(linkIdPtr);
+      calloc.free(linkOut);
+    }
+  }
+
+  /// Generate URL for an invite link (static helper)
+  String groupInviteLinkToUrl(String groupIdHex, String linkIdHex) {
+    return 'cyxchat://join/$groupIdHex/$linkIdHex';
+  }
+
+  /// Parse an invite URL into group ID and link ID
+  /// Returns (groupIdHex, linkIdHex) or null if invalid
+  (String, String)? groupParseInviteUrl(String url) {
+    // Supported formats:
+    // cyxchat://join/<group_id>/<link_id>
+    // https://cyxchat.app/join/<group_id>/<link_id>
+    final patterns = [
+      RegExp(r'^cyxchat://join/([a-fA-F0-9]+)/([a-fA-F0-9]+)$'),
+      RegExp(r'^https?://cyxchat\.app/join/([a-fA-F0-9]+)/([a-fA-F0-9]+)$'),
+    ];
+
+    for (final pattern in patterns) {
+      final match = pattern.firstMatch(url);
+      if (match != null) {
+        final groupId = match.group(1)!;
+        final linkId = match.group(2)!;
+        // Validate lengths
+        if (groupId.length == 16 && linkId.length == 32) {
+          return (groupId, linkId);
+        }
+      }
+    }
+    return null;
+  }
+
+  // ============================================================
+  // Admin Action Log Module (Phase 4)
+  // ============================================================
+
+  /// Log an admin action
+  /// Returns (error, actionIdHex) tuple
+  (int, String?) groupLogAdminAction(
+    String groupIdHex,
+    int actionType, {
+    String? targetIdHex,
+    String? targetMsgIdHex,
+    String? oldValue,
+    String? newValue,
+  }) {
+    if (_groupCtx == null) return (CyxChatError.errNull, null);
+    final groupIdPtr = calloc<Uint8>(8);
+    final targetIdPtr = targetIdHex != null ? calloc<Uint8>(32) : nullptr;
+    final msgIdPtr = targetMsgIdHex != null ? calloc<Uint8>(8) : nullptr;
+    final oldValuePtr = oldValue != null ? oldValue.toNativeUtf8() : nullptr;
+    final newValuePtr = newValue != null ? newValue.toNativeUtf8() : nullptr;
+    final actionOut = calloc<_AdminActionNative>();
+    try {
+      final parseResult = groupIdFromHex(groupIdHex, groupIdPtr);
+      if (parseResult != 0) return (parseResult, null);
+
+      if (targetIdHex != null) {
+        final targetBytes = _hexToBytes(targetIdHex);
+        for (int i = 0; i < 32 && i < targetBytes.length; i++) {
+          targetIdPtr[i] = targetBytes[i];
+        }
+      }
+
+      if (targetMsgIdHex != null) {
+        final msgBytes = _hexToBytes(targetMsgIdHex);
+        for (int i = 0; i < 8 && i < msgBytes.length; i++) {
+          msgIdPtr[i] = msgBytes[i];
+        }
+      }
+
+      final result = _native.cyxchat_group_log_admin_action(
+        _groupCtx!,
+        groupIdPtr,
+        actionType,
+        targetIdPtr,
+        msgIdPtr,
+        oldValuePtr.cast(),
+        newValuePtr.cast(),
+        actionOut.cast(),
+      );
+
+      if (result == 0) {
+        final actionIdBytes = <int>[];
+        for (int i = 0; i < 16; i++) {
+          actionIdBytes.add(actionOut.ref.actionId[i]);
+        }
+        return (0, _bytesToHex(actionIdBytes));
+      }
+      return (result, null);
+    } finally {
+      calloc.free(groupIdPtr);
+      if (targetIdPtr != nullptr) calloc.free(targetIdPtr);
+      if (msgIdPtr != nullptr) calloc.free(msgIdPtr);
+      if (oldValuePtr != nullptr) calloc.free(oldValuePtr);
+      if (newValuePtr != nullptr) calloc.free(newValuePtr);
+      calloc.free(actionOut);
+    }
+  }
+
+  /// Get admin actions for a group
+  /// Returns list of action data maps
+  List<Map<String, dynamic>> groupGetAdminActions(
+    String groupIdHex, {
+    int maxActions = 50,
+    int offset = 0,
+  }) {
+    if (_groupCtx == null) return [];
+    final groupIdPtr = calloc<Uint8>(8);
+    final actionsOut = calloc<_AdminActionNative>(maxActions);
+    final countOut = calloc<Size>();
+    try {
+      final parseResult = groupIdFromHex(groupIdHex, groupIdPtr);
+      if (parseResult != 0) return [];
+
+      final result = _native.cyxchat_group_get_admin_actions(
+        _groupCtx!,
+        groupIdPtr,
+        actionsOut.cast(),
+        maxActions,
+        offset,
+        countOut,
+      );
+
+      if (result != 0) return [];
+
+      final count = countOut.value;
+      final actions = <Map<String, dynamic>>[];
+      for (int i = 0; i < count; i++) {
+        final action = actionsOut[i];
+        actions.add(_adminActionToMap(action));
+      }
+      return actions;
+    } finally {
+      calloc.free(groupIdPtr);
+      calloc.free(actionsOut);
+      calloc.free(countOut);
+    }
+  }
+
+  /// Get admin actions by a specific admin
+  List<Map<String, dynamic>> groupGetAdminActionsByAdmin(
+    String groupIdHex,
+    String adminIdHex, {
+    int maxActions = 50,
+  }) {
+    if (_groupCtx == null) return [];
+    final groupIdPtr = calloc<Uint8>(8);
+    final adminIdPtr = calloc<Uint8>(32);
+    final actionsOut = calloc<_AdminActionNative>(maxActions);
+    final countOut = calloc<Size>();
+    try {
+      final parseResult = groupIdFromHex(groupIdHex, groupIdPtr);
+      if (parseResult != 0) return [];
+
+      final adminBytes = _hexToBytes(adminIdHex);
+      for (int i = 0; i < 32 && i < adminBytes.length; i++) {
+        adminIdPtr[i] = adminBytes[i];
+      }
+
+      final result = _native.cyxchat_group_get_admin_actions_by_admin(
+        _groupCtx!,
+        groupIdPtr,
+        adminIdPtr,
+        actionsOut.cast(),
+        maxActions,
+        countOut,
+      );
+
+      if (result != 0) return [];
+
+      final count = countOut.value;
+      final actions = <Map<String, dynamic>>[];
+      for (int i = 0; i < count; i++) {
+        final action = actionsOut[i];
+        actions.add(_adminActionToMap(action));
+      }
+      return actions;
+    } finally {
+      calloc.free(groupIdPtr);
+      calloc.free(adminIdPtr);
+      calloc.free(actionsOut);
+      calloc.free(countOut);
+    }
+  }
+
+  /// Get count of admin actions for a group
+  int groupGetAdminActionCount(String groupIdHex) {
+    if (_groupCtx == null) return 0;
+    final groupIdPtr = calloc<Uint8>(8);
+    try {
+      final parseResult = groupIdFromHex(groupIdHex, groupIdPtr);
+      if (parseResult != 0) return 0;
+
+      return _native.cyxchat_group_get_admin_action_count(
+        _groupCtx!,
+        groupIdPtr,
+      );
+    } finally {
+      calloc.free(groupIdPtr);
+    }
+  }
+
+  /// Helper to convert native admin action to map
+  Map<String, dynamic> _adminActionToMap(_AdminActionNative action) {
+    // Extract action ID
+    final actionIdBytes = <int>[];
+    for (int i = 0; i < 16; i++) {
+      actionIdBytes.add(action.actionId[i]);
+    }
+
+    // Extract group ID
+    final groupIdBytes = <int>[];
+    for (int i = 0; i < 8; i++) {
+      groupIdBytes.add(action.groupId[i]);
+    }
+
+    // Extract admin ID
+    final adminIdBytes = <int>[];
+    for (int i = 0; i < 32; i++) {
+      adminIdBytes.add(action.adminId[i]);
+    }
+
+    // Extract target ID
+    final targetIdBytes = <int>[];
+    bool hasTarget = false;
+    for (int i = 0; i < 32; i++) {
+      targetIdBytes.add(action.targetId[i]);
+      if (action.targetId[i] != 0) hasTarget = true;
+    }
+
+    // Extract target message ID
+    final targetMsgBytes = <int>[];
+    bool hasTargetMsg = false;
+    for (int i = 0; i < 8; i++) {
+      targetMsgBytes.add(action.targetMsgId[i]);
+      if (action.targetMsgId[i] != 0) hasTargetMsg = true;
+    }
+
+    // Extract old value
+    final oldValueBytes = <int>[];
+    for (int i = 0; i < 256 && action.oldValue[i] != 0; i++) {
+      oldValueBytes.add(action.oldValue[i]);
+    }
+    final oldValue = oldValueBytes.isEmpty ? null : String.fromCharCodes(oldValueBytes);
+
+    // Extract new value
+    final newValueBytes = <int>[];
+    for (int i = 0; i < 256 && action.newValue[i] != 0; i++) {
+      newValueBytes.add(action.newValue[i]);
+    }
+    final newValue = newValueBytes.isEmpty ? null : String.fromCharCodes(newValueBytes);
+
+    return {
+      'id': _bytesToHex(actionIdBytes),
+      'group_id': _bytesToHex(groupIdBytes),
+      'admin_id': _bytesToHex(adminIdBytes),
+      'action_type': action.actionType,
+      'target_id': hasTarget ? _bytesToHex(targetIdBytes) : null,
+      'target_message_id': hasTargetMsg ? _bytesToHex(targetMsgBytes) : null,
+      'old_value': oldValue,
+      'new_value': newValue,
+      'timestamp': action.timestamp,
+    };
+  }
+
+  // ============================================================
+  // Group Media Module (Phase 5)
+  // ============================================================
+
+  /// Send a file to a group
+  /// Returns (error code, message ID hex, file ID hex) or null on error
+  ({int error, String? msgId, String? fileId}) groupSendFile(
+    String groupIdHex,
+    String filename,
+    List<int> fileData,
+    List<int>? thumbnailData,
+  ) {
+    if (_groupCtx == null) {
+      return (error: CyxChatError.errNull, msgId: null, fileId: null);
+    }
+
+    final groupIdPtr = calloc<Uint8>(8);
+    final filenamePtr = filename.toNativeUtf8();
+    final dataPtr = calloc<Uint8>(fileData.length);
+    final thumbnailPtr = thumbnailData != null
+        ? calloc<Uint8>(thumbnailData.length)
+        : nullptr;
+    final msgIdOut = calloc<Uint8>(8);
+    final fileIdOut = calloc<Uint8>(8);
+
+    try {
+      final parseResult = groupIdFromHex(groupIdHex, groupIdPtr);
+      if (parseResult != 0) {
+        return (error: CyxChatError.errInvalid, msgId: null, fileId: null);
+      }
+
+      // Copy file data
+      for (int i = 0; i < fileData.length; i++) {
+        dataPtr[i] = fileData[i];
+      }
+
+      // Copy thumbnail data if present
+      if (thumbnailData != null && thumbnailPtr != nullptr) {
+        for (int i = 0; i < thumbnailData.length; i++) {
+          thumbnailPtr[i] = thumbnailData[i];
+        }
+      }
+
+      final result = _native.cyxchat_group_send_file(
+        _groupCtx!,
+        groupIdPtr,
+        filenamePtr.cast(),
+        dataPtr,
+        fileData.length,
+        thumbnailPtr,
+        thumbnailData?.length ?? 0,
+        fileIdOut,
+        msgIdOut,
+      );
+
+      if (result != 0) {
+        return (error: result, msgId: null, fileId: null);
+      }
+
+      // Extract IDs
+      final msgIdBytes = <int>[];
+      final fileIdBytes = <int>[];
+      for (int i = 0; i < 8; i++) {
+        msgIdBytes.add(msgIdOut[i]);
+        fileIdBytes.add(fileIdOut[i]);
+      }
+
+      return (
+        error: 0,
+        msgId: _bytesToHex(msgIdBytes),
+        fileId: _bytesToHex(fileIdBytes),
+      );
+    } finally {
+      calloc.free(groupIdPtr);
+      calloc.free(filenamePtr);
+      calloc.free(dataPtr);
+      if (thumbnailPtr != nullptr) calloc.free(thumbnailPtr);
+      calloc.free(msgIdOut);
+      calloc.free(fileIdOut);
+    }
+  }
+
+  /// Send a voice message to a group
+  /// Returns (error code, message ID hex) or null on error
+  ({int error, String? msgId}) groupSendVoice(
+    String groupIdHex,
+    List<int> audioData,
+    int durationMs,
+  ) {
+    if (_groupCtx == null) {
+      return (error: CyxChatError.errNull, msgId: null);
+    }
+
+    final groupIdPtr = calloc<Uint8>(8);
+    final audioPtr = calloc<Uint8>(audioData.length);
+    final msgIdOut = calloc<Uint8>(8);
+
+    try {
+      final parseResult = groupIdFromHex(groupIdHex, groupIdPtr);
+      if (parseResult != 0) {
+        return (error: CyxChatError.errInvalid, msgId: null);
+      }
+
+      // Copy audio data
+      for (int i = 0; i < audioData.length; i++) {
+        audioPtr[i] = audioData[i];
+      }
+
+      final result = _native.cyxchat_group_send_voice(
+        _groupCtx!,
+        groupIdPtr,
+        audioPtr,
+        audioData.length,
+        durationMs,
+        msgIdOut,
+      );
+
+      if (result != 0) {
+        return (error: result, msgId: null);
+      }
+
+      // Extract message ID
+      final msgIdBytes = <int>[];
+      for (int i = 0; i < 8; i++) {
+        msgIdBytes.add(msgIdOut[i]);
+      }
+
+      return (error: 0, msgId: _bytesToHex(msgIdBytes));
+    } finally {
+      calloc.free(groupIdPtr);
+      calloc.free(audioPtr);
+      calloc.free(msgIdOut);
+    }
+  }
+
+  /// Send an image to a group
+  /// Returns (error code, message ID hex) or null on error
+  ({int error, String? msgId}) groupSendImage(
+    String groupIdHex,
+    String? filename,
+    List<int> imageData,
+    int width,
+    int height,
+  ) {
+    if (_groupCtx == null) {
+      return (error: CyxChatError.errNull, msgId: null);
+    }
+
+    final groupIdPtr = calloc<Uint8>(8);
+    final filenamePtr = filename?.toNativeUtf8() ?? nullptr;
+    final imagePtr = calloc<Uint8>(imageData.length);
+    final msgIdOut = calloc<Uint8>(8);
+
+    try {
+      final parseResult = groupIdFromHex(groupIdHex, groupIdPtr);
+      if (parseResult != 0) {
+        return (error: CyxChatError.errInvalid, msgId: null);
+      }
+
+      // Copy image data
+      for (int i = 0; i < imageData.length; i++) {
+        imagePtr[i] = imageData[i];
+      }
+
+      final result = _native.cyxchat_group_send_image(
+        _groupCtx!,
+        groupIdPtr,
+        filenamePtr.cast(),
+        imagePtr,
+        imageData.length,
+        width,
+        height,
+        msgIdOut,
+      );
+
+      if (result != 0) {
+        return (error: result, msgId: null);
+      }
+
+      // Extract message ID
+      final msgIdBytes = <int>[];
+      for (int i = 0; i < 8; i++) {
+        msgIdBytes.add(msgIdOut[i]);
+      }
+
+      return (error: 0, msgId: _bytesToHex(msgIdBytes));
+    } finally {
+      calloc.free(groupIdPtr);
+      if (filenamePtr != nullptr) calloc.free(filenamePtr);
+      calloc.free(imagePtr);
+      calloc.free(msgIdOut);
+    }
+  }
+
+  /// Get count of media items in a group
+  /// mediaType: -1 for all, or specific cyxchat_media_type_t value
+  int groupGetMediaCount(String groupIdHex, {int mediaType = -1}) {
+    if (_groupCtx == null) return 0;
+
+    final groupIdPtr = calloc<Uint8>(8);
+    try {
+      final parseResult = groupIdFromHex(groupIdHex, groupIdPtr);
+      if (parseResult != 0) return 0;
+
+      return _native.cyxchat_group_get_media_count(
+        _groupCtx!,
+        groupIdPtr,
+        mediaType,
+      );
+    } finally {
+      calloc.free(groupIdPtr);
+    }
   }
 
   // ============================================================
@@ -1538,7 +2811,7 @@ class CyxChatBindings {
     if (onFileRequest == null) return;
 
     // Convert from node ID to hex string
-    final fromHex = _bytesToHex(from, 32);
+    final fromHex = _ptrToHex(from, 32);
 
     // Extract file ID (8 bytes)
     final fileIdBytes = <int>[];
@@ -1581,7 +2854,7 @@ class CyxChatBindings {
     if (onFileComplete == null) return;
 
     // Copy file ID bytes immediately (pointer may be stale by async callback time)
-    final fileIdHex = _bytesToHex(fileId, 8);
+    final fileIdHex = _ptrToHex(fileId, 8);
 
     // Copy data to Dart list
     final dataList = <int>[];
@@ -1603,7 +2876,7 @@ class CyxChatBindings {
     if (onFileProgress == null) return;
 
     // Copy file ID bytes immediately (pointer may be stale by async callback time)
-    final fileIdHex = _bytesToHex(fileId, 8);
+    final fileIdHex = _ptrToHex(fileId, 8);
     onFileProgress!(fileIdHex, chunksDone, chunksTotal);
   }
 
@@ -1617,17 +2890,8 @@ class CyxChatBindings {
     if (onFileError == null) return;
 
     // Copy file ID bytes immediately (pointer may be stale by async callback time)
-    final fileIdHex = _bytesToHex(fileId, 8);
+    final fileIdHex = _ptrToHex(fileId, 8);
     onFileError!(fileIdHex, error);
-  }
-
-  /// Helper to convert bytes to hex string
-  String _bytesToHex(Pointer<Uint8> bytes, int len) {
-    final buffer = StringBuffer();
-    for (int i = 0; i < len; i++) {
-      buffer.write(bytes[i].toRadixString(16).padLeft(2, '0'));
-    }
-    return buffer.toString();
   }
 
   /// Poll file transfer events
@@ -2344,6 +3608,201 @@ class CyxChatNative {
       Void Function(Pointer<Void>, Pointer<NativeFunction<_KeyDistCompleteCallback>>, Pointer<Void>),
       void Function(Pointer<Void>, Pointer<NativeFunction<_KeyDistCompleteCallback>>, Pointer<Void>)>(
       'cyxchat_group_set_on_key_dist_complete');
+
+  // Group admin permissions and restrictions (Phase 1)
+  late final cyxchat_group_set_admin_permissions = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>, Uint8),
+      int Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>, int)>(
+      'cyxchat_group_set_admin_permissions');
+
+  late final cyxchat_group_get_admin_permissions = _lib.lookupFunction<
+      Uint8 Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>),
+      int Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>)>(
+      'cyxchat_group_get_admin_permissions');
+
+  late final cyxchat_group_has_permission = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>, Uint8),
+      int Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>, int)>(
+      'cyxchat_group_has_permission');
+
+  late final cyxchat_group_restrict_member = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>, Uint8, Uint64),
+      int Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>, int, int)>(
+      'cyxchat_group_restrict_member');
+
+  late final cyxchat_group_unrestrict_member = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>),
+      int Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>)>(
+      'cyxchat_group_unrestrict_member');
+
+  late final cyxchat_group_get_member_restrictions = _lib.lookupFunction<
+      Uint8 Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>, Pointer<Uint64>),
+      int Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>, Pointer<Uint64>)>(
+      'cyxchat_group_get_member_restrictions');
+
+  late final cyxchat_group_is_member_muted = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>),
+      int Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>)>(
+      'cyxchat_group_is_member_muted');
+
+  late final cyxchat_group_set_slow_mode = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>, Uint16),
+      int Function(Pointer<Void>, Pointer<Uint8>, int)>(
+      'cyxchat_group_set_slow_mode');
+
+  late final cyxchat_group_get_slow_mode = _lib.lookupFunction<
+      Uint16 Function(Pointer<Void>, Pointer<Uint8>),
+      int Function(Pointer<Void>, Pointer<Uint8>)>(
+      'cyxchat_group_get_slow_mode');
+
+  late final cyxchat_group_set_who_can_add = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>, Int32),
+      int Function(Pointer<Void>, Pointer<Uint8>, int)>(
+      'cyxchat_group_set_who_can_add');
+
+  late final cyxchat_group_set_who_can_edit = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>, Int32),
+      int Function(Pointer<Void>, Pointer<Uint8>, int)>(
+      'cyxchat_group_set_who_can_edit');
+
+  late final cyxchat_group_get_type = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>),
+      int Function(Pointer<Void>, Pointer<Uint8>)>(
+      'cyxchat_group_get_type');
+
+  late final cyxchat_group_upgrade_to_supergroup = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>),
+      int Function(Pointer<Void>, Pointer<Uint8>)>(
+      'cyxchat_group_upgrade_to_supergroup');
+
+  // Phase 2: Message action functions
+  late final cyxchat_group_edit_message = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>,
+          Pointer<Int8>, Size),
+      int Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>,
+          Pointer<Int8>, int)>('cyxchat_group_edit_message');
+
+  late final cyxchat_group_delete_message = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>, Int32),
+      int Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>, int)>(
+      'cyxchat_group_delete_message');
+
+  late final cyxchat_group_pin_message = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>, Int32),
+      int Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>, int)>(
+      'cyxchat_group_pin_message');
+
+  late final cyxchat_group_unpin_message = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>),
+      int Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>)>(
+      'cyxchat_group_unpin_message');
+
+  late final cyxchat_group_unpin_all = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>),
+      int Function(Pointer<Void>, Pointer<Uint8>)>('cyxchat_group_unpin_all');
+
+  late final cyxchat_group_get_pinned_count = _lib.lookupFunction<
+      Size Function(Pointer<Void>, Pointer<Uint8>),
+      int Function(Pointer<Void>, Pointer<Uint8>)>(
+      'cyxchat_group_get_pinned_count');
+
+  late final cyxchat_group_get_pinned_messages = _lib.lookupFunction<
+      Size Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>, Size),
+      int Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>, int)>(
+      'cyxchat_group_get_pinned_messages');
+
+  late final cyxchat_group_is_message_pinned = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>),
+      int Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>)>(
+      'cyxchat_group_is_message_pinned');
+
+  late final cyxchat_group_forward_message = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>,
+          Pointer<Uint8>, Pointer<Uint8>),
+      int Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>,
+          Pointer<Uint8>, Pointer<Uint8>)>('cyxchat_group_forward_message');
+
+  // Invite link functions
+  late final cyxchat_group_create_invite_link = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>, Pointer<Int8>, Uint64, Uint32, Pointer<Void>),
+      int Function(Pointer<Void>, Pointer<Uint8>, Pointer<Int8>, int, int, Pointer<Void>)>(
+      'cyxchat_group_create_invite_link');
+
+  late final cyxchat_group_revoke_invite_link = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>),
+      int Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>)>(
+      'cyxchat_group_revoke_invite_link');
+
+  late final cyxchat_group_join_via_link = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>),
+      int Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>)>(
+      'cyxchat_group_join_via_link');
+
+  late final cyxchat_group_get_invite_links = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>, Pointer<Void>, Size, Pointer<Size>),
+      int Function(Pointer<Void>, Pointer<Uint8>, Pointer<Void>, int, Pointer<Size>)>(
+      'cyxchat_group_get_invite_links');
+
+  late final cyxchat_group_get_invite_link = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>, Pointer<Void>),
+      int Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>, Pointer<Void>)>(
+      'cyxchat_group_get_invite_link');
+
+  // Admin action log functions
+  late final cyxchat_group_log_admin_action = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>, Int32, Pointer<Uint8>,
+          Pointer<Uint8>, Pointer<Int8>, Pointer<Int8>, Pointer<Void>),
+      int Function(Pointer<Void>, Pointer<Uint8>, int, Pointer<Uint8>,
+          Pointer<Uint8>, Pointer<Int8>, Pointer<Int8>, Pointer<Void>)>(
+      'cyxchat_group_log_admin_action');
+
+  late final cyxchat_group_get_admin_actions = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>, Pointer<Void>, Size, Size, Pointer<Size>),
+      int Function(Pointer<Void>, Pointer<Uint8>, Pointer<Void>, int, int, Pointer<Size>)>(
+      'cyxchat_group_get_admin_actions');
+
+  late final cyxchat_group_get_admin_actions_by_admin = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>, Pointer<Void>, Size, Pointer<Size>),
+      int Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>, Pointer<Void>, int, Pointer<Size>)>(
+      'cyxchat_group_get_admin_actions_by_admin');
+
+  late final cyxchat_group_get_admin_action_count = _lib.lookupFunction<
+      Size Function(Pointer<Void>, Pointer<Uint8>),
+      int Function(Pointer<Void>, Pointer<Uint8>)>(
+      'cyxchat_group_get_admin_action_count');
+
+  // Group Media functions
+  late final cyxchat_group_send_file = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>, Pointer<Int8>,
+          Pointer<Uint8>, Size, Pointer<Uint8>, Size, Pointer<Uint8>,
+          Pointer<Uint8>),
+      int Function(Pointer<Void>, Pointer<Uint8>, Pointer<Int8>,
+          Pointer<Uint8>, int, Pointer<Uint8>, int, Pointer<Uint8>,
+          Pointer<Uint8>)>('cyxchat_group_send_file');
+
+  late final cyxchat_group_send_voice = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>, Size,
+          Uint32, Pointer<Uint8>),
+      int Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>, int,
+          int, Pointer<Uint8>)>('cyxchat_group_send_voice');
+
+  late final cyxchat_group_send_image = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>, Pointer<Int8>,
+          Pointer<Uint8>, Size, Uint16, Uint16, Pointer<Uint8>),
+      int Function(Pointer<Void>, Pointer<Uint8>, Pointer<Int8>,
+          Pointer<Uint8>, int, int, int, Pointer<Uint8>)>(
+      'cyxchat_group_send_image');
+
+  late final cyxchat_group_get_media = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>, Int32, Pointer<Void>,
+          Size, Size, Pointer<Size>),
+      int Function(Pointer<Void>, Pointer<Uint8>, int, Pointer<Void>,
+          int, int, Pointer<Size>)>('cyxchat_group_get_media');
+
+  late final cyxchat_group_get_media_count = _lib.lookupFunction<
+      Size Function(Pointer<Void>, Pointer<Uint8>, Int32),
+      int Function(Pointer<Void>, Pointer<Uint8>, int)>(
+      'cyxchat_group_get_media_count');
 
   late final cyxchat_msg_id_to_hex = _lib.lookupFunction<
       Void Function(Pointer<Uint8>, Pointer<Int8>),

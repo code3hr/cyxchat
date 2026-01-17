@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:sqflite/sqflite.dart' show ConflictAlgorithm, Sqflite;
 import 'package:uuid/uuid.dart';
 import '../models/models.dart';
 import '../providers/group_ffi_provider.dart';
@@ -386,10 +387,9 @@ class GroupService {
       'id': groupId,
       'type': 1, // ConversationType.group
       'group_id': groupId,
-      'title': name,
+      'display_name': name,
       'is_pinned': 0,
       'is_muted': 0,
-      'is_archived': 0,
       'unread_count': 0,
       'last_activity_at': now.millisecondsSinceEpoch,
     });
@@ -650,10 +650,10 @@ class GroupService {
       whereArgs: [groupId],
     );
 
-    // Update conversation title
+    // Update conversation display_name
     await db.update(
       'conversations',
-      {'title': name},
+      {'display_name': name},
       where: 'id = ?',
       whereArgs: [groupId],
     );
@@ -792,6 +792,391 @@ class GroupService {
   }
 
   // ============================================================
+  // Public API - Message Actions (Phase 2)
+  // ============================================================
+
+  /// Edit a message in group
+  Future<bool> editMessage({
+    required String groupId,
+    required String messageId,
+    required String newContent,
+  }) async {
+    final db = await DatabaseService.instance.database;
+    final identity = IdentityService.instance.currentIdentity;
+    if (identity == null) return false;
+
+    // Get the original message to verify ownership
+    final msgRows = await db.query(
+      'messages',
+      where: 'id = ? AND conversation_id = ?',
+      whereArgs: [messageId, groupId],
+    );
+    if (msgRows.isEmpty) {
+      _log.error('Message not found for edit', source: 'GroupService');
+      return false;
+    }
+
+    final originalMsg = Message.fromMap(msgRows.first);
+
+    // Only the sender can edit their own message
+    if (originalMsg.senderId != identity.nodeId) {
+      _log.error('Cannot edit message: not the sender', source: 'GroupService');
+      return false;
+    }
+
+    // Broadcast edit via FFI
+    if (_ffiProvider != null && _ffiProvider!.initialized) {
+      final result = _ffiProvider!.bindings.groupEditMessage(
+        groupId,
+        messageId,
+        newContent,
+      );
+      if (result != 0) {
+        _log.error('Failed to broadcast edit via FFI: $result',
+            source: 'GroupService');
+        return false;
+      }
+    }
+
+    // Update local database
+    final now = DateTime.now();
+    await db.update(
+      'messages',
+      {
+        'original_content': originalMsg.originalContent ?? originalMsg.content,
+        'content': newContent,
+        'is_edited': 1,
+        'edited_at': now.millisecondsSinceEpoch,
+      },
+      where: 'id = ?',
+      whereArgs: [messageId],
+    );
+
+    _log.info('Edited message $messageId', source: 'GroupService');
+
+    // Emit updated message
+    final updatedMsg = originalMsg.copyWith(
+      content: newContent,
+      isEdited: true,
+      editedAt: now,
+      originalContent: originalMsg.originalContent ?? originalMsg.content,
+    );
+    _messageController.add(updatedMsg);
+
+    return true;
+  }
+
+  /// Delete a message from group
+  Future<bool> deleteMessage({
+    required String groupId,
+    required String messageId,
+    required bool deleteForAll,
+  }) async {
+    final db = await DatabaseService.instance.database;
+    final identity = IdentityService.instance.currentIdentity;
+    if (identity == null) return false;
+
+    // Get the message
+    final msgRows = await db.query(
+      'messages',
+      where: 'id = ? AND conversation_id = ?',
+      whereArgs: [messageId, groupId],
+    );
+    if (msgRows.isEmpty) {
+      _log.error('Message not found for delete', source: 'GroupService');
+      return false;
+    }
+
+    final msg = Message.fromMap(msgRows.first);
+
+    // For delete for all, need to be sender or have DELETE_MESSAGES permission
+    if (deleteForAll && msg.senderId != identity.nodeId) {
+      // Check if admin with delete permission
+      final hasPermission = _ffiProvider?.bindings.groupHasPermission(
+        groupId,
+        identity.nodeId,
+        0x04, // CYXCHAT_PERM_DELETE_MESSAGES
+      );
+      if (hasPermission != true) {
+        _log.error('Cannot delete message for all: no permission',
+            source: 'GroupService');
+        return false;
+      }
+    }
+
+    // Broadcast delete via FFI (only for delete for all)
+    if (deleteForAll && _ffiProvider != null && _ffiProvider!.initialized) {
+      final result = _ffiProvider!.bindings.groupDeleteMessage(
+        groupId,
+        messageId,
+        deleteForAll,
+      );
+      if (result != 0) {
+        _log.error('Failed to broadcast delete via FFI: $result',
+            source: 'GroupService');
+        return false;
+      }
+    }
+
+    // Update local database
+    final now = DateTime.now();
+    await db.update(
+      'messages',
+      {
+        'is_deleted': 1,
+        'deleted_by': identity.nodeId,
+        'deleted_at': now.millisecondsSinceEpoch,
+        'content': '[Message deleted]',
+      },
+      where: 'id = ?',
+      whereArgs: [messageId],
+    );
+
+    _log.info('Deleted message $messageId (forAll: $deleteForAll)',
+        source: 'GroupService');
+
+    // Emit updated message
+    final updatedMsg = msg.copyWith(
+      isDeleted: true,
+      deletedBy: identity.nodeId,
+      deletedAt: now,
+      content: '[Message deleted]',
+    );
+    _messageController.add(updatedMsg);
+
+    return true;
+  }
+
+  /// Pin a message in group (admin only)
+  Future<bool> pinMessage({
+    required String groupId,
+    required String messageId,
+    bool notify = true,
+  }) async {
+    final db = await DatabaseService.instance.database;
+    final identity = IdentityService.instance.currentIdentity;
+    if (identity == null) return false;
+
+    // Pin via FFI
+    if (_ffiProvider != null && _ffiProvider!.initialized) {
+      final result = _ffiProvider!.bindings.groupPinMessage(
+        groupId,
+        messageId,
+        notify: notify,
+      );
+      if (result != 0) {
+        _log.error('Failed to pin message via FFI: $result',
+            source: 'GroupService');
+        return false;
+      }
+    }
+
+    // Save to local database
+    final now = DateTime.now();
+    await db.insert('pinned_messages', {
+      'group_id': groupId,
+      'message_id': messageId,
+      'pinned_by': identity.nodeId,
+      'pinned_at': now.millisecondsSinceEpoch,
+    });
+
+    _log.info('Pinned message $messageId', source: 'GroupService');
+
+    // Notify group update
+    final group = await getGroup(groupId);
+    if (group != null) {
+      _groupUpdateController.add(group);
+    }
+
+    return true;
+  }
+
+  /// Unpin a message from group (admin only)
+  Future<bool> unpinMessage({
+    required String groupId,
+    required String messageId,
+  }) async {
+    final db = await DatabaseService.instance.database;
+
+    // Unpin via FFI
+    if (_ffiProvider != null && _ffiProvider!.initialized) {
+      final result = _ffiProvider!.bindings.groupUnpinMessage(
+        groupId,
+        messageId,
+      );
+      if (result != 0) {
+        _log.error('Failed to unpin message via FFI: $result',
+            source: 'GroupService');
+        return false;
+      }
+    }
+
+    // Remove from local database
+    await db.delete(
+      'pinned_messages',
+      where: 'group_id = ? AND message_id = ?',
+      whereArgs: [groupId, messageId],
+    );
+
+    _log.info('Unpinned message $messageId', source: 'GroupService');
+
+    // Notify group update
+    final group = await getGroup(groupId);
+    if (group != null) {
+      _groupUpdateController.add(group);
+    }
+
+    return true;
+  }
+
+  /// Unpin all messages from group (admin only)
+  Future<bool> unpinAllMessages(String groupId) async {
+    final db = await DatabaseService.instance.database;
+
+    // Unpin all via FFI
+    if (_ffiProvider != null && _ffiProvider!.initialized) {
+      final result = _ffiProvider!.bindings.groupUnpinAll(groupId);
+      if (result != 0) {
+        _log.error('Failed to unpin all via FFI: $result',
+            source: 'GroupService');
+        return false;
+      }
+    }
+
+    // Remove from local database
+    await db.delete(
+      'pinned_messages',
+      where: 'group_id = ?',
+      whereArgs: [groupId],
+    );
+
+    _log.info('Unpinned all messages in group $groupId', source: 'GroupService');
+
+    // Notify group update
+    final group = await getGroup(groupId);
+    if (group != null) {
+      _groupUpdateController.add(group);
+    }
+
+    return true;
+  }
+
+  /// Get pinned messages for a group
+  Future<List<Message>> getPinnedMessages(String groupId) async {
+    final db = await DatabaseService.instance.database;
+
+    final rows = await db.rawQuery('''
+      SELECT m.* FROM messages m
+      INNER JOIN pinned_messages pm ON m.id = pm.message_id
+      WHERE pm.group_id = ?
+      ORDER BY pm.pinned_at DESC
+    ''', [groupId]);
+
+    return rows.map((row) => Message.fromMap(row)).toList();
+  }
+
+  /// Get count of pinned messages
+  Future<int> getPinnedCount(String groupId) async {
+    final db = await DatabaseService.instance.database;
+
+    final rows = await db.rawQuery(
+      'SELECT COUNT(*) as count FROM pinned_messages WHERE group_id = ?',
+      [groupId],
+    );
+
+    return rows.first['count'] as int? ?? 0;
+  }
+
+  /// Check if a message is pinned
+  Future<bool> isMessagePinned({
+    required String groupId,
+    required String messageId,
+  }) async {
+    final db = await DatabaseService.instance.database;
+
+    final rows = await db.query(
+      'pinned_messages',
+      where: 'group_id = ? AND message_id = ?',
+      whereArgs: [groupId, messageId],
+    );
+
+    return rows.isNotEmpty;
+  }
+
+  /// Forward a message to another group
+  Future<Message?> forwardMessage({
+    required String fromGroupId,
+    required String toGroupId,
+    required String messageId,
+  }) async {
+    final db = await DatabaseService.instance.database;
+    final identity = IdentityService.instance.currentIdentity;
+    if (identity == null) return null;
+
+    // Get original message
+    final msgRows = await db.query(
+      'messages',
+      where: 'id = ?',
+      whereArgs: [messageId],
+    );
+    if (msgRows.isEmpty) {
+      _log.error('Original message not found for forward', source: 'GroupService');
+      return null;
+    }
+
+    final originalMsg = Message.fromMap(msgRows.first);
+
+    // Call FFI to generate new message ID
+    String? newMsgId;
+    if (_ffiProvider != null && _ffiProvider!.initialized) {
+      final (result, msgId) = _ffiProvider!.bindings.groupForwardMessage(
+        fromGroupId,
+        toGroupId,
+        messageId,
+      );
+      if (result != 0 || msgId == null) {
+        _log.error('Failed to forward message via FFI: $result',
+            source: 'GroupService');
+        return null;
+      }
+      newMsgId = msgId;
+    } else {
+      newMsgId = _uuid.v4();
+    }
+
+    // Create new message with forward info
+    final now = DateTime.now();
+    final forwardedMsg = Message(
+      id: newMsgId,
+      conversationId: toGroupId,
+      senderId: identity.nodeId,
+      type: originalMsg.type,
+      content: originalMsg.content,
+      timestamp: now,
+      status: MessageStatus.sent,
+      isOutgoing: true,
+      forwardedFrom: fromGroupId,
+    );
+
+    // Save to database
+    await db.insert('messages', forwardedMsg.toMap());
+
+    // Update conversation timestamp
+    await db.update(
+      'conversations',
+      {'last_activity_at': now.millisecondsSinceEpoch},
+      where: 'id = ?',
+      whereArgs: [toGroupId],
+    );
+
+    _log.info('Forwarded message from $fromGroupId to $toGroupId',
+        source: 'GroupService');
+
+    _messageController.add(forwardedMsg);
+    return forwardedMsg;
+  }
+
+  // ============================================================
   // Public API - Key Management (FFI)
   // ============================================================
 
@@ -884,10 +1269,9 @@ class GroupService {
         'id': groupId,
         'type': 1, // ConversationType.group
         'group_id': groupId,
-        'title': groupName,
+        'display_name': groupName,
         'is_pinned': 0,
         'is_muted': 0,
-        'is_archived': 0,
         'unread_count': 0,
         'last_activity_at': now.millisecondsSinceEpoch,
       });
@@ -911,6 +1295,860 @@ class GroupService {
     }
 
     return _ffiProvider!.declineInvite(groupId);
+  }
+
+  // ============================================================
+  // Public API - Admin Permissions (Database + FFI) - Phase 1
+  // ============================================================
+
+  /// Set granular permissions for an admin
+  Future<bool> setAdminPermissions({
+    required String groupId,
+    required String adminId,
+    required AdminPermissions permissions,
+  }) async {
+    final db = await DatabaseService.instance.database;
+
+    // Set via FFI
+    if (_ffiProvider != null && _ffiProvider!.initialized) {
+      final success = await _ffiProvider!.setAdminPermissions(
+        groupId: groupId,
+        adminId: adminId,
+        permissions: permissions.toBitmask(),
+      );
+      if (!success) {
+        _log.error('Failed to set admin permissions via FFI',
+            source: 'GroupService');
+        return false;
+      }
+    }
+
+    // Save to database
+    await db.insert(
+      'admin_permissions',
+      permissions.toMap(),
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+
+    _log.info('Set permissions for admin ${adminId.substring(0, 8)}...',
+        source: 'GroupService');
+
+    // Notify update
+    final group = await getGroup(groupId);
+    if (group != null) {
+      _groupUpdateController.add(group);
+    }
+
+    return true;
+  }
+
+  /// Get admin permissions from database
+  Future<AdminPermissions?> getAdminPermissions({
+    required String groupId,
+    required String adminId,
+  }) async {
+    final db = await DatabaseService.instance.database;
+
+    final rows = await db.query(
+      'admin_permissions',
+      where: 'group_id = ? AND node_id = ?',
+      whereArgs: [groupId, adminId],
+    );
+
+    if (rows.isEmpty) return null;
+    return AdminPermissions.fromMap(rows.first);
+  }
+
+  /// Get all admin permissions for a group
+  Future<List<AdminPermissions>> getGroupAdminPermissions(String groupId) async {
+    final db = await DatabaseService.instance.database;
+
+    final rows = await db.query(
+      'admin_permissions',
+      where: 'group_id = ?',
+      whereArgs: [groupId],
+    );
+
+    return rows.map((row) => AdminPermissions.fromMap(row)).toList();
+  }
+
+  /// Check if admin has a specific permission
+  bool hasPermission({
+    required String groupId,
+    required String adminId,
+    required int permission,
+  }) {
+    if (_ffiProvider == null || !_ffiProvider!.initialized) {
+      return false;
+    }
+    return _ffiProvider!.hasPermission(
+      groupId: groupId,
+      adminId: adminId,
+      permission: permission,
+    );
+  }
+
+  /// Remove admin permissions (when demoted)
+  Future<bool> removeAdminPermissions({
+    required String groupId,
+    required String adminId,
+  }) async {
+    final db = await DatabaseService.instance.database;
+
+    await db.delete(
+      'admin_permissions',
+      where: 'group_id = ? AND node_id = ?',
+      whereArgs: [groupId, adminId],
+    );
+
+    return true;
+  }
+
+  // ============================================================
+  // Public API - Member Restrictions (Database + FFI) - Phase 1
+  // ============================================================
+
+  /// Restrict a member (mute, no media, etc.)
+  Future<bool> restrictMember({
+    required String groupId,
+    required String memberId,
+    required MemberRestriction restriction,
+  }) async {
+    final db = await DatabaseService.instance.database;
+
+    // Set via FFI
+    if (_ffiProvider != null && _ffiProvider!.initialized) {
+      final success = await _ffiProvider!.restrictMember(
+        groupId: groupId,
+        memberId: memberId,
+        restrictions: restriction.toBitmask(),
+        untilMs: restriction.mutedUntil?.millisecondsSinceEpoch,
+      );
+      if (!success) {
+        _log.error('Failed to restrict member via FFI',
+            source: 'GroupService');
+        return false;
+      }
+    }
+
+    // Save to database
+    await db.insert(
+      'member_restrictions',
+      restriction.toMap(),
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+
+    _log.info('Restricted member ${memberId.substring(0, 8)}...',
+        source: 'GroupService');
+
+    // Notify update
+    final group = await getGroup(groupId);
+    if (group != null) {
+      _groupUpdateController.add(group);
+    }
+
+    return true;
+  }
+
+  /// Mute a member
+  Future<bool> muteMember({
+    required String groupId,
+    required String memberId,
+    required String restrictedBy,
+    Duration? duration,
+  }) async {
+    final until = duration != null ? DateTime.now().add(duration) : null;
+    final restriction = MemberRestriction.muted(
+      groupId: groupId,
+      nodeId: memberId,
+      restrictedBy: restrictedBy,
+      until: until,
+    );
+    return restrictMember(
+      groupId: groupId,
+      memberId: memberId,
+      restriction: restriction,
+    );
+  }
+
+  /// Unmute/unrestrict a member
+  Future<bool> unrestrictMember({
+    required String groupId,
+    required String memberId,
+  }) async {
+    final db = await DatabaseService.instance.database;
+
+    // Unrestrict via FFI
+    if (_ffiProvider != null && _ffiProvider!.initialized) {
+      final success = await _ffiProvider!.unrestrictMember(
+        groupId: groupId,
+        memberId: memberId,
+      );
+      if (!success) {
+        _log.error('Failed to unrestrict member via FFI',
+            source: 'GroupService');
+        return false;
+      }
+    }
+
+    // Remove from database
+    await db.delete(
+      'member_restrictions',
+      where: 'group_id = ? AND node_id = ?',
+      whereArgs: [groupId, memberId],
+    );
+
+    _log.info('Unrestricted member ${memberId.substring(0, 8)}...',
+        source: 'GroupService');
+
+    // Notify update
+    final group = await getGroup(groupId);
+    if (group != null) {
+      _groupUpdateController.add(group);
+    }
+
+    return true;
+  }
+
+  /// Get member restriction from database
+  Future<MemberRestriction?> getMemberRestriction({
+    required String groupId,
+    required String memberId,
+  }) async {
+    final db = await DatabaseService.instance.database;
+
+    final rows = await db.query(
+      'member_restrictions',
+      where: 'group_id = ? AND node_id = ?',
+      whereArgs: [groupId, memberId],
+    );
+
+    if (rows.isEmpty) return null;
+    return MemberRestriction.fromMap(rows.first);
+  }
+
+  /// Get all member restrictions for a group
+  Future<List<MemberRestriction>> getGroupRestrictions(String groupId) async {
+    final db = await DatabaseService.instance.database;
+
+    final rows = await db.query(
+      'member_restrictions',
+      where: 'group_id = ?',
+      whereArgs: [groupId],
+    );
+
+    return rows.map((row) => MemberRestriction.fromMap(row)).toList();
+  }
+
+  /// Check if member is currently muted
+  bool isMemberMuted({
+    required String groupId,
+    required String memberId,
+  }) {
+    if (_ffiProvider == null || !_ffiProvider!.initialized) {
+      return false;
+    }
+    return _ffiProvider!.isMemberMuted(
+      groupId: groupId,
+      memberId: memberId,
+    );
+  }
+
+  // ============================================================
+  // Public API - Group Settings (Database + FFI) - Phase 1
+  // ============================================================
+
+  /// Set slow mode (seconds between messages)
+  Future<bool> setSlowMode({
+    required String groupId,
+    required int seconds,
+  }) async {
+    final db = await DatabaseService.instance.database;
+
+    // Set via FFI
+    if (_ffiProvider != null && _ffiProvider!.initialized) {
+      final success = await _ffiProvider!.setSlowMode(
+        groupId: groupId,
+        seconds: seconds,
+      );
+      if (!success) {
+        _log.error('Failed to set slow mode via FFI', source: 'GroupService');
+        return false;
+      }
+    }
+
+    // Update database
+    await db.update(
+      'groups',
+      {
+        'slow_mode_seconds': seconds,
+        'updated_at': DateTime.now().millisecondsSinceEpoch,
+      },
+      where: 'id = ?',
+      whereArgs: [groupId],
+    );
+
+    _log.info('Set slow mode to ${seconds}s', source: 'GroupService');
+
+    // Notify update
+    final group = await getGroup(groupId);
+    if (group != null) {
+      _groupUpdateController.add(group);
+    }
+
+    return true;
+  }
+
+  /// Set who can add members
+  Future<bool> setWhoCanAddMembers({
+    required String groupId,
+    required WhoCanAddMembers setting,
+  }) async {
+    final db = await DatabaseService.instance.database;
+
+    // Set via FFI
+    if (_ffiProvider != null && _ffiProvider!.initialized) {
+      final success = await _ffiProvider!.setWhoCanAdd(
+        groupId: groupId,
+        setting: setting.index,
+      );
+      if (!success) {
+        _log.error('Failed to set who can add members via FFI',
+            source: 'GroupService');
+        return false;
+      }
+    }
+
+    // Update database
+    await db.update(
+      'groups',
+      {
+        'who_can_add_members': setting.index,
+        'updated_at': DateTime.now().millisecondsSinceEpoch,
+      },
+      where: 'id = ?',
+      whereArgs: [groupId],
+    );
+
+    _log.info('Set who can add members to ${setting.displayName}',
+        source: 'GroupService');
+
+    // Notify update
+    final group = await getGroup(groupId);
+    if (group != null) {
+      _groupUpdateController.add(group);
+    }
+
+    return true;
+  }
+
+  /// Set who can change group info
+  Future<bool> setWhoCanChangeInfo({
+    required String groupId,
+    required WhoCanChangeInfo setting,
+  }) async {
+    final db = await DatabaseService.instance.database;
+
+    // Set via FFI
+    if (_ffiProvider != null && _ffiProvider!.initialized) {
+      final success = await _ffiProvider!.setWhoCanEdit(
+        groupId: groupId,
+        setting: setting.index,
+      );
+      if (!success) {
+        _log.error('Failed to set who can change info via FFI',
+            source: 'GroupService');
+        return false;
+      }
+    }
+
+    // Update database
+    await db.update(
+      'groups',
+      {
+        'who_can_change_info': setting.index,
+        'updated_at': DateTime.now().millisecondsSinceEpoch,
+      },
+      where: 'id = ?',
+      whereArgs: [groupId],
+    );
+
+    _log.info('Set who can change info to ${setting.displayName}',
+        source: 'GroupService');
+
+    // Notify update
+    final group = await getGroup(groupId);
+    if (group != null) {
+      _groupUpdateController.add(group);
+    }
+
+    return true;
+  }
+
+  /// Set message history visibility for new members
+  Future<bool> setMessageHistoryVisible({
+    required String groupId,
+    required bool visible,
+  }) async {
+    final db = await DatabaseService.instance.database;
+
+    // Update database
+    await db.update(
+      'groups',
+      {
+        'message_history_visible': visible ? 1 : 0,
+        'updated_at': DateTime.now().millisecondsSinceEpoch,
+      },
+      where: 'id = ?',
+      whereArgs: [groupId],
+    );
+
+    _log.info('Set message history visible to $visible',
+        source: 'GroupService');
+
+    // Notify update
+    final group = await getGroup(groupId);
+    if (group != null) {
+      _groupUpdateController.add(group);
+    }
+
+    return true;
+  }
+
+  /// Upgrade group to supergroup
+  Future<bool> upgradeToSupergroup(String groupId) async {
+    final db = await DatabaseService.instance.database;
+
+    // Upgrade via FFI
+    if (_ffiProvider != null && _ffiProvider!.initialized) {
+      final success = await _ffiProvider!.upgradeToSupergroup(groupId);
+      if (!success) {
+        _log.error('Failed to upgrade to supergroup via FFI',
+            source: 'GroupService');
+        return false;
+      }
+    }
+
+    // Update database
+    await db.update(
+      'groups',
+      {
+        'group_type': GroupType.supergroup.index,
+        'max_members': 0, // Unlimited
+        'updated_at': DateTime.now().millisecondsSinceEpoch,
+      },
+      where: 'id = ?',
+      whereArgs: [groupId],
+    );
+
+    _log.info('Upgraded group to supergroup', source: 'GroupService');
+
+    // Notify update
+    final group = await getGroup(groupId);
+    if (group != null) {
+      _groupUpdateController.add(group);
+    }
+
+    return true;
+  }
+
+  // ============================================================
+  // Public API - Invite Links (Database + FFI) - Phase 3
+  // ============================================================
+
+  /// Create an invite link for a group
+  Future<InviteLink?> createInviteLink({
+    required String groupId,
+    String? name,
+    DateTime? expiresAt,
+    int? maxUses,
+  }) async {
+    final db = await DatabaseService.instance.database;
+    final identity = IdentityService.instance.currentIdentity;
+    if (identity == null) {
+      _log.error('Cannot create invite link: no identity',
+          source: 'GroupService');
+      return null;
+    }
+
+    String linkId;
+    final now = DateTime.now();
+
+    // Create via FFI
+    if (_ffiProvider != null && _ffiProvider!.initialized) {
+      final (result, linkIdHex) = _ffiProvider!.bindings.groupCreateInviteLink(
+        groupId,
+        name: name,
+        expiresAtMs: expiresAt?.millisecondsSinceEpoch,
+        maxUses: maxUses,
+      );
+      if (result != 0 || linkIdHex == null) {
+        _log.error('Failed to create invite link via FFI: $result',
+            source: 'GroupService');
+        return null;
+      }
+      linkId = linkIdHex;
+    } else {
+      // Fallback for testing
+      linkId = _uuid.v4().replaceAll('-', '');
+    }
+
+    final link = InviteLink(
+      id: linkId,
+      groupId: groupId,
+      createdBy: identity.nodeId,
+      createdAt: now,
+      expiresAt: expiresAt,
+      maxUses: maxUses,
+      useCount: 0,
+      isRevoked: false,
+      name: name,
+    );
+
+    // Save to database
+    await db.insert('group_invite_links', link.toMap());
+
+    _log.info('Created invite link $linkId for group $groupId',
+        source: 'GroupService');
+
+    return link;
+  }
+
+  /// Revoke an invite link
+  Future<bool> revokeInviteLink({
+    required String groupId,
+    required String linkId,
+  }) async {
+    final db = await DatabaseService.instance.database;
+
+    // Revoke via FFI
+    if (_ffiProvider != null && _ffiProvider!.initialized) {
+      final result = _ffiProvider!.bindings.groupRevokeInviteLink(groupId, linkId);
+      if (result != 0) {
+        _log.error('Failed to revoke invite link via FFI: $result',
+            source: 'GroupService');
+        return false;
+      }
+    }
+
+    // Update database
+    await db.update(
+      'group_invite_links',
+      {'is_revoked': 1},
+      where: 'id = ? AND group_id = ?',
+      whereArgs: [linkId, groupId],
+    );
+
+    _log.info('Revoked invite link $linkId', source: 'GroupService');
+    return true;
+  }
+
+  /// Join a group via invite link
+  Future<bool> joinViaLink({
+    required String groupId,
+    required String linkId,
+  }) async {
+    final db = await DatabaseService.instance.database;
+    final identity = IdentityService.instance.currentIdentity;
+    if (identity == null) {
+      _log.error('Cannot join via link: no identity', source: 'GroupService');
+      return false;
+    }
+
+    // Join via FFI
+    if (_ffiProvider != null && _ffiProvider!.initialized) {
+      final result = _ffiProvider!.bindings.groupJoinViaLink(groupId, linkId);
+      if (result != 0) {
+        _log.error('Failed to join via link FFI: $result',
+            source: 'GroupService');
+        return false;
+      }
+    }
+
+    // Record link usage
+    await db.insert('invite_link_usage', {
+      'link_id': linkId,
+      'node_id': identity.nodeId,
+      'joined_at': DateTime.now().millisecondsSinceEpoch,
+    });
+
+    // Increment use count
+    await db.rawUpdate('''
+      UPDATE group_invite_links
+      SET use_count = use_count + 1
+      WHERE id = ?
+    ''', [linkId]);
+
+    _log.info('Joined group $groupId via link $linkId', source: 'GroupService');
+    return true;
+  }
+
+  /// Get all invite links for a group
+  Future<List<InviteLink>> getInviteLinks(String groupId) async {
+    final db = await DatabaseService.instance.database;
+
+    // Try FFI first for most up-to-date data
+    if (_ffiProvider != null && _ffiProvider!.initialized) {
+      final linksData = _ffiProvider!.bindings.groupGetInviteLinks(groupId);
+      if (linksData.isNotEmpty) {
+        return linksData.map((data) => InviteLink(
+          id: data['id'] as String,
+          groupId: data['groupId'] as String,
+          createdBy: data['createdBy'] as String,
+          createdAt: DateTime.fromMillisecondsSinceEpoch(data['createdAt'] as int),
+          expiresAt: data['expiresAt'] != null && data['expiresAt'] != 0
+              ? DateTime.fromMillisecondsSinceEpoch(data['expiresAt'] as int)
+              : null,
+          maxUses: data['maxUses'] as int?,
+          useCount: data['useCount'] as int? ?? 0,
+          isRevoked: data['isRevoked'] as bool? ?? false,
+          name: data['name'] as String?,
+        )).toList();
+      }
+    }
+
+    // Fallback to database
+    final rows = await db.query(
+      'group_invite_links',
+      where: 'group_id = ?',
+      whereArgs: [groupId],
+      orderBy: 'created_at DESC',
+    );
+
+    return rows.map((row) => InviteLink.fromMap(row)).toList();
+  }
+
+  /// Get a specific invite link
+  Future<InviteLink?> getInviteLink({
+    required String groupId,
+    required String linkId,
+  }) async {
+    final db = await DatabaseService.instance.database;
+
+    // Try FFI first
+    if (_ffiProvider != null && _ffiProvider!.initialized) {
+      final data = _ffiProvider!.bindings.groupGetInviteLink(groupId, linkId);
+      if (data != null) {
+        return InviteLink(
+          id: data['id'] as String,
+          groupId: data['groupId'] as String,
+          createdBy: data['createdBy'] as String,
+          createdAt: DateTime.fromMillisecondsSinceEpoch(data['createdAt'] as int),
+          expiresAt: data['expiresAt'] != null && data['expiresAt'] != 0
+              ? DateTime.fromMillisecondsSinceEpoch(data['expiresAt'] as int)
+              : null,
+          maxUses: data['maxUses'] as int?,
+          useCount: data['useCount'] as int? ?? 0,
+          isRevoked: data['isRevoked'] as bool? ?? false,
+          name: data['name'] as String?,
+        );
+      }
+    }
+
+    // Fallback to database
+    final rows = await db.query(
+      'group_invite_links',
+      where: 'id = ? AND group_id = ?',
+      whereArgs: [linkId, groupId],
+    );
+
+    if (rows.isEmpty) return null;
+    return InviteLink.fromMap(rows.first);
+  }
+
+  /// Get invite link URL for sharing
+  String getInviteLinkUrl({
+    required String groupId,
+    required String linkId,
+  }) {
+    return 'cyxchat://join/$groupId/$linkId';
+  }
+
+  /// Parse an invite URL
+  /// Returns (groupId, linkId) or null if invalid
+  ({String groupId, String linkId})? parseInviteUrl(String url) {
+    final result = _ffiProvider?.bindings.groupParseInviteUrl(url);
+    if (result != null) {
+      return (groupId: result.$1, linkId: result.$2);
+    }
+    return null;
+  }
+
+  /// Get users who joined via a specific link
+  Future<List<InviteLinkUsage>> getLinkUsage(String linkId) async {
+    final db = await DatabaseService.instance.database;
+
+    final rows = await db.query(
+      'invite_link_usage',
+      where: 'link_id = ?',
+      whereArgs: [linkId],
+      orderBy: 'joined_at DESC',
+    );
+
+    return rows.map((row) => InviteLinkUsage.fromMap(row)).toList();
+  }
+
+  /// Delete an invite link completely (admin only)
+  Future<bool> deleteInviteLink({
+    required String groupId,
+    required String linkId,
+  }) async {
+    final db = await DatabaseService.instance.database;
+
+    // Delete usage records first
+    await db.delete(
+      'invite_link_usage',
+      where: 'link_id = ?',
+      whereArgs: [linkId],
+    );
+
+    // Delete the link
+    await db.delete(
+      'group_invite_links',
+      where: 'id = ? AND group_id = ?',
+      whereArgs: [linkId, groupId],
+    );
+
+    _log.info('Deleted invite link $linkId', source: 'GroupService');
+    return true;
+  }
+
+  // ============================================================
+  // Admin Action Log (Phase 4)
+  // ============================================================
+
+  /// Log an admin action
+  Future<AdminAction?> logAdminAction({
+    required String groupId,
+    required AdminActionType actionType,
+    String? targetId,
+    String? targetMessageId,
+    String? oldValue,
+    String? newValue,
+  }) async {
+    // Log via FFI
+    final result = _ffiProvider?.bindings.groupLogAdminAction(
+      groupId,
+      actionType.value,
+      targetIdHex: targetId,
+      targetMsgIdHex: targetMessageId,
+      oldValue: oldValue,
+      newValue: newValue,
+    );
+
+    if (result == null || result.$1 != 0) {
+      _log.warning('Failed to log admin action: ${result?.$1}', source: 'GroupService');
+      return null;
+    }
+
+    final actionId = result.$2!;
+    final now = DateTime.now();
+
+    // Also store in database for persistence
+    final db = await DatabaseService.instance.database;
+    final action = AdminAction(
+      id: actionId,
+      groupId: groupId,
+      adminId: _ffiProvider!.localNodeId!,
+      actionType: actionType,
+      targetId: targetId,
+      targetMessageId: targetMessageId,
+      oldValue: oldValue,
+      newValue: newValue,
+      timestamp: now,
+    );
+
+    await db.insert('admin_actions', action.toMap());
+
+    _log.info('Logged admin action: ${actionType.description}', source: 'GroupService');
+    return action;
+  }
+
+  /// Get admin actions for a group
+  Future<List<AdminAction>> getAdminActions(
+    String groupId, {
+    int limit = 50,
+    int offset = 0,
+  }) async {
+    final db = await DatabaseService.instance.database;
+
+    final rows = await db.query(
+      'admin_actions',
+      where: 'group_id = ?',
+      whereArgs: [groupId],
+      orderBy: 'timestamp DESC',
+      limit: limit,
+      offset: offset,
+    );
+
+    return rows.map((row) => AdminAction.fromMap(row)).toList();
+  }
+
+  /// Get admin actions by a specific admin
+  Future<List<AdminAction>> getAdminActionsByAdmin(
+    String groupId,
+    String adminId, {
+    int limit = 50,
+  }) async {
+    final db = await DatabaseService.instance.database;
+
+    final rows = await db.query(
+      'admin_actions',
+      where: 'group_id = ? AND admin_id = ?',
+      whereArgs: [groupId, adminId],
+      orderBy: 'timestamp DESC',
+      limit: limit,
+    );
+
+    return rows.map((row) => AdminAction.fromMap(row)).toList();
+  }
+
+  /// Get count of admin actions for a group
+  Future<int> getAdminActionCount(String groupId) async {
+    final db = await DatabaseService.instance.database;
+
+    final result = await db.rawQuery(
+      'SELECT COUNT(*) as count FROM admin_actions WHERE group_id = ?',
+      [groupId],
+    );
+
+    return Sqflite.firstIntValue(result) ?? 0;
+  }
+
+  /// Get admin actions filtered by type
+  Future<List<AdminAction>> getAdminActionsByType(
+    String groupId,
+    AdminActionType actionType, {
+    int limit = 50,
+  }) async {
+    final db = await DatabaseService.instance.database;
+
+    final rows = await db.query(
+      'admin_actions',
+      where: 'group_id = ? AND action_type = ?',
+      whereArgs: [groupId, actionType.value],
+      orderBy: 'timestamp DESC',
+      limit: limit,
+    );
+
+    return rows.map((row) => AdminAction.fromMap(row)).toList();
+  }
+
+  /// Delete old admin actions (for cleanup)
+  Future<int> deleteOldAdminActions(
+    String groupId, {
+    int olderThanDays = 90,
+  }) async {
+    final db = await DatabaseService.instance.database;
+    final cutoff = DateTime.now()
+        .subtract(Duration(days: olderThanDays))
+        .millisecondsSinceEpoch;
+
+    return await db.delete(
+      'admin_actions',
+      where: 'group_id = ? AND timestamp < ?',
+      whereArgs: [groupId, cutoff],
+    );
   }
 
   // ============================================================

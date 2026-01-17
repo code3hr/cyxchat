@@ -1,6 +1,10 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/models.dart';
 import '../services/group_service.dart';
+import 'conversation_provider.dart';
+
+/// Provider for the GroupService instance
+final groupServiceProvider = Provider((ref) => GroupService.instance);
 
 /// Provider for all groups
 final groupsProvider = FutureProvider<List<Group>>((ref) async {
@@ -34,6 +38,18 @@ final groupUpdateStreamProvider = StreamProvider<Group>((ref) {
   return GroupService.instance.groupUpdateStream;
 });
 
+/// Provider for pinned messages in a group
+final pinnedMessagesProvider =
+    FutureProvider.family<List<Message>, String>((ref, groupId) async {
+  return GroupService.instance.getPinnedMessages(groupId);
+});
+
+/// Provider for pinned messages count in a group
+final pinnedMessagesCountProvider =
+    FutureProvider.family<int, String>((ref, groupId) async {
+  return GroupService.instance.getPinnedCount(groupId);
+});
+
 /// Provider for group actions
 final groupActionsProvider = Provider((ref) => GroupActions(ref));
 
@@ -49,6 +65,7 @@ class GroupActions {
       description: description,
     );
     _ref.invalidate(groupsProvider);
+    _ref.invalidate(conversationsProvider);  // Refresh home screen
     return group;
   }
 
@@ -86,6 +103,7 @@ class GroupActions {
   Future<void> leaveGroup(String groupId) async {
     await GroupService.instance.leaveGroup(groupId);
     _ref.invalidate(groupsProvider);
+    _ref.invalidate(conversationsProvider);  // Refresh home screen
   }
 
   /// Promote member to admin

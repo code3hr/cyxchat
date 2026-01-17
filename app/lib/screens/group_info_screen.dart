@@ -1,9 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../main.dart';
 import '../models/models.dart';
 import '../providers/group_provider.dart';
+import '../providers/contact_provider.dart';
+import '../services/group_service.dart';
 import '../services/identity_service.dart';
+import 'invite_links_screen.dart';
+import 'admin_log_screen.dart';
 
 class GroupInfoScreen extends ConsumerStatefulWidget {
   final String groupId;
@@ -103,6 +108,54 @@ class _GroupInfoScreenState extends ConsumerState<GroupInfoScreen> {
 
               const SizedBox(height: 24),
 
+              // Group Settings section (admins only)
+              if (canManageMembers)
+                _GroupSettingsSection(
+                  group: group,
+                  isOwner: group.isOwner(myNodeId),
+                  onSlowModeChanged: (seconds) => _setSlowMode(seconds),
+                  onWhoCanAddChanged: (setting) => _setWhoCanAdd(setting),
+                  onWhoCanEditChanged: (setting) => _setWhoCanEdit(setting),
+                  onHistoryVisibleChanged: (visible) => _setHistoryVisible(visible),
+                  onUpgradeToSupergroup: () => _upgradeToSupergroup(),
+                ),
+
+              if (canManageMembers) const SizedBox(height: 24),
+
+              // Invite Links section (admins only)
+              if (canManageMembers)
+                _InviteLinksSection(
+                  group: group,
+                  onManageLinks: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => InviteLinksScreen(
+                        groupId: group.id,
+                        groupName: group.name,
+                      ),
+                    ),
+                  ),
+                ),
+
+              if (canManageMembers) const SizedBox(height: 24),
+
+              // Admin Log section (admins only)
+              if (canManageMembers)
+                _AdminLogSection(
+                  group: group,
+                  onViewLog: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => AdminLogScreen(
+                        groupId: group.id,
+                        groupName: group.name,
+                      ),
+                    ),
+                  ),
+                ),
+
+              if (canManageMembers) const SizedBox(height: 24),
+
               // Actions
               _ActionsSection(
                 group: group,
@@ -150,10 +203,105 @@ class _GroupInfoScreenState extends ConsumerState<GroupInfoScreen> {
   }
 
   void _showAddMemberDialog(BuildContext context) {
-    // TODO: Show contact picker to add members
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Add member feature coming soon')),
+    final groupAsync = ref.read(groupProvider(widget.groupId));
+    final group = groupAsync.valueOrNull;
+    if (group == null) return;
+
+    // Get existing member IDs to filter them out
+    final existingMemberIds = group.members.map((m) => m.nodeId).toSet();
+
+    showDialog(
+      context: context,
+      builder: (context) => Consumer(
+        builder: (context, ref, _) {
+          final contactsAsync = ref.watch(contactsProvider);
+
+          return AlertDialog(
+            title: const Text('Add Member'),
+            content: SizedBox(
+              width: double.maxFinite,
+              height: 300,
+              child: contactsAsync.when(
+                loading: () => const Center(child: CircularProgressIndicator()),
+                error: (e, _) => Center(child: Text('Error: $e')),
+                data: (contacts) {
+                  // Filter out existing members
+                  final availableContacts = contacts
+                      .where((c) => !existingMemberIds.contains(c.nodeId))
+                      .toList();
+
+                  if (availableContacts.isEmpty) {
+                    return const Center(
+                      child: Text(
+                        'No contacts available to add.\nAdd contacts first from the Contacts tab.',
+                        textAlign: TextAlign.center,
+                      ),
+                    );
+                  }
+
+                  return ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: availableContacts.length,
+                    itemBuilder: (context, index) {
+                      final contact = availableContacts[index];
+                      return ListTile(
+                        leading: CircleAvatar(
+                          backgroundColor: AppColors.primary,
+                          child: Text(
+                            (contact.displayName ?? contact.shortId)[0].toUpperCase(),
+                            style: const TextStyle(color: Colors.white),
+                          ),
+                        ),
+                        title: Text(contact.displayName ?? contact.shortId),
+                        subtitle: Text(
+                          contact.shortId,
+                          style: TextStyle(
+                            color: Colors.grey[400],
+                            fontSize: 12,
+                          ),
+                        ),
+                        onTap: () async {
+                          Navigator.pop(context);
+                          await _inviteMember(contact);
+                        },
+                      );
+                    },
+                  );
+                },
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancel'),
+              ),
+            ],
+          );
+        },
+      ),
     );
+  }
+
+  Future<void> _inviteMember(Contact contact) async {
+    try {
+      await ref.read(groupActionsProvider).inviteMember(
+        widget.groupId,
+        contact.nodeId,
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Invited ${contact.displayName ?? contact.shortId}'),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to invite: $e')),
+        );
+      }
+    }
   }
 
   void _showMemberOptions(
@@ -169,6 +317,12 @@ class _GroupInfoScreenState extends ConsumerState<GroupInfoScreen> {
         (myRole == GroupRole.admin && member.role == GroupRole.member);
 
     if (isMe || !canManage) return;
+
+    // Check if member is currently muted
+    final isMuted = GroupService.instance.isMemberMuted(
+      groupId: widget.groupId,
+      memberId: member.nodeId,
+    );
 
     showModalBottomSheet(
       context: context,
@@ -229,6 +383,26 @@ class _GroupInfoScreenState extends ConsumerState<GroupInfoScreen> {
                   ),
               ],
 
+              // Mute/Unmute
+              if (isMuted)
+                ListTile(
+                  leading: const Icon(Icons.volume_up),
+                  title: const Text('Unmute'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _unmuteMember(member);
+                  },
+                )
+              else
+                ListTile(
+                  leading: const Icon(Icons.volume_off),
+                  title: const Text('Mute'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _showMuteOptions(member);
+                  },
+                ),
+
               // Remove member
               ListTile(
                 leading: Icon(Icons.person_remove, color: AppColors.error),
@@ -281,6 +455,274 @@ class _GroupInfoScreenState extends ConsumerState<GroupInfoScreen> {
               ),
             ),
           ],
+        );
+      },
+    );
+  }
+
+  // ============================================================
+  // Group Settings Methods
+  // ============================================================
+
+  Future<void> _setSlowMode(int seconds) async {
+    try {
+      await GroupService.instance.setSlowMode(
+        groupId: widget.groupId,
+        seconds: seconds,
+      );
+      ref.invalidate(groupProvider(widget.groupId));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(seconds == 0
+                ? 'Slow mode disabled'
+                : 'Slow mode set to ${_formatSlowMode(seconds)}'),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to update slow mode: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _setWhoCanAdd(WhoCanAddMembers setting) async {
+    try {
+      await GroupService.instance.setWhoCanAddMembers(
+        groupId: widget.groupId,
+        setting: setting,
+      );
+      ref.invalidate(groupProvider(widget.groupId));
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to update setting: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _setWhoCanEdit(WhoCanChangeInfo setting) async {
+    try {
+      await GroupService.instance.setWhoCanChangeInfo(
+        groupId: widget.groupId,
+        setting: setting,
+      );
+      ref.invalidate(groupProvider(widget.groupId));
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to update setting: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _setHistoryVisible(bool visible) async {
+    try {
+      await GroupService.instance.setMessageHistoryVisible(
+        groupId: widget.groupId,
+        visible: visible,
+      );
+      ref.invalidate(groupProvider(widget.groupId));
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to update setting: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _upgradeToSupergroup() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppColors.bgDarkSecondary,
+        title: const Text('Upgrade to Supergroup?'),
+        content: const Text(
+          'Supergroups have unlimited members and advanced admin features. '
+          'This cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(
+              'Upgrade',
+              style: TextStyle(color: AppColors.primary),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      try {
+        await GroupService.instance.upgradeToSupergroup(widget.groupId);
+        ref.invalidate(groupProvider(widget.groupId));
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Upgraded to supergroup')),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Failed to upgrade: $e')),
+          );
+        }
+      }
+    }
+  }
+
+  String _formatSlowMode(int seconds) {
+    if (seconds < 60) return '${seconds}s';
+    if (seconds < 3600) return '${seconds ~/ 60}m';
+    return '${seconds ~/ 3600}h';
+  }
+
+  // ============================================================
+  // Member Restriction Methods
+  // ============================================================
+
+  Future<void> _muteMember(GroupMember member, Duration? duration) async {
+    final identity = IdentityService.instance.currentIdentity;
+    if (identity == null) return;
+
+    try {
+      await GroupService.instance.muteMember(
+        groupId: widget.groupId,
+        memberId: member.nodeId,
+        restrictedBy: identity.nodeId,
+        duration: duration,
+      );
+      ref.invalidate(groupProvider(widget.groupId));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(duration == null
+                ? 'Muted ${member.displayText} permanently'
+                : 'Muted ${member.displayText} for ${_formatDuration(duration)}'),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to mute: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _unmuteMember(GroupMember member) async {
+    try {
+      await GroupService.instance.unrestrictMember(
+        groupId: widget.groupId,
+        memberId: member.nodeId,
+      );
+      ref.invalidate(groupProvider(widget.groupId));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Unmuted ${member.displayText}')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to unmute: $e')),
+        );
+      }
+    }
+  }
+
+  String _formatDuration(Duration duration) {
+    if (duration.inDays > 0) return '${duration.inDays} days';
+    if (duration.inHours > 0) return '${duration.inHours} hours';
+    if (duration.inMinutes > 0) return '${duration.inMinutes} minutes';
+    return '${duration.inSeconds} seconds';
+  }
+
+  void _showMuteOptions(GroupMember member) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.bgDarkSecondary,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 8),
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppColors.textDarkSecondary,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Mute Duration',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 16),
+              ListTile(
+                leading: const Icon(Icons.timer),
+                title: const Text('1 hour'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _muteMember(member, const Duration(hours: 1));
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.timer),
+                title: const Text('8 hours'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _muteMember(member, const Duration(hours: 8));
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.timer),
+                title: const Text('1 day'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _muteMember(member, const Duration(days: 1));
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.timer),
+                title: const Text('1 week'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _muteMember(member, const Duration(days: 7));
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.block),
+                title: const Text('Forever'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _muteMember(member, null);
+                },
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
         );
       },
     );
@@ -426,6 +868,53 @@ class _GroupHeader extends StatelessWidget {
                 ),
               ),
             ],
+          ),
+
+          const SizedBox(height: 12),
+
+          // Group ID with copy button
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: AppColors.bgDarkSecondary,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.tag,
+                  size: 14,
+                  color: AppColors.textDarkSecondary,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  group.shortId,
+                  style: TextStyle(
+                    color: AppColors.textDarkSecondary,
+                    fontSize: 12,
+                    fontFamily: 'monospace',
+                  ),
+                ),
+                const SizedBox(width: 8),
+                InkWell(
+                  onTap: () {
+                    Clipboard.setData(ClipboardData(text: group.id));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Group ID copied to clipboard'),
+                        duration: Duration(seconds: 2),
+                      ),
+                    );
+                  },
+                  child: Icon(
+                    Icons.copy,
+                    size: 16,
+                    color: AppColors.primary,
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -659,6 +1148,529 @@ class _ActionsSection extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(vertical: 12),
               ),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Group settings section for admin controls
+class _GroupSettingsSection extends StatelessWidget {
+  final Group group;
+  final bool isOwner;
+  final void Function(int seconds) onSlowModeChanged;
+  final void Function(WhoCanAddMembers) onWhoCanAddChanged;
+  final void Function(WhoCanChangeInfo) onWhoCanEditChanged;
+  final void Function(bool visible) onHistoryVisibleChanged;
+  final VoidCallback onUpgradeToSupergroup;
+
+  const _GroupSettingsSection({
+    required this.group,
+    required this.isOwner,
+    required this.onSlowModeChanged,
+    required this.onWhoCanAddChanged,
+    required this.onWhoCanEditChanged,
+    required this.onHistoryVisibleChanged,
+    required this.onUpgradeToSupergroup,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(
+            children: [
+              Text(
+                'Group Settings',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textDarkSecondary,
+                ),
+              ),
+              if (group.isSupergroup) ...[
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: AppColors.primary.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    'Supergroup',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: AppColors.primary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(height: 8),
+
+        // Group type / Upgrade option (owner only, basic groups only)
+        if (isOwner && !group.isSupergroup)
+          ListTile(
+            leading: const Icon(Icons.upgrade),
+            title: const Text('Upgrade to Supergroup'),
+            subtitle: Text(
+              'Unlimited members, advanced features',
+              style: TextStyle(
+                color: AppColors.textDarkSecondary,
+                fontSize: 12,
+              ),
+            ),
+            trailing: Icon(Icons.chevron_right, color: AppColors.textDarkSecondary),
+            onTap: onUpgradeToSupergroup,
+          ),
+
+        // Slow mode
+        ListTile(
+          leading: const Icon(Icons.slow_motion_video),
+          title: const Text('Slow Mode'),
+          subtitle: Text(
+            group.slowModeDisplay,
+            style: TextStyle(
+              color: AppColors.textDarkSecondary,
+              fontSize: 12,
+            ),
+          ),
+          trailing: Icon(Icons.chevron_right, color: AppColors.textDarkSecondary),
+          onTap: () => _showSlowModeDialog(context),
+        ),
+
+        // Who can add members
+        ListTile(
+          leading: const Icon(Icons.person_add),
+          title: const Text('Who Can Add Members'),
+          subtitle: Text(
+            group.whoCanAddMembers.displayName,
+            style: TextStyle(
+              color: AppColors.textDarkSecondary,
+              fontSize: 12,
+            ),
+          ),
+          trailing: Icon(Icons.chevron_right, color: AppColors.textDarkSecondary),
+          onTap: () => _showWhoCanAddDialog(context),
+        ),
+
+        // Who can edit info
+        ListTile(
+          leading: const Icon(Icons.edit),
+          title: const Text('Who Can Change Info'),
+          subtitle: Text(
+            group.whoCanChangeInfo.displayName,
+            style: TextStyle(
+              color: AppColors.textDarkSecondary,
+              fontSize: 12,
+            ),
+          ),
+          trailing: Icon(Icons.chevron_right, color: AppColors.textDarkSecondary),
+          onTap: () => _showWhoCanEditDialog(context),
+        ),
+
+        // Message history visible
+        SwitchListTile(
+          secondary: const Icon(Icons.history),
+          title: const Text('Message History'),
+          subtitle: Text(
+            'Show history to new members',
+            style: TextStyle(
+              color: AppColors.textDarkSecondary,
+              fontSize: 12,
+            ),
+          ),
+          value: group.messageHistoryVisible,
+          onChanged: onHistoryVisibleChanged,
+          activeColor: AppColors.primary,
+        ),
+      ],
+    );
+  }
+
+  void _showSlowModeDialog(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.bgDarkSecondary,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 8),
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppColors.textDarkSecondary,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Slow Mode',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Set the minimum time between messages',
+                style: TextStyle(
+                  color: AppColors.textDarkSecondary,
+                  fontSize: 13,
+                ),
+              ),
+              const SizedBox(height: 16),
+              _SlowModeOption(
+                label: 'Off',
+                seconds: 0,
+                isSelected: group.slowModeSeconds == 0,
+                onTap: () {
+                  Navigator.pop(context);
+                  onSlowModeChanged(0);
+                },
+              ),
+              _SlowModeOption(
+                label: '10 seconds',
+                seconds: 10,
+                isSelected: group.slowModeSeconds == 10,
+                onTap: () {
+                  Navigator.pop(context);
+                  onSlowModeChanged(10);
+                },
+              ),
+              _SlowModeOption(
+                label: '30 seconds',
+                seconds: 30,
+                isSelected: group.slowModeSeconds == 30,
+                onTap: () {
+                  Navigator.pop(context);
+                  onSlowModeChanged(30);
+                },
+              ),
+              _SlowModeOption(
+                label: '1 minute',
+                seconds: 60,
+                isSelected: group.slowModeSeconds == 60,
+                onTap: () {
+                  Navigator.pop(context);
+                  onSlowModeChanged(60);
+                },
+              ),
+              _SlowModeOption(
+                label: '5 minutes',
+                seconds: 300,
+                isSelected: group.slowModeSeconds == 300,
+                onTap: () {
+                  Navigator.pop(context);
+                  onSlowModeChanged(300);
+                },
+              ),
+              _SlowModeOption(
+                label: '15 minutes',
+                seconds: 900,
+                isSelected: group.slowModeSeconds == 900,
+                onTap: () {
+                  Navigator.pop(context);
+                  onSlowModeChanged(900);
+                },
+              ),
+              _SlowModeOption(
+                label: '1 hour',
+                seconds: 3600,
+                isSelected: group.slowModeSeconds == 3600,
+                onTap: () {
+                  Navigator.pop(context);
+                  onSlowModeChanged(3600);
+                },
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _showWhoCanAddDialog(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.bgDarkSecondary,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 8),
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppColors.textDarkSecondary,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Who Can Add Members',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 16),
+              ListTile(
+                leading: Icon(
+                  Icons.check,
+                  color: group.whoCanAddMembers == WhoCanAddMembers.everyone
+                      ? AppColors.primary
+                      : Colors.transparent,
+                ),
+                title: const Text('Everyone'),
+                subtitle: Text(
+                  'All members can add new members',
+                  style: TextStyle(
+                    color: AppColors.textDarkSecondary,
+                    fontSize: 12,
+                  ),
+                ),
+                onTap: () {
+                  Navigator.pop(context);
+                  onWhoCanAddChanged(WhoCanAddMembers.everyone);
+                },
+              ),
+              ListTile(
+                leading: Icon(
+                  Icons.check,
+                  color: group.whoCanAddMembers == WhoCanAddMembers.adminsOnly
+                      ? AppColors.primary
+                      : Colors.transparent,
+                ),
+                title: const Text('Admins Only'),
+                subtitle: Text(
+                  'Only admins and owner can add members',
+                  style: TextStyle(
+                    color: AppColors.textDarkSecondary,
+                    fontSize: 12,
+                  ),
+                ),
+                onTap: () {
+                  Navigator.pop(context);
+                  onWhoCanAddChanged(WhoCanAddMembers.adminsOnly);
+                },
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _showWhoCanEditDialog(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.bgDarkSecondary,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 8),
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppColors.textDarkSecondary,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Who Can Change Info',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 16),
+              ListTile(
+                leading: Icon(
+                  Icons.check,
+                  color: group.whoCanChangeInfo == WhoCanChangeInfo.everyone
+                      ? AppColors.primary
+                      : Colors.transparent,
+                ),
+                title: const Text('Everyone'),
+                subtitle: Text(
+                  'All members can change name and description',
+                  style: TextStyle(
+                    color: AppColors.textDarkSecondary,
+                    fontSize: 12,
+                  ),
+                ),
+                onTap: () {
+                  Navigator.pop(context);
+                  onWhoCanEditChanged(WhoCanChangeInfo.everyone);
+                },
+              ),
+              ListTile(
+                leading: Icon(
+                  Icons.check,
+                  color: group.whoCanChangeInfo == WhoCanChangeInfo.adminsOnly
+                      ? AppColors.primary
+                      : Colors.transparent,
+                ),
+                title: const Text('Admins Only'),
+                subtitle: Text(
+                  'Only admins and owner can change info',
+                  style: TextStyle(
+                    color: AppColors.textDarkSecondary,
+                    fontSize: 12,
+                  ),
+                ),
+                onTap: () {
+                  Navigator.pop(context);
+                  onWhoCanEditChanged(WhoCanChangeInfo.adminsOnly);
+                },
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// Slow mode option tile
+class _SlowModeOption extends StatelessWidget {
+  final String label;
+  final int seconds;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  const _SlowModeOption({
+    required this.label,
+    required this.seconds,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      leading: Icon(
+        Icons.check,
+        color: isSelected ? AppColors.primary : Colors.transparent,
+      ),
+      title: Text(label),
+      onTap: onTap,
+    );
+  }
+}
+
+/// Section for invite link management
+class _InviteLinksSection extends StatelessWidget {
+  final Group group;
+  final VoidCallback onManageLinks;
+
+  const _InviteLinksSection({
+    required this.group,
+    required this.onManageLinks,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+            child: Row(
+              children: [
+                Icon(Icons.link, size: 20, color: AppColors.primary),
+                const SizedBox(width: 8),
+                Text(
+                  'Invite Links',
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                ),
+              ],
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.link),
+            title: const Text('Manage Invite Links'),
+            subtitle: const Text('Create, share, or revoke invite links'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: onManageLinks,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Section for admin action log
+class _AdminLogSection extends StatelessWidget {
+  final Group group;
+  final VoidCallback onViewLog;
+
+  const _AdminLogSection({
+    required this.group,
+    required this.onViewLog,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+            child: Row(
+              children: [
+                Icon(Icons.history, size: 20, color: AppColors.primary),
+                const SizedBox(width: 8),
+                Text(
+                  'Admin Log',
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                ),
+              ],
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.history),
+            title: const Text('View Admin Actions'),
+            subtitle: const Text('See all administrative actions'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: onViewLog,
           ),
         ],
       ),

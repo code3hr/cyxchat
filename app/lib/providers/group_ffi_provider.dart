@@ -127,6 +127,7 @@ class GroupFFIProvider extends ChangeNotifier {
   // Getters
   bool get initialized => _initialized;
   String? get localNodeId => _localNodeId;
+  CyxChatBindings get bindings => _bindings;
 
   /// Stream of incoming group messages
   Stream<GroupMessageReceived> get messageStream => _messageController.stream;
@@ -160,15 +161,20 @@ class GroupFFIProvider extends ChangeNotifier {
 
     try {
       // Check if chat context exists (group module depends on it)
+      print('GroupFFI: Checking chat context...');
       if (_bindings.chatCtx == null) {
+        print('GroupFFI: ERROR - chat context is null!');
         log.error('Cannot initialize groups: chat context not created',
             source: 'GroupFFI');
         return false;
       }
+      print('GroupFFI: Chat context OK, creating group context...');
 
       // Create group context using chat context
       final result = _bindings.groupCtxCreate(_bindings.chatCtx!);
+      print('GroupFFI: groupCtxCreate result = $result');
       if (result != CyxChatError.ok) {
+        print('GroupFFI: ERROR - groupCtxCreate failed: ${_bindings.errorString(result)}');
         log.error(
             'Failed to create group context: ${_bindings.errorString(result)}',
             source: 'GroupFFI');
@@ -176,15 +182,22 @@ class GroupFFIProvider extends ChangeNotifier {
       }
 
       // Set up callbacks
+      print('GroupFFI: Setting up callbacks...');
       _setupCallbacks();
+      print('GroupFFI: Callbacks set up');
 
       _initialized = true;
+      print('GroupFFI: Starting polling...');
       _startPolling();
+      print('GroupFFI: Polling started');
       notifyListeners();
 
       log.info('Group FFI provider initialized', source: 'GroupFFI');
+      print('GroupFFI: Initialization complete!');
       return true;
-    } catch (e) {
+    } catch (e, st) {
+      print('GroupFFI: EXCEPTION during init: $e');
+      print('GroupFFI: Stack trace: $st');
       log.error('Failed to initialize group FFI provider: $e',
           source: 'GroupFFI');
       return false;
@@ -505,6 +518,247 @@ class GroupFFIProvider extends ChangeNotifier {
   }
 
   // ============================================================
+  // Admin Permissions (FFI) - Phase 1
+  // ============================================================
+
+  /// Set granular permissions for an admin
+  Future<bool> setAdminPermissions({
+    required String groupId,
+    required String adminId,
+    required int permissions,
+  }) async {
+    if (!_initialized) return false;
+
+    final adminIdBytes = NodeIdUtils.toBytesAsList(adminId);
+    final adminIdPtr = calloc<Uint8>(32);
+
+    try {
+      for (int i = 0; i < 32 && i < adminIdBytes.length; i++) {
+        adminIdPtr[i] = adminIdBytes[i];
+      }
+
+      final result = _bindings.groupSetAdminPermissions(groupId, adminIdPtr, permissions);
+      if (result == CyxChatError.ok) {
+        notifyListeners();
+        return true;
+      }
+      return false;
+    } finally {
+      calloc.free(adminIdPtr);
+    }
+  }
+
+  /// Get permissions bitmask for an admin
+  int getAdminPermissions({
+    required String groupId,
+    required String adminId,
+  }) {
+    if (!_initialized) return 0;
+
+    final adminIdBytes = NodeIdUtils.toBytesAsList(adminId);
+    final adminIdPtr = calloc<Uint8>(32);
+
+    try {
+      for (int i = 0; i < 32 && i < adminIdBytes.length; i++) {
+        adminIdPtr[i] = adminIdBytes[i];
+      }
+
+      return _bindings.groupGetAdminPermissions(groupId, adminIdPtr);
+    } finally {
+      calloc.free(adminIdPtr);
+    }
+  }
+
+  /// Check if admin has specific permission
+  bool hasPermission({
+    required String groupId,
+    required String adminId,
+    required int permission,
+  }) {
+    if (!_initialized) return false;
+    return _bindings.groupHasPermission(groupId, adminId, permission);
+  }
+
+  // ============================================================
+  // Member Restrictions (FFI) - Phase 1
+  // ============================================================
+
+  /// Restrict a member (mute, no media, etc.)
+  Future<bool> restrictMember({
+    required String groupId,
+    required String memberId,
+    required int restrictions,
+    int? untilMs,
+  }) async {
+    if (!_initialized) return false;
+
+    final memberIdBytes = NodeIdUtils.toBytesAsList(memberId);
+    final memberIdPtr = calloc<Uint8>(32);
+
+    try {
+      for (int i = 0; i < 32 && i < memberIdBytes.length; i++) {
+        memberIdPtr[i] = memberIdBytes[i];
+      }
+
+      final result = _bindings.groupRestrictMember(
+        groupId,
+        memberIdPtr,
+        restrictions,
+        untilMs ?? 0,
+      );
+      if (result == CyxChatError.ok) {
+        notifyListeners();
+        return true;
+      }
+      return false;
+    } finally {
+      calloc.free(memberIdPtr);
+    }
+  }
+
+  /// Remove all restrictions from a member
+  Future<bool> unrestrictMember({
+    required String groupId,
+    required String memberId,
+  }) async {
+    if (!_initialized) return false;
+
+    final memberIdBytes = NodeIdUtils.toBytesAsList(memberId);
+    final memberIdPtr = calloc<Uint8>(32);
+
+    try {
+      for (int i = 0; i < 32 && i < memberIdBytes.length; i++) {
+        memberIdPtr[i] = memberIdBytes[i];
+      }
+
+      final result = _bindings.groupUnrestrictMember(groupId, memberIdPtr);
+      if (result == CyxChatError.ok) {
+        notifyListeners();
+        return true;
+      }
+      return false;
+    } finally {
+      calloc.free(memberIdPtr);
+    }
+  }
+
+  /// Get member restrictions (returns bitmask and until timestamp)
+  ({int restrictions, int untilMs}) getMemberRestrictions({
+    required String groupId,
+    required String memberId,
+  }) {
+    if (!_initialized) return (restrictions: 0, untilMs: 0);
+
+    final memberIdBytes = NodeIdUtils.toBytesAsList(memberId);
+    final memberIdPtr = calloc<Uint8>(32);
+
+    try {
+      for (int i = 0; i < 32 && i < memberIdBytes.length; i++) {
+        memberIdPtr[i] = memberIdBytes[i];
+      }
+
+      final result = _bindings.groupGetMemberRestrictions(groupId, memberIdPtr);
+      return (restrictions: result.$1, untilMs: result.$2);
+    } finally {
+      calloc.free(memberIdPtr);
+    }
+  }
+
+  /// Check if member is currently muted
+  bool isMemberMuted({
+    required String groupId,
+    required String memberId,
+  }) {
+    if (!_initialized) return false;
+
+    final memberIdBytes = NodeIdUtils.toBytesAsList(memberId);
+    final memberIdPtr = calloc<Uint8>(32);
+
+    try {
+      for (int i = 0; i < 32 && i < memberIdBytes.length; i++) {
+        memberIdPtr[i] = memberIdBytes[i];
+      }
+
+      return _bindings.groupIsMemberMuted(groupId, memberIdPtr);
+    } finally {
+      calloc.free(memberIdPtr);
+    }
+  }
+
+  // ============================================================
+  // Group Settings (FFI) - Phase 1
+  // ============================================================
+
+  /// Set slow mode (seconds between messages)
+  Future<bool> setSlowMode({
+    required String groupId,
+    required int seconds,
+  }) async {
+    if (!_initialized) return false;
+
+    final result = _bindings.groupSetSlowMode(groupId, seconds);
+    if (result == CyxChatError.ok) {
+      notifyListeners();
+      return true;
+    }
+    return false;
+  }
+
+  /// Get slow mode setting
+  int getSlowMode(String groupId) {
+    if (!_initialized) return 0;
+    return _bindings.groupGetSlowMode(groupId);
+  }
+
+  /// Set who can add members (0 = everyone, 1 = admins only)
+  Future<bool> setWhoCanAdd({
+    required String groupId,
+    required int setting,
+  }) async {
+    if (!_initialized) return false;
+
+    final result = _bindings.groupSetWhoCanAdd(groupId, setting);
+    if (result == CyxChatError.ok) {
+      notifyListeners();
+      return true;
+    }
+    return false;
+  }
+
+  /// Set who can edit group info (0 = everyone, 1 = admins only)
+  Future<bool> setWhoCanEdit({
+    required String groupId,
+    required int setting,
+  }) async {
+    if (!_initialized) return false;
+
+    final result = _bindings.groupSetWhoCanEdit(groupId, setting);
+    if (result == CyxChatError.ok) {
+      notifyListeners();
+      return true;
+    }
+    return false;
+  }
+
+  /// Get group type (0 = basic, 1 = supergroup)
+  int getGroupType(String groupId) {
+    if (!_initialized) return 0;
+    return _bindings.groupGetType(groupId);
+  }
+
+  /// Upgrade group to supergroup
+  Future<bool> upgradeToSupergroup(String groupId) async {
+    if (!_initialized) return false;
+
+    final result = _bindings.groupUpgradeToSupergroup(groupId);
+    if (result == CyxChatError.ok) {
+      notifyListeners();
+      return true;
+    }
+    return false;
+  }
+
+  // ============================================================
   // Queries (FFI)
   // ============================================================
 
@@ -533,6 +787,106 @@ class GroupFFIProvider extends ChangeNotifier {
   int getRole(String groupId) {
     if (!_initialized) return CyxChatGroupRole.member;
     return _bindings.groupGetRole(groupId);
+  }
+
+  // ============================================================
+  // Media Sharing (Phase 5)
+  // ============================================================
+
+  /// Send a file to a group
+  Future<GroupFFIResult> sendFile({
+    required String groupId,
+    required String filename,
+    required List<int> fileData,
+    List<int>? thumbnailData,
+  }) async {
+    final log = LogService.instance;
+    if (!_initialized) {
+      return GroupFFIResult.failure('Group FFI not initialized');
+    }
+
+    final result = _bindings.groupSendFile(
+      groupId,
+      filename,
+      fileData,
+      thumbnailData,
+    );
+
+    if (result.error == CyxChatError.ok && result.msgId != null) {
+      log.info('Sent file "$filename" (${fileData.length} bytes) to group',
+          source: 'GroupFFI');
+      return GroupFFIResult.success(msgId: result.msgId);
+    } else {
+      final errorStr = _bindings.errorString(result.error);
+      log.error('Failed to send file: $errorStr', source: 'GroupFFI');
+      return GroupFFIResult.failure('Failed to send file: $errorStr');
+    }
+  }
+
+  /// Send a voice message to a group
+  Future<GroupFFIResult> sendVoice({
+    required String groupId,
+    required List<int> audioData,
+    required int durationMs,
+  }) async {
+    final log = LogService.instance;
+    if (!_initialized) {
+      return GroupFFIResult.failure('Group FFI not initialized');
+    }
+
+    final result = _bindings.groupSendVoice(
+      groupId,
+      audioData,
+      durationMs,
+    );
+
+    if (result.error == CyxChatError.ok && result.msgId != null) {
+      final seconds = (durationMs / 1000).toStringAsFixed(1);
+      log.info('Sent voice message (${seconds}s) to group', source: 'GroupFFI');
+      return GroupFFIResult.success(msgId: result.msgId);
+    } else {
+      final errorStr = _bindings.errorString(result.error);
+      log.error('Failed to send voice message: $errorStr', source: 'GroupFFI');
+      return GroupFFIResult.failure('Failed to send voice message: $errorStr');
+    }
+  }
+
+  /// Send an image to a group
+  Future<GroupFFIResult> sendImage({
+    required String groupId,
+    String? filename,
+    required List<int> imageData,
+    required int width,
+    required int height,
+  }) async {
+    final log = LogService.instance;
+    if (!_initialized) {
+      return GroupFFIResult.failure('Group FFI not initialized');
+    }
+
+    final result = _bindings.groupSendImage(
+      groupId,
+      filename,
+      imageData,
+      width,
+      height,
+    );
+
+    if (result.error == CyxChatError.ok && result.msgId != null) {
+      log.info('Sent image (${width}x$height) to group', source: 'GroupFFI');
+      return GroupFFIResult.success(msgId: result.msgId);
+    } else {
+      final errorStr = _bindings.errorString(result.error);
+      log.error('Failed to send image: $errorStr', source: 'GroupFFI');
+      return GroupFFIResult.failure('Failed to send image: $errorStr');
+    }
+  }
+
+  /// Get the count of media items in a group
+  /// mediaType: -1 for all types, or specific media type
+  int getMediaCount(String groupId, {int mediaType = -1}) {
+    if (!_initialized) return 0;
+    return _bindings.groupGetMediaCount(groupId, mediaType: mediaType);
   }
 
   // ============================================================

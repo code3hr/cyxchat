@@ -40,13 +40,57 @@ enum MessageType {
   image,
   file,
   audio,
-  system;
+  system,
+  video,
+  voice;
 
   static MessageType fromInt(int value) {
     if (value >= 0 && value < MessageType.values.length) {
       return MessageType.values[value];
     }
     return MessageType.text;
+  }
+
+  /// Check if this type is a media type
+  bool get isMedia => this == image || this == video || this == audio || this == voice || this == file;
+
+  /// Get icon for this message type
+  String get icon {
+    switch (this) {
+      case MessageType.text:
+        return '';
+      case MessageType.image:
+        return '🖼️';
+      case MessageType.video:
+        return '🎬';
+      case MessageType.audio:
+        return '🎵';
+      case MessageType.voice:
+        return '🎤';
+      case MessageType.file:
+        return '📎';
+      case MessageType.system:
+        return 'ℹ️';
+    }
+  }
+}
+
+/// Media type for detailed categorization
+enum MediaType {
+  image,
+  video,
+  audio,
+  voice,
+  document,
+  archive,
+  other;
+
+  static MediaType? fromString(String? value) {
+    if (value == null) return null;
+    return MediaType.values.cast<MediaType?>().firstWhere(
+      (e) => e?.name == value,
+      orElse: () => null,
+    );
   }
 }
 
@@ -65,6 +109,18 @@ class Message extends Equatable {
   final bool isDeleted;
   final Map<String, int>? reactions;
 
+  // Phase 2: Message action fields
+  final String? originalContent;  // Content before edit
+  final DateTime? editedAt;       // When message was edited
+  final String? deletedBy;        // Who deleted the message
+  final DateTime? deletedAt;      // When message was deleted
+  final String? forwardedFrom;    // Original source (group ID or sender ID)
+
+  // Phase 5: Media fields
+  final MediaType? mediaType;     // Type of media (image, video, audio, voice, document, etc.)
+  final String? mediaMetadata;    // JSON metadata (dimensions, duration, file size, etc.)
+  final String? thumbnailPath;    // Path to thumbnail file
+
   const Message({
     required this.id,
     required this.conversationId,
@@ -78,6 +134,14 @@ class Message extends Equatable {
     this.isEdited = false,
     this.isDeleted = false,
     this.reactions,
+    this.originalContent,
+    this.editedAt,
+    this.deletedBy,
+    this.deletedAt,
+    this.forwardedFrom,
+    this.mediaType,
+    this.mediaMetadata,
+    this.thumbnailPath,
   });
 
   factory Message.fromMap(Map<String, dynamic> map) {
@@ -94,6 +158,18 @@ class Message extends Equatable {
       isEdited: (map['is_edited'] as int?) == 1,
       isDeleted: (map['is_deleted'] as int?) == 1,
       reactions: null, // Parsed from separate table
+      originalContent: map['original_content'] as String?,
+      editedAt: map['edited_at'] != null
+          ? DateTime.fromMillisecondsSinceEpoch(map['edited_at'] as int)
+          : null,
+      deletedBy: map['deleted_by'] as String?,
+      deletedAt: map['deleted_at'] != null
+          ? DateTime.fromMillisecondsSinceEpoch(map['deleted_at'] as int)
+          : null,
+      forwardedFrom: map['forwarded_from'] as String?,
+      mediaType: MediaType.fromString(map['media_type'] as String?),
+      mediaMetadata: map['media_metadata'] as String?,
+      thumbnailPath: map['thumbnail_path'] as String?,
     );
   }
 
@@ -110,6 +186,14 @@ class Message extends Equatable {
       'is_outgoing': isOutgoing ? 1 : 0,
       'is_edited': isEdited ? 1 : 0,
       'is_deleted': isDeleted ? 1 : 0,
+      'original_content': originalContent,
+      'edited_at': editedAt?.millisecondsSinceEpoch,
+      'deleted_by': deletedBy,
+      'deleted_at': deletedAt?.millisecondsSinceEpoch,
+      'forwarded_from': forwardedFrom,
+      'media_type': mediaType?.name,
+      'media_metadata': mediaMetadata,
+      'thumbnail_path': thumbnailPath,
     };
   }
 
@@ -143,7 +227,21 @@ class Message extends Equatable {
         isEdited,
         isDeleted,
         reactions,
+        originalContent,
+        editedAt,
+        deletedBy,
+        deletedAt,
+        forwardedFrom,
+        mediaType,
+        mediaMetadata,
+        thumbnailPath,
       ];
+
+  /// Check if this is a forwarded message
+  bool get isForwarded => forwardedFrom != null;
+
+  /// Check if this message has media content
+  bool get hasMedia => mediaType != null;
 
   Message copyWith({
     String? id,
@@ -158,6 +256,14 @@ class Message extends Equatable {
     bool? isEdited,
     bool? isDeleted,
     Map<String, int>? reactions,
+    String? originalContent,
+    DateTime? editedAt,
+    String? deletedBy,
+    DateTime? deletedAt,
+    String? forwardedFrom,
+    MediaType? mediaType,
+    String? mediaMetadata,
+    String? thumbnailPath,
   }) {
     return Message(
       id: id ?? this.id,
@@ -172,6 +278,14 @@ class Message extends Equatable {
       isEdited: isEdited ?? this.isEdited,
       isDeleted: isDeleted ?? this.isDeleted,
       reactions: reactions ?? this.reactions,
+      originalContent: originalContent ?? this.originalContent,
+      editedAt: editedAt ?? this.editedAt,
+      deletedBy: deletedBy ?? this.deletedBy,
+      deletedAt: deletedAt ?? this.deletedAt,
+      forwardedFrom: forwardedFrom ?? this.forwardedFrom,
+      mediaType: mediaType ?? this.mediaType,
+      mediaMetadata: mediaMetadata ?? this.mediaMetadata,
+      thumbnailPath: thumbnailPath ?? this.thumbnailPath,
     );
   }
 }

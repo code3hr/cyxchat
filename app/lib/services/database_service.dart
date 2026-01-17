@@ -27,7 +27,7 @@ class DatabaseService {
 
     return await openDatabase(
       path,
-      version: 3,
+      version: 8,
       onCreate: _createDatabase,
       onUpgrade: _upgradeDatabase,
     );
@@ -92,6 +92,14 @@ class DatabaseService {
         is_outgoing INTEGER NOT NULL,
         is_edited INTEGER DEFAULT 0,
         is_deleted INTEGER DEFAULT 0,
+        original_content TEXT,
+        edited_at INTEGER,
+        deleted_by TEXT,
+        deleted_at INTEGER,
+        forwarded_from TEXT,
+        media_type TEXT,
+        media_metadata TEXT,
+        thumbnail_path TEXT,
         FOREIGN KEY (conversation_id) REFERENCES conversations(id)
       )
     ''');
@@ -113,6 +121,12 @@ class DatabaseService {
         creator_id TEXT NOT NULL,
         group_key_encrypted BLOB,
         key_version INTEGER DEFAULT 1,
+        group_type INTEGER DEFAULT 0,
+        who_can_add_members INTEGER DEFAULT 0,
+        who_can_change_info INTEGER DEFAULT 1,
+        message_history_visible INTEGER DEFAULT 1,
+        slow_mode_seconds INTEGER DEFAULT 0,
+        max_members INTEGER DEFAULT 200,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL
       )
@@ -131,6 +145,113 @@ class DatabaseService {
         FOREIGN KEY (group_id) REFERENCES groups(id)
       )
     ''');
+
+    // Admin permissions table (granular per-admin control)
+    await db.execute('''
+      CREATE TABLE admin_permissions (
+        group_id TEXT NOT NULL,
+        node_id TEXT NOT NULL,
+        can_add_members INTEGER DEFAULT 1,
+        can_remove_members INTEGER DEFAULT 1,
+        can_delete_messages INTEGER DEFAULT 1,
+        can_pin_messages INTEGER DEFAULT 0,
+        can_change_info INTEGER DEFAULT 1,
+        can_ban_users INTEGER DEFAULT 0,
+        can_manage_admins INTEGER DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (group_id, node_id),
+        FOREIGN KEY (group_id) REFERENCES groups(id)
+      )
+    ''');
+
+    // Member restrictions table (mute, media/link restrictions, slow mode)
+    await db.execute('''
+      CREATE TABLE member_restrictions (
+        group_id TEXT NOT NULL,
+        node_id TEXT NOT NULL,
+        is_muted INTEGER DEFAULT 0,
+        muted_until INTEGER,
+        can_send_media INTEGER DEFAULT 1,
+        can_send_links INTEGER DEFAULT 1,
+        can_send_messages INTEGER DEFAULT 1,
+        slow_mode_seconds INTEGER DEFAULT 0,
+        last_message_at INTEGER,
+        restricted_by TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (group_id, node_id),
+        FOREIGN KEY (group_id) REFERENCES groups(id)
+      )
+    ''');
+
+    // Pinned messages table
+    await db.execute('''
+      CREATE TABLE pinned_messages (
+        group_id TEXT NOT NULL,
+        message_id TEXT NOT NULL,
+        pinned_by TEXT NOT NULL,
+        pinned_at INTEGER NOT NULL,
+        PRIMARY KEY (group_id, message_id),
+        FOREIGN KEY (group_id) REFERENCES groups(id),
+        FOREIGN KEY (message_id) REFERENCES messages(id)
+      )
+    ''');
+    await db.execute(
+      'CREATE INDEX idx_pinned_messages_group ON pinned_messages(group_id, pinned_at DESC)'
+    );
+
+    // Invite links table
+    await db.execute('''
+      CREATE TABLE group_invite_links (
+        id TEXT PRIMARY KEY,
+        group_id TEXT NOT NULL,
+        created_by TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        expires_at INTEGER,
+        max_uses INTEGER,
+        use_count INTEGER DEFAULT 0,
+        is_revoked INTEGER DEFAULT 0,
+        link_name TEXT,
+        FOREIGN KEY (group_id) REFERENCES groups(id)
+      )
+    ''');
+    await db.execute(
+      'CREATE INDEX idx_invite_links_group ON group_invite_links(group_id, created_at DESC)'
+    );
+
+    // Invite link usage table (tracks who joined via which link)
+    await db.execute('''
+      CREATE TABLE invite_link_usage (
+        link_id TEXT NOT NULL,
+        node_id TEXT NOT NULL,
+        joined_at INTEGER NOT NULL,
+        PRIMARY KEY (link_id, node_id),
+        FOREIGN KEY (link_id) REFERENCES group_invite_links(id)
+      )
+    ''');
+
+    // Admin actions log table (Phase 4)
+    await db.execute('''
+      CREATE TABLE admin_actions (
+        id TEXT PRIMARY KEY,
+        group_id TEXT NOT NULL,
+        admin_id TEXT NOT NULL,
+        action_type INTEGER NOT NULL,
+        target_id TEXT,
+        target_message_id TEXT,
+        old_value TEXT,
+        new_value TEXT,
+        timestamp INTEGER NOT NULL,
+        FOREIGN KEY (group_id) REFERENCES groups(id)
+      )
+    ''');
+    await db.execute(
+      'CREATE INDEX idx_admin_actions_group ON admin_actions(group_id, timestamp DESC)'
+    );
+    await db.execute(
+      'CREATE INDEX idx_admin_actions_admin ON admin_actions(admin_id, timestamp DESC)'
+    );
 
     // Settings table
     await db.execute('''
@@ -163,6 +284,160 @@ class DatabaseService {
       await db.execute('DROP TABLE IF EXISTS email_messages');
       await db.execute('DROP TABLE IF EXISTS email_folders');
     }
+
+    if (oldVersion < 4) {
+      // Version 4: Add Telegram-like group features
+
+      // Add new columns to groups table
+      await db.execute('ALTER TABLE groups ADD COLUMN group_type INTEGER DEFAULT 0');
+      await db.execute('ALTER TABLE groups ADD COLUMN who_can_add_members INTEGER DEFAULT 0');
+      await db.execute('ALTER TABLE groups ADD COLUMN who_can_change_info INTEGER DEFAULT 1');
+      await db.execute('ALTER TABLE groups ADD COLUMN message_history_visible INTEGER DEFAULT 1');
+      await db.execute('ALTER TABLE groups ADD COLUMN slow_mode_seconds INTEGER DEFAULT 0');
+      await db.execute('ALTER TABLE groups ADD COLUMN max_members INTEGER DEFAULT 200');
+
+      // Create admin permissions table
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS admin_permissions (
+          group_id TEXT NOT NULL,
+          node_id TEXT NOT NULL,
+          can_add_members INTEGER DEFAULT 1,
+          can_remove_members INTEGER DEFAULT 1,
+          can_delete_messages INTEGER DEFAULT 1,
+          can_pin_messages INTEGER DEFAULT 0,
+          can_change_info INTEGER DEFAULT 1,
+          can_ban_users INTEGER DEFAULT 0,
+          can_manage_admins INTEGER DEFAULT 0,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          PRIMARY KEY (group_id, node_id),
+          FOREIGN KEY (group_id) REFERENCES groups(id)
+        )
+      ''');
+
+      // Create member restrictions table
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS member_restrictions (
+          group_id TEXT NOT NULL,
+          node_id TEXT NOT NULL,
+          is_muted INTEGER DEFAULT 0,
+          muted_until INTEGER,
+          can_send_media INTEGER DEFAULT 1,
+          can_send_links INTEGER DEFAULT 1,
+          can_send_messages INTEGER DEFAULT 1,
+          slow_mode_seconds INTEGER DEFAULT 0,
+          last_message_at INTEGER,
+          restricted_by TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          PRIMARY KEY (group_id, node_id),
+          FOREIGN KEY (group_id) REFERENCES groups(id)
+        )
+      ''');
+    }
+
+    if (oldVersion < 5) {
+      // Version 5: Add message actions support (Phase 2)
+
+      // Add message action columns to messages table
+      await db.execute('ALTER TABLE messages ADD COLUMN original_content TEXT');
+      await db.execute('ALTER TABLE messages ADD COLUMN edited_at INTEGER');
+      await db.execute('ALTER TABLE messages ADD COLUMN deleted_by TEXT');
+      await db.execute('ALTER TABLE messages ADD COLUMN deleted_at INTEGER');
+      await db.execute('ALTER TABLE messages ADD COLUMN forwarded_from TEXT');
+
+      // Create pinned messages table
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS pinned_messages (
+          group_id TEXT NOT NULL,
+          message_id TEXT NOT NULL,
+          pinned_by TEXT NOT NULL,
+          pinned_at INTEGER NOT NULL,
+          PRIMARY KEY (group_id, message_id),
+          FOREIGN KEY (group_id) REFERENCES groups(id),
+          FOREIGN KEY (message_id) REFERENCES messages(id)
+        )
+      ''');
+
+      // Create index for pinned messages
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_pinned_messages_group ON pinned_messages(group_id, pinned_at DESC)'
+      );
+    }
+
+    if (oldVersion < 6) {
+      // Version 6: Add invite links support (Phase 3)
+
+      // Create invite links table
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS group_invite_links (
+          id TEXT PRIMARY KEY,
+          group_id TEXT NOT NULL,
+          created_by TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          expires_at INTEGER,
+          max_uses INTEGER,
+          use_count INTEGER DEFAULT 0,
+          is_revoked INTEGER DEFAULT 0,
+          link_name TEXT,
+          FOREIGN KEY (group_id) REFERENCES groups(id)
+        )
+      ''');
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_invite_links_group ON group_invite_links(group_id, created_at DESC)'
+      );
+
+      // Create invite link usage table
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS invite_link_usage (
+          link_id TEXT NOT NULL,
+          node_id TEXT NOT NULL,
+          joined_at INTEGER NOT NULL,
+          PRIMARY KEY (link_id, node_id),
+          FOREIGN KEY (link_id) REFERENCES group_invite_links(id)
+        )
+      ''');
+    }
+
+    if (oldVersion < 7) {
+      // Version 7: Add admin actions log (Phase 4)
+
+      // Create admin actions table
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS admin_actions (
+          id TEXT PRIMARY KEY,
+          group_id TEXT NOT NULL,
+          admin_id TEXT NOT NULL,
+          action_type INTEGER NOT NULL,
+          target_id TEXT,
+          target_message_id TEXT,
+          old_value TEXT,
+          new_value TEXT,
+          timestamp INTEGER NOT NULL,
+          FOREIGN KEY (group_id) REFERENCES groups(id)
+        )
+      ''');
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_admin_actions_group ON admin_actions(group_id, timestamp DESC)'
+      );
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_admin_actions_admin ON admin_actions(admin_id, timestamp DESC)'
+      );
+    }
+
+    if (oldVersion < 8) {
+      // Version 8: Add media columns for group file sharing (Phase 5)
+
+      // Add media columns to messages table
+      await db.execute('ALTER TABLE messages ADD COLUMN media_type TEXT');
+      await db.execute('ALTER TABLE messages ADD COLUMN media_metadata TEXT');
+      await db.execute('ALTER TABLE messages ADD COLUMN thumbnail_path TEXT');
+
+      // Create media index for gallery queries
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_messages_media ON messages(conversation_id, media_type) WHERE media_type IS NOT NULL'
+      );
+    }
   }
 
   Future<void> close() async {
@@ -175,6 +450,12 @@ class DatabaseService {
   Future<void> clearAllData() async {
     final db = await database;
     await db.delete('offline_queue');
+    await db.delete('admin_actions');
+    await db.delete('invite_link_usage');
+    await db.delete('group_invite_links');
+    await db.delete('pinned_messages');
+    await db.delete('member_restrictions');
+    await db.delete('admin_permissions');
     await db.delete('group_members');
     await db.delete('groups');
     await db.delete('messages');

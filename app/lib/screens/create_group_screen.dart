@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../main.dart';
 import '../models/contact.dart';
 import '../providers/group_provider.dart';
+import '../providers/contact_provider.dart';
 import 'group_chat_screen.dart';
 
 class CreateGroupScreen extends ConsumerStatefulWidget {
@@ -18,9 +19,6 @@ class _CreateGroupScreenState extends ConsumerState<CreateGroupScreen> {
   final Set<String> _selectedContactIds = {};
   bool _isCreating = false;
 
-  // TODO: Replace with actual contacts provider
-  final List<Contact> _contacts = [];
-
   @override
   void dispose() {
     _nameController.dispose();
@@ -30,6 +28,8 @@ class _CreateGroupScreenState extends ConsumerState<CreateGroupScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final contactsAsync = ref.watch(contactsProvider);
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('New Group'),
@@ -169,21 +169,28 @@ class _CreateGroupScreenState extends ConsumerState<CreateGroupScreen> {
 
           // Contacts list
           Expanded(
-            child: _contacts.isEmpty
-                ? _buildEmptyContacts()
-                : ListView.builder(
-                    itemCount: _contacts.length,
-                    itemBuilder: (context, index) {
-                      final contact = _contacts[index];
-                      final isSelected =
-                          _selectedContactIds.contains(contact.nodeId);
-                      return _ContactSelectTile(
-                        contact: contact,
-                        isSelected: isSelected,
-                        onToggle: () => _toggleContact(contact.nodeId),
-                      );
-                    },
-                  ),
+            child: contactsAsync.when(
+              loading: () => const Center(child: CircularProgressIndicator()),
+              error: (e, _) => Center(child: Text('Error loading contacts: $e')),
+              data: (contacts) {
+                if (contacts.isEmpty) {
+                  return _buildEmptyContacts();
+                }
+                return ListView.builder(
+                  itemCount: contacts.length,
+                  itemBuilder: (context, index) {
+                    final contact = contacts[index];
+                    final isSelected =
+                        _selectedContactIds.contains(contact.nodeId);
+                    return _ContactSelectTile(
+                      contact: contact,
+                      isSelected: isSelected,
+                      onToggle: () => _toggleContact(contact.nodeId),
+                    );
+                  },
+                );
+              },
+            ),
           ),
         ],
       ),

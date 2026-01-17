@@ -205,15 +205,19 @@ class ConnectionActions {
     }
 
     // Initialize Group FFI provider for group chat (requires chat context)
+    print('GroupFFI: Starting initialization...');
     final groupProvider = _ref.read(groupFFINotifierProvider);
     final groupResult = await groupProvider.initialize(localId: nodeIdBytes);
+    print('GroupFFI: Initialize result = $groupResult');
 
     if (!groupResult) {
+      print('GroupFFI: Initialization FAILED');
       log.warning('Group chat initialization failed', source: 'Network');
       // Don't fail - group chat is optional
     } else {
       // Connect GroupService to GroupFFIProvider for group message handling
       GroupService.instance.connectProvider(groupProvider);
+      print('GroupFFI: GroupService connected');
       log.info('Group chat service ready', source: 'Network');
     }
 
