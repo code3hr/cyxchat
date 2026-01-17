@@ -292,6 +292,231 @@ Track all admin actions - who did what and when.
 
                   const SizedBox(height: 16),
 
+                  // QR Codes
+                  _GuideSection(
+                    icon: Icons.qr_code,
+                    title: 'QR Codes',
+                    gradient: [AppColors.accent, AppColors.primary],
+                    content: '''
+SHARING YOUR QR CODE
+1. Go to Settings
+2. Tap the QR icon next to your profile
+3. Show the QR code to others to scan
+
+Others can scan your QR to instantly add you as a contact.
+
+SCANNING QR CODES
+1. Go to Contacts → Add Contact
+2. Tap "Scan QR Code"
+3. Point camera at the QR code
+4. Contact is added automatically
+
+GROUP INVITE QR CODES
+Admins can create invite links with QR codes:
+1. Open Group Info
+2. Go to Invite Links
+3. Create a new link
+4. Tap "Show QR" to display
+
+Share the QR code in person for secure group invites.
+''',
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  // Voice Messages
+                  _GuideSection(
+                    icon: Icons.mic,
+                    title: 'Voice Messages',
+                    gradient: [AppColors.accentPink, AppColors.accentOrange],
+                    content: '''
+RECORDING A VOICE MESSAGE
+1. Open a chat
+2. Press and hold the microphone button
+3. Speak your message
+4. Release to send
+
+CANCEL RECORDING
+While holding the mic button, slide left to cancel.
+
+PLAYBACK
+Tap on a received voice message to play it. The waveform shows audio levels.
+
+DURATION
+• Maximum recording: 60 seconds
+• Minimum to send: 0.5 seconds
+
+Voice messages are encrypted just like text messages.
+''',
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  // Video Calls
+                  _GuideSection(
+                    icon: Icons.videocam,
+                    title: 'Video Calls',
+                    gradient: [AppColors.accentOrange, AppColors.error],
+                    content: '''
+ENABLING VIDEO CALLS
+Go to Settings → Privacy → Video Calls and toggle ON.
+
+⚠️ PRIVACY WARNING
+Video calls require direct P2P connection. The peer CAN see your IP address during calls. This is necessary for real-time streaming.
+
+MAKING A CALL
+1. Open a contact's chat
+2. Tap the video camera icon in the top bar
+3. Wait for them to answer
+
+RECEIVING A CALL
+When someone calls you:
+• Accept to join the call
+• Decline to reject
+• You can also ignore and call back later
+
+DURING A CALL
+• Tap screen to show controls
+• Toggle camera on/off
+• Toggle microphone on/off
+• Switch front/back camera
+• End call
+
+All video/audio is end-to-end encrypted.
+''',
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  // Message Actions
+                  _GuideSection(
+                    icon: Icons.touch_app,
+                    title: 'Message Actions',
+                    gradient: [AppColors.primary, AppColors.accentGreen],
+                    content: '''
+Long-press any message to see available actions:
+
+REPLY
+Quote a message in your response. Shows the original message above your reply.
+
+COPY
+Copy message text to clipboard.
+
+FORWARD
+Send a message to another chat or group. Shows "Forwarded" label.
+
+EDIT (Your messages only)
+Change the text of a sent message. Shows "(edited)" indicator.
+
+DELETE
+• Delete for me - removes from your device
+• Delete for everyone - removes for all (within time limit)
+
+PIN (Groups - Admin only)
+Pin important messages to the top of the chat. All members can see pinned messages.
+
+UNPIN
+Remove a pinned message from the pinned section.
+''',
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  // Media Gallery
+                  _GuideSection(
+                    icon: Icons.photo_library,
+                    title: 'Media Gallery',
+                    gradient: [AppColors.accentGreen, AppColors.accent],
+                    content: '''
+VIEW SHARED MEDIA
+In group chats, access all shared media in one place:
+
+1. Open Group Info
+2. Tap "Media Gallery" or the media section
+
+TABS
+• All - Everything shared in the group
+• Images - Photos and pictures
+• Videos - Video files
+• Files - Documents, archives, other files
+
+FEATURES
+• Grid view for images/videos
+• List view for files with icons
+• Tap to view full-screen
+• Pinch to zoom images
+• Download files to device
+
+Media is sorted by date (newest first).
+''',
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  // Blocking
+                  _GuideSection(
+                    icon: Icons.block,
+                    title: 'Blocking Contacts',
+                    gradient: [AppColors.error, AppColors.accentOrange],
+                    content: '''
+BLOCK A CONTACT
+1. Open the contact's chat
+2. Tap their name at the top
+3. Scroll down and tap "Block"
+4. Confirm
+
+WHAT HAPPENS WHEN BLOCKED
+• They cannot send you messages
+• They cannot see your online status
+• They cannot add you to groups
+• Existing messages remain visible
+
+UNBLOCK
+1. Go to the blocked contact's profile
+2. Tap "Unblock"
+
+Or go to Settings to manage all blocked contacts.
+
+BLOCKING IN GROUPS
+Admins can ban members from groups, which prevents them from rejoining via invite links.
+''',
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  // Privacy Settings
+                  _GuideSection(
+                    icon: Icons.visibility_off,
+                    title: 'Privacy Settings',
+                    gradient: [AppColors.primary, AppColors.primaryLight],
+                    content: '''
+Go to Settings → Privacy to configure:
+
+READ RECEIPTS
+When enabled, others see blue checkmarks when you read their messages. Disable to hide your read status.
+
+TYPING INDICATORS
+When enabled, others see "typing..." when you're composing a message. Disable for more privacy.
+
+SCREEN LOCK
+Require authentication (PIN, fingerprint, face) to open CyxChat.
+
+ONION ROUTING
+Configure the number of hops for message routing:
+• 2 hops - Faster, good privacy
+• 5 hops - Slower, better anonymity
+• 8 hops - Slowest, maximum anonymity
+
+FAST FILE TRANSFER
+Enable for larger files, but peer sees your IP.
+
+VIDEO CALLS
+Enable to allow video calling (requires direct P2P).
+''',
+                  ),
+
+                  const SizedBox(height: 16),
+
                   // Privacy & Security
                   _GuideSection(
                     icon: Icons.security,
