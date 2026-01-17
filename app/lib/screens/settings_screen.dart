@@ -16,6 +16,7 @@ import '../models/identity.dart';
 import '../utils/node_id_utils.dart';
 import 'onboarding_screen.dart';
 import 'log_viewer_screen.dart';
+import 'user_guide_screen.dart';
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -198,6 +199,19 @@ class SettingsScreen extends ConsumerWidget {
                   icon: Icons.info_outline_rounded,
                   iconGradient: const [AppColors.textDarkSecondary, AppColors.bgDarkTertiary],
                   children: [
+                    _SettingsTile(
+                      icon: Icons.menu_book_rounded,
+                      title: 'User Guide',
+                      subtitle: 'Learn how to use CyxChat',
+                      trailing: const Icon(
+                        Icons.chevron_right_rounded,
+                        color: AppColors.textDarkSecondary,
+                      ),
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const UserGuideScreen()),
+                      ),
+                    ),
                     _SettingsTile(
                       icon: Icons.tag_rounded,
                       title: 'Version',

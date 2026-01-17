@@ -123,6 +123,7 @@ class _GroupInfoScreenState extends ConsumerState<GroupInfoScreen> {
               if (canManageMembers) const SizedBox(height: 24),
 
               // Invite Links section (admins only)
+              // Basic groups get simple invite links, supergroups get advanced features
               if (canManageMembers)
                 _InviteLinksSection(
                   group: group,
@@ -139,8 +140,8 @@ class _GroupInfoScreenState extends ConsumerState<GroupInfoScreen> {
 
               if (canManageMembers) const SizedBox(height: 24),
 
-              // Admin Log section (admins only)
-              if (canManageMembers)
+              // Admin Log section (supergroups only)
+              if (canManageMembers && group.hasAdminLog)
                 _AdminLogSection(
                   group: group,
                   onViewLog: () => Navigator.push(
@@ -836,6 +837,34 @@ class _GroupHeader extends StatelessWidget {
 
           const SizedBox(height: 12),
 
+          // Group type badge
+          if (group.isSupergroup)
+            Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [AppColors.primary, AppColors.primaryLight],
+                ),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.verified, size: 14, color: Colors.white),
+                  const SizedBox(width: 4),
+                  const Text(
+                    'Supergroup',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
           // Member count and created date
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -847,7 +876,7 @@ class _GroupHeader extends StatelessWidget {
               ),
               const SizedBox(width: 4),
               Text(
-                '${group.memberCount} members',
+                '${group.memberCount}/${group.effectiveMaxMembers} members',
                 style: TextStyle(
                   color: AppColors.textDarkSecondary,
                   fontSize: 13,
@@ -1617,13 +1646,35 @@ class _InviteLinksSection extends StatelessWidget {
                         fontWeight: FontWeight.bold,
                       ),
                 ),
+                if (group.hasAdvancedInviteLinks) ...[
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: AppColors.primary.withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      'Advanced',
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: AppColors.primary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
           ListTile(
             leading: const Icon(Icons.link),
             title: const Text('Manage Invite Links'),
-            subtitle: const Text('Create, share, or revoke invite links'),
+            subtitle: Text(
+              group.hasAdvancedInviteLinks
+                  ? 'Create links with expiry and usage limits'
+                  : 'Create and share invite links',
+            ),
             trailing: const Icon(Icons.chevron_right),
             onTap: onManageLinks,
           ),

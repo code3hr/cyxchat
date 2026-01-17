@@ -138,4 +138,15 @@ class GroupActions {
     await GroupService.instance.markAsRead(groupId);
     _ref.invalidate(groupsProvider);
   }
+
+  /// Upgrade a basic group to supergroup (owner only)
+  /// Returns true on success
+  Future<bool> upgradeToSupergroup(String groupId) async {
+    final success = await GroupService.instance.upgradeToSupergroup(groupId);
+    if (success) {
+      _ref.invalidate(groupProvider(groupId));
+      _ref.invalidate(groupsProvider);
+    }
+    return success;
+  }
 }

@@ -155,6 +155,28 @@ class Group extends Equatable {
   /// Check if this is a supergroup
   bool get isSupergroup => groupType == GroupType.supergroup;
 
+  // ============================================================
+  // Feature availability based on group type
+  // ============================================================
+
+  /// Max members allowed (200 for basic, unlimited for supergroup)
+  int get effectiveMaxMembers => isSupergroup ? 100000 : 200;
+
+  /// Whether granular admin permissions are available
+  bool get hasGranularPermissions => isSupergroup;
+
+  /// Whether admin action log is available
+  bool get hasAdminLog => isSupergroup;
+
+  /// Whether advanced invite links (with expiry/usage limits) are available
+  bool get hasAdvancedInviteLinks => isSupergroup;
+
+  /// Whether this group can accept more members
+  bool get canAcceptMoreMembers => memberCount < effectiveMaxMembers;
+
+  /// Check if group can be upgraded to supergroup
+  bool get canUpgradeToSupergroup => !isSupergroup;
+
   int get memberCount => members.length;
 
   String get shortId => id.length >= 8 ? id.substring(0, 8) : id;
