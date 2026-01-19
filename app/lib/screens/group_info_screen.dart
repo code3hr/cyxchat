@@ -7,6 +7,7 @@ import '../providers/group_provider.dart';
 import '../providers/contact_provider.dart';
 import '../services/group_service.dart';
 import '../services/identity_service.dart';
+import '../utils/node_id_utils.dart';
 import 'invite_links_screen.dart';
 import 'admin_log_screen.dart';
 
@@ -213,74 +214,55 @@ class _GroupInfoScreenState extends ConsumerState<GroupInfoScreen> {
 
     showDialog(
       context: context,
-      builder: (context) => Consumer(
-        builder: (context, ref, _) {
-          final contactsAsync = ref.watch(contactsProvider);
-
-          return AlertDialog(
-            title: const Text('Add Member'),
-            content: SizedBox(
-              width: double.maxFinite,
-              height: 300,
-              child: contactsAsync.when(
-                loading: () => const Center(child: CircularProgressIndicator()),
-                error: (e, _) => Center(child: Text('Error: $e')),
-                data: (contacts) {
-                  // Filter out existing members
-                  final availableContacts = contacts
-                      .where((c) => !existingMemberIds.contains(c.nodeId))
-                      .toList();
-
-                  if (availableContacts.isEmpty) {
-                    return const Center(
-                      child: Text(
-                        'No contacts available to add.\nAdd contacts first from the Contacts tab.',
-                        textAlign: TextAlign.center,
-                      ),
-                    );
-                  }
-
-                  return ListView.builder(
-                    shrinkWrap: true,
-                    itemCount: availableContacts.length,
-                    itemBuilder: (context, index) {
-                      final contact = availableContacts[index];
-                      return ListTile(
-                        leading: CircleAvatar(
-                          backgroundColor: AppColors.primary,
-                          child: Text(
-                            (contact.displayName ?? contact.shortId)[0].toUpperCase(),
-                            style: const TextStyle(color: Colors.white),
-                          ),
-                        ),
-                        title: Text(contact.displayName ?? contact.shortId),
-                        subtitle: Text(
-                          contact.shortId,
-                          style: TextStyle(
-                            color: Colors.grey[400],
-                            fontSize: 12,
-                          ),
-                        ),
-                        onTap: () async {
-                          Navigator.pop(context);
-                          await _inviteMember(contact);
-                        },
-                      );
-                    },
-                  );
-                },
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Cancel'),
-              ),
-            ],
-          );
+      builder: (context) => _AddMemberDialog(
+        existingMemberIds: existingMemberIds,
+        onSelectContact: (contact) async {
+          Navigator.pop(context);
+          await _inviteMember(contact);
+        },
+        onEnterNodeId: (nodeId) async {
+          Navigator.pop(context);
+          await _inviteMemberByNodeId(nodeId);
         },
       ),
     );
+  }
+
+  Future<void> _inviteMemberByNodeId(String nodeId) async {
+    // Normalize the node ID
+    final normalizedId = NodeIdUtils.normalize(nodeId.trim());
+
+    // Validate format
+    if (!NodeIdUtils.isValid(normalizedId)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Invalid Node ID format. Use UUID (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx) or 64-char hex.'),
+          ),
+        );
+      }
+      return;
+    }
+
+    try {
+      await ref.read(groupActionsProvider).inviteMember(
+        widget.groupId,
+        normalizedId,
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Invited ${NodeIdUtils.shortId(normalizedId)}'),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to invite: $e')),
+        );
+      }
+    }
   }
 
   Future<void> _inviteMember(Contact contact) async {
@@ -1725,6 +1707,218 @@ class _AdminLogSection extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Dialog for adding a member by contact or node ID
+class _AddMemberDialog extends ConsumerStatefulWidget {
+  final Set<String> existingMemberIds;
+  final Future<void> Function(Contact contact) onSelectContact;
+  final Future<void> Function(String nodeId) onEnterNodeId;
+
+  const _AddMemberDialog({
+    required this.existingMemberIds,
+    required this.onSelectContact,
+    required this.onEnterNodeId,
+  });
+
+  @override
+  ConsumerState<_AddMemberDialog> createState() => _AddMemberDialogState();
+}
+
+class _AddMemberDialogState extends ConsumerState<_AddMemberDialog>
+    with SingleTickerProviderStateMixin {
+  late TabController _tabController;
+  final _nodeIdController = TextEditingController();
+  String? _nodeIdError;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 2, vsync: this);
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    _nodeIdController.dispose();
+    super.dispose();
+  }
+
+  void _validateAndSubmitNodeId() {
+    final nodeId = _nodeIdController.text.trim();
+    if (nodeId.isEmpty) {
+      setState(() => _nodeIdError = 'Please enter a Node ID');
+      return;
+    }
+
+    final normalizedId = NodeIdUtils.normalize(nodeId);
+    if (!NodeIdUtils.isValid(normalizedId)) {
+      setState(() => _nodeIdError = 'Invalid format. Use UUID or 64-char hex.');
+      return;
+    }
+
+    if (widget.existingMemberIds.contains(normalizedId)) {
+      setState(() => _nodeIdError = 'This user is already a member');
+      return;
+    }
+
+    widget.onEnterNodeId(normalizedId);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final contactsAsync = ref.watch(contactsProvider);
+
+    return AlertDialog(
+      title: const Text('Add Member'),
+      contentPadding: const EdgeInsets.fromLTRB(0, 16, 0, 0),
+      content: SizedBox(
+        width: double.maxFinite,
+        height: 350,
+        child: Column(
+          children: [
+            TabBar(
+              controller: _tabController,
+              labelColor: AppColors.primary,
+              unselectedLabelColor: AppColors.textDarkSecondary,
+              indicatorColor: AppColors.primary,
+              tabs: const [
+                Tab(text: 'Contacts'),
+                Tab(text: 'Node ID'),
+              ],
+            ),
+            Expanded(
+              child: TabBarView(
+                controller: _tabController,
+                children: [
+                  // Contacts tab
+                  Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: contactsAsync.when(
+                      loading: () =>
+                          const Center(child: CircularProgressIndicator()),
+                      error: (e, _) => Center(child: Text('Error: $e')),
+                      data: (contacts) {
+                        final availableContacts = contacts
+                            .where((c) =>
+                                !widget.existingMemberIds.contains(c.nodeId))
+                            .toList();
+
+                        if (availableContacts.isEmpty) {
+                          return const Center(
+                            child: Text(
+                              'No contacts available.\nUse Node ID tab to add by ID.',
+                              textAlign: TextAlign.center,
+                            ),
+                          );
+                        }
+
+                        return ListView.builder(
+                          shrinkWrap: true,
+                          itemCount: availableContacts.length,
+                          itemBuilder: (context, index) {
+                            final contact = availableContacts[index];
+                            return ListTile(
+                              leading: CircleAvatar(
+                                backgroundColor: AppColors.primary,
+                                child: Text(
+                                  (contact.displayName ?? contact.shortId)[0]
+                                      .toUpperCase(),
+                                  style: const TextStyle(color: Colors.white),
+                                ),
+                              ),
+                              title:
+                                  Text(contact.displayName ?? contact.shortId),
+                              subtitle: Text(
+                                contact.shortId,
+                                style: TextStyle(
+                                  color: Colors.grey[400],
+                                  fontSize: 12,
+                                ),
+                              ),
+                              onTap: () => widget.onSelectContact(contact),
+                            );
+                          },
+                        );
+                      },
+                    ),
+                  ),
+                  // Node ID tab
+                  Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Enter the Node ID of the person you want to invite:',
+                          style: TextStyle(fontSize: 14),
+                        ),
+                        const SizedBox(height: 16),
+                        TextField(
+                          controller: _nodeIdController,
+                          decoration: InputDecoration(
+                            labelText: 'Node ID',
+                            hintText: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx',
+                            errorText: _nodeIdError,
+                            border: const OutlineInputBorder(),
+                            suffixIcon: IconButton(
+                              icon: const Icon(Icons.paste),
+                              onPressed: () async {
+                                final data =
+                                    await Clipboard.getData('text/plain');
+                                if (data?.text != null) {
+                                  _nodeIdController.text = data!.text!;
+                                  setState(() => _nodeIdError = null);
+                                }
+                              },
+                            ),
+                          ),
+                          onChanged: (_) =>
+                              setState(() => _nodeIdError = null),
+                          maxLines: 2,
+                          style: const TextStyle(
+                            fontFamily: 'monospace',
+                            fontSize: 12,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Accepts UUID format or 64-character hex',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: AppColors.textDarkSecondary,
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton.icon(
+                            onPressed: _validateAndSubmitNodeId,
+                            icon: const Icon(Icons.person_add),
+                            label: const Text('Invite'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppColors.primary,
+                              foregroundColor: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+      ],
     );
   }
 }

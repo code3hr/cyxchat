@@ -119,6 +119,11 @@ class ChatActions {
     _ref.invalidate(conversationsProvider);
   }
 
+  Future<void> deleteConversation(String conversationId) async {
+    await ChatService.instance.deleteConversation(conversationId);
+    _ref.invalidate(conversationsProvider);
+  }
+
   /// Update conversation display name (alias)
   Future<void> updateConversationDisplayName(String conversationId, String displayName) async {
     await ChatService.instance.updateConversationDisplayName(conversationId, displayName);

@@ -1171,9 +1171,11 @@ class CyxChatBindings {
     }
   }
 
-  /// Parse group ID from hex string
+  /// Parse group ID from hex string (also handles UUID format with hyphens)
   int groupIdFromHex(String hex, Pointer<Uint8> idOut) {
-    final hexPtr = hex.toNativeUtf8();
+    // Strip hyphens if UUID format
+    final cleanHex = hex.replaceAll('-', '');
+    final hexPtr = cleanHex.toNativeUtf8();
     try {
       return _native.cyxchat_group_id_from_hex(hexPtr.cast(), idOut);
     } finally {
@@ -1983,11 +1985,13 @@ class CyxChatBindings {
     }
   }
 
-  /// Helper to convert hex string to bytes
+  /// Helper to convert hex string to bytes (also handles UUID format with hyphens)
   List<int> _hexToBytes(String hex) {
+    // Strip hyphens if UUID format
+    final cleanHex = hex.replaceAll('-', '');
     final result = <int>[];
-    for (int i = 0; i < hex.length; i += 2) {
-      result.add(int.parse(hex.substring(i, i + 2), radix: 16));
+    for (int i = 0; i < cleanHex.length; i += 2) {
+      result.add(int.parse(cleanHex.substring(i, i + 2), radix: 16));
     }
     return result;
   }

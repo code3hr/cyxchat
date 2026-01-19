@@ -8,6 +8,7 @@ import '../providers/settings_provider.dart';
 import '../providers/group_ffi_provider.dart';
 import '../services/group_service.dart';
 import '../models/models.dart';
+import '../models/invite_link.dart';
 import 'chat_screen.dart';
 import 'group_chat_screen.dart';
 import 'create_group_screen.dart';
@@ -372,6 +373,10 @@ class _ChatsTab extends ConsumerWidget {
   void _showJoinGroupDialog(BuildContext context, WidgetRef ref) {
     final controller = TextEditingController();
 
+    // Capture navigator and scaffold BEFORE showing dialog
+    final navigator = Navigator.of(context);
+    final scaffoldMessenger = ScaffoldMessenger.of(context);
+
     showDialog(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -381,7 +386,7 @@ class _ChatsTab extends ConsumerWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Enter the group ID shared by the group admin:',
+              'Paste an invite link or group ID:',
               style: TextStyle(
                 color: AppColors.textDarkSecondary,
                 fontSize: 14,
@@ -391,7 +396,7 @@ class _ChatsTab extends ConsumerWidget {
             TextField(
               controller: controller,
               decoration: InputDecoration(
-                hintText: 'Paste group ID',
+                hintText: 'cyxchat://join/... or group ID',
                 suffixIcon: IconButton(
                   icon: const Icon(Icons.paste),
                   onPressed: () async {
@@ -415,14 +420,11 @@ class _ChatsTab extends ConsumerWidget {
             onPressed: () async {
               final groupId = controller.text.trim();
               if (groupId.isEmpty) {
-                ScaffoldMessenger.of(dialogContext).showSnackBar(
-                  const SnackBar(content: Text('Please enter a group ID')),
+                scaffoldMessenger.showSnackBar(
+                  const SnackBar(content: Text('Please enter a group ID or invite link')),
                 );
                 return;
               }
-              // Capture navigator and scaffold BEFORE closing dialog
-              final navigator = Navigator.of(context);
-              final scaffoldMessenger = ScaffoldMessenger.of(context);
               Navigator.pop(dialogContext);
               await _joinGroup(navigator, scaffoldMessenger, ref, groupId);
             },
@@ -433,71 +435,89 @@ class _ChatsTab extends ConsumerWidget {
     );
   }
 
-  Future<void> _joinGroup(NavigatorState navigator, ScaffoldMessengerState scaffoldMessenger, WidgetRef ref, String groupId) async {
-    // Check if we have a pending invite for this group
-    final pendingInvites = GroupService.instance.pendingInvites;
-    final invite = pendingInvites.where((i) => i.groupId == groupId).firstOrNull;
+  Future<void> _joinGroup(NavigatorState navigator, ScaffoldMessengerState scaffoldMessenger, WidgetRef ref, String input) async {
+    try {
+      // Check if input is an invite link URL
+      final linkParsed = InviteLink.parseUrl(input);
 
-    if (invite != null) {
-      // We have an invite, accept it
-      final success = await GroupService.instance.acceptInvite(groupId);
-      if (success) {
-        ref.invalidate(conversationsProvider);
+      if (linkParsed != null) {
+        // It's an invite link URL - join via link
         scaffoldMessenger.showSnackBar(
-          SnackBar(content: Text('Joined "${invite.groupName}"!')),
+          const SnackBar(content: Text('Joining group...')),
         );
-        // Navigate to the group chat
-        navigator.push(
-          MaterialPageRoute(
-            builder: (context) => GroupChatScreen(groupId: groupId),
-          ),
+
+        final success = await GroupService.instance.joinViaLink(
+          groupId: linkParsed.groupId,
+          linkId: linkParsed.linkId,
         );
+
+        if (success) {
+          ref.invalidate(conversationsProvider);
+          scaffoldMessenger.hideCurrentSnackBar();
+          scaffoldMessenger.showSnackBar(
+            const SnackBar(content: Text('Joined group successfully!')),
+          );
+          // Navigate to the group chat
+          navigator.push(
+            MaterialPageRoute(
+              builder: (context) => GroupChatScreen(groupId: linkParsed.groupId),
+            ),
+          );
+        } else {
+          scaffoldMessenger.hideCurrentSnackBar();
+          scaffoldMessenger.showSnackBar(
+            const SnackBar(content: Text('Failed to join group. Link may be expired or invalid.')),
+          );
+        }
+        return;
+      }
+
+      // Not a URL - treat as group ID and check for pending invite
+      final groupId = input.trim();
+      final pendingInvites = GroupService.instance.pendingInvites;
+      final invite = pendingInvites.where((i) => i.groupId == groupId).firstOrNull;
+
+      if (invite != null) {
+        // We have an invite, accept it
+        scaffoldMessenger.showSnackBar(
+          const SnackBar(content: Text('Accepting invite...')),
+        );
+
+        final success = await GroupService.instance.acceptInvite(groupId);
+        if (success) {
+          ref.invalidate(conversationsProvider);
+          scaffoldMessenger.hideCurrentSnackBar();
+          scaffoldMessenger.showSnackBar(
+            SnackBar(content: Text('Joined "${invite.groupName}"!')),
+          );
+          // Navigate to the group chat
+          navigator.push(
+            MaterialPageRoute(
+              builder: (context) => GroupChatScreen(groupId: groupId),
+            ),
+          );
+        } else {
+          scaffoldMessenger.hideCurrentSnackBar();
+          scaffoldMessenger.showSnackBar(
+            const SnackBar(content: Text('Failed to join group')),
+          );
+        }
       } else {
+        // No pending invite - show feedback via SnackBar
         scaffoldMessenger.showSnackBar(
-          const SnackBar(content: Text('Failed to join group')),
+          SnackBar(
+            content: const Text('No invite found. Ask the admin to add you or share an invite link.'),
+            duration: const Duration(seconds: 5),
+            action: SnackBarAction(
+              label: 'OK',
+              onPressed: () {},
+            ),
+          ),
         );
       }
-    } else {
-      // No invite found - show instructions using navigator's context
-      showDialog(
-        context: navigator.context,
-        builder: (dialogContext) => AlertDialog(
-          title: const Text('No Invite Found'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'You need an invitation to join this group.',
-              ),
-              const SizedBox(height: 12),
-              Text(
-                'Ask the group admin to:',
-                style: TextStyle(
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.textDarkSecondary,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                '1. Open the group\n'
-                '2. Go to Group Info\n'
-                '3. Tap "Add" in Members\n'
-                '4. Select your contact',
-                style: TextStyle(
-                  color: AppColors.textDarkSecondary,
-                  fontSize: 13,
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext),
-              child: const Text('OK'),
-            ),
-          ],
-        ),
+    } catch (e) {
+      scaffoldMessenger.showSnackBar(
+        SnackBar(content: Text('Error joining group: $e')),
       );
     }
   }
@@ -859,6 +879,7 @@ class _ConversationCard extends ConsumerWidget {
                 label: 'Delete',
                 isDestructive: true,
                 onTap: () {
+                  ref.read(chatActionsProvider).deleteConversation(conversation.id);
                   Navigator.pop(context);
                 },
               ),

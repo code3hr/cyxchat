@@ -58,11 +58,48 @@ class Contact extends Equatable {
   });
 
   factory Contact.fromMap(Map<String, dynamic> map) {
+    // public_key is stored as BLOB, sqflite returns it as Uint8List
+    final pubkeyData = map['public_key'];
+    Uint8List publicKey;
+    if (pubkeyData is Uint8List) {
+      publicKey = pubkeyData;
+    } else if (pubkeyData is List<int>) {
+      publicKey = Uint8List.fromList(pubkeyData);
+    } else if (pubkeyData is String) {
+      // Legacy data: might be stored as raw character codes or hex
+      // If string length is 32, it's likely raw bytes stored via String.fromCharCodes
+      // If string length is 64, it's likely hex
+      if (pubkeyData.length == 32) {
+        publicKey = Uint8List.fromList(pubkeyData.codeUnits);
+      } else if (pubkeyData.length >= 64) {
+        // Try hex parsing
+        try {
+          final cleanHex = pubkeyData.replaceAll('-', '');
+          final bytes = <int>[];
+          for (int i = 0; i < cleanHex.length && bytes.length < 32; i += 2) {
+            bytes.add(int.parse(cleanHex.substring(i, i + 2), radix: 16));
+          }
+          publicKey = Uint8List.fromList(bytes);
+        } catch (e) {
+          // If hex parsing fails, use codeUnits
+          publicKey = Uint8List.fromList(pubkeyData.codeUnits.take(32).toList());
+        }
+      } else {
+        // Unknown format, use codeUnits (truncated/padded to 32)
+        final codes = pubkeyData.codeUnits;
+        final padded = List<int>.filled(32, 0);
+        for (int i = 0; i < codes.length && i < 32; i++) {
+          padded[i] = codes[i];
+        }
+        publicKey = Uint8List.fromList(padded);
+      }
+    } else {
+      publicKey = Uint8List(32); // Empty key as fallback
+    }
+
     return Contact(
       nodeId: map['node_id'] as String,
-      publicKey: Uint8List.fromList(
-        (map['public_key'] as String).codeUnits,
-      ),
+      publicKey: publicKey,
       displayName: map['display_name'] as String?,
       verified: (map['verified'] as int?) == 1,
       blocked: (map['blocked'] as int?) == 1,
@@ -78,7 +115,7 @@ class Contact extends Equatable {
   Map<String, dynamic> toMap() {
     return {
       'node_id': nodeId,
-      'public_key': String.fromCharCodes(publicKey),
+      'public_key': publicKey, // Stored as BLOB directly
       'display_name': displayName,
       'verified': verified ? 1 : 0,
       'blocked': blocked ? 1 : 0,

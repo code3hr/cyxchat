@@ -437,9 +437,31 @@ class GroupService {
     // Get pubkey from contact if not provided
     List<int>? pubkey = memberPubkey;
     if (pubkey == null && contacts.isNotEmpty) {
-      final pubkeyStr = contacts.first['public_key'] as String?;
-      if (pubkeyStr != null) {
-        pubkey = _hexToBytes(pubkeyStr);
+      final pubkeyData = contacts.first['public_key'];
+      if (pubkeyData != null) {
+        // public_key is stored as BLOB, read as bytes directly
+        if (pubkeyData is List<int>) {
+          pubkey = pubkeyData;
+        } else if (pubkeyData is String) {
+          // Legacy data: might be stored as raw character codes or hex
+          // If string length is 32, it's likely raw bytes stored via String.fromCharCodes
+          // If string length is 64, it's likely hex
+          if (pubkeyData.length == 32) {
+            // Raw bytes stored as string
+            pubkey = pubkeyData.codeUnits;
+          } else if (pubkeyData.length >= 64) {
+            // Hex string format
+            try {
+              pubkey = _hexToBytes(pubkeyData);
+            } catch (e) {
+              // If hex parsing fails, try as raw bytes
+              pubkey = pubkeyData.codeUnits;
+            }
+          } else {
+            // Unknown format, try as raw bytes
+            pubkey = pubkeyData.codeUnits;
+          }
+        }
       }
     }
 
@@ -2156,9 +2178,11 @@ class GroupService {
   // ============================================================
 
   List<int> _hexToBytes(String hex) {
+    // Strip hyphens if UUID format
+    final cleanHex = hex.replaceAll('-', '');
     final result = <int>[];
-    for (int i = 0; i < hex.length; i += 2) {
-      result.add(int.parse(hex.substring(i, i + 2), radix: 16));
+    for (int i = 0; i < cleanHex.length; i += 2) {
+      result.add(int.parse(cleanHex.substring(i, i + 2), radix: 16));
     }
     return result;
   }

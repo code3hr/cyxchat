@@ -491,6 +491,27 @@ class ChatService {
     );
   }
 
+  /// Delete conversation and all its messages
+  Future<void> deleteConversation(String conversationId) async {
+    final db = await DatabaseService.instance.database;
+
+    // Delete all messages in the conversation
+    await db.delete(
+      'messages',
+      where: 'conversation_id = ?',
+      whereArgs: [conversationId],
+    );
+
+    // Delete the conversation
+    await db.delete(
+      'conversations',
+      where: 'id = ?',
+      whereArgs: [conversationId],
+    );
+
+    debugPrint('ChatService: Deleted conversation $conversationId');
+  }
+
   /// Update conversation display name (alias)
   Future<void> updateConversationDisplayName(String conversationId, String displayName) async {
     final db = await DatabaseService.instance.database;
