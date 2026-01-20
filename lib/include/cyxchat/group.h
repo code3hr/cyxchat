@@ -195,6 +195,32 @@ CYXCHAT_API cyxchat_error_t cyxchat_group_create(
 );
 
 /**
+ * Restore a group from saved data (e.g., from database on app restart)
+ *
+ * This function recreates the group in memory from previously saved data.
+ * Use this on startup to restore groups loaded from persistent storage.
+ *
+ * @param ctx           Group context
+ * @param group_id      Group ID to restore
+ * @param name          Group name
+ * @param group_key     32-byte group encryption key
+ * @param key_version   Current key version
+ * @param creator_id    Creator node ID
+ * @param my_role       Our role in the group (OWNER, ADMIN, or MEMBER)
+ * @return              CYXCHAT_OK on success
+ */
+CYXCHAT_API cyxchat_error_t cyxchat_group_restore(
+    cyxchat_group_ctx_t *ctx,
+    const cyxchat_group_id_t *group_id,
+    const char *name,
+    const uint8_t *group_key,
+    uint32_t key_version,
+    const cyxwiz_node_id_t *creator_id,
+    cyxchat_group_role_t my_role
+);
+
+
+/**
  * Set group description
  */
 CYXCHAT_API cyxchat_error_t cyxchat_group_set_description(
@@ -312,6 +338,23 @@ CYXCHAT_API cyxchat_group_t* cyxchat_group_find(
     cyxchat_group_ctx_t *ctx,
     const cyxchat_group_id_t *group_id
 );
+
+/**
+ * Get group key and version (for persistence)
+ *
+ * @param ctx           Group context
+ * @param group_id      Group ID
+ * @param key_out       Output: 32-byte group key (must be pre-allocated)
+ * @param version_out   Output: key version
+ * @return              CYXCHAT_OK on success
+ */
+CYXCHAT_API cyxchat_error_t cyxchat_group_get_key(
+    cyxchat_group_ctx_t *ctx,
+    const cyxchat_group_id_t *group_id,
+    uint8_t *key_out,
+    uint32_t *version_out
+);
+
 
 /**
  * Check if we are member of group

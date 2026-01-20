@@ -8,6 +8,7 @@
 #include <cyxwiz/memory.h>
 #include <cyxwiz/onion.h>
 #include <cyxwiz/log.h>
+#include <sodium.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -895,13 +896,23 @@ static cyxwiz_error_t derive_member_key(
     memcpy(input + 32, sender->bytes, 32);
     memcpy(input + 64, recipient->bytes, 32);
 
+    /* Pre-hash the 96-byte input to 32 bytes.
+     * cyxwiz_crypto_derive_key uses BLAKE2b keyed hash mode which has a
+     * max key size of 64 bytes, so we need to compress first. */
+    uint8_t hashed_input[32];
+    crypto_generichash(hashed_input, 32, input, sizeof(input), NULL, 0);
+    cyxwiz_secure_zero(input, sizeof(input));
+
     /* Derive key with domain separation */
-    return cyxwiz_crypto_derive_key(
-        input, sizeof(input),
+    cyxwiz_error_t result = cyxwiz_crypto_derive_key(
+        hashed_input, 32,
         (const uint8_t*)CYXCHAT_GROUP_KEY_DOMAIN,
         strlen(CYXCHAT_GROUP_KEY_DOMAIN),
         key_out
     );
+
+    cyxwiz_secure_zero(hashed_input, 32);
+    return result;
 }
 
 /* ============================================================
@@ -1463,6 +1474,69 @@ cyxchat_error_t cyxchat_group_create(
     return CYXCHAT_OK;
 }
 
+cyxchat_error_t cyxchat_group_restore(
+    cyxchat_group_ctx_t *ctx,
+    const cyxchat_group_id_t *group_id,
+    const char *name,
+    const uint8_t *group_key,
+    uint32_t key_version,
+    const cyxwiz_node_id_t *creator_id,
+    cyxchat_group_role_t my_role
+) {
+    if (!ctx || !group_id || !name || !group_key || !creator_id) {
+        return CYXCHAT_ERR_NULL;
+    }
+
+    /* Check if group already exists */
+    cyxchat_group_t *existing = find_group(ctx, group_id);
+    if (existing) {
+        CYXWIZ_INFO("Group already restored, skipping");
+        return CYXCHAT_OK;
+    }
+
+    if (ctx->group_count >= CYXCHAT_MAX_GROUPS) {
+        return CYXCHAT_ERR_FULL;
+    }
+
+    cyxchat_group_t *group = &ctx->groups[ctx->group_count];
+    memset(group, 0, sizeof(cyxchat_group_t));
+
+    /* Copy group ID */
+    memcpy(&group->group_id, group_id, sizeof(cyxchat_group_id_t));
+
+    /* Set name */
+    strncpy(group->name, name, CYXCHAT_MAX_DISPLAY_NAME - 1);
+
+    /* Copy creator */
+    memcpy(&group->creator, creator_id, sizeof(cyxwiz_node_id_t));
+
+    /* Copy group key */
+    memcpy(group->group_key, group_key, 32);
+    group->key_version = key_version;
+
+    /* Add ourselves with the specified role */
+    cyxchat_group_member_t *self = &group->members[0];
+    memcpy(&self->node_id, &ctx->local_id, sizeof(cyxwiz_node_id_t));
+    self->role = my_role;
+    self->joined_at = cyxchat_timestamp_ms();
+    group->member_count = 1;
+
+    /* Timestamps (use current time since we don't have originals) */
+    group->created_at = cyxchat_timestamp_ms();
+    group->key_updated_at = group->created_at;
+
+    ctx->group_count++;
+
+    char group_hex[17] = {0};
+    for (int i = 0; i < 8; i++) {
+        snprintf(group_hex + i*2, 3, "%02x", group_id->bytes[i]);
+    }
+    CYXWIZ_INFO("Restored group %.16s with role %d", group_hex, my_role);
+
+    return CYXCHAT_OK;
+}
+
+
 cyxchat_error_t cyxchat_group_set_description(
     cyxchat_group_ctx_t *ctx,
     const cyxchat_group_id_t *group_id,
@@ -1472,9 +1546,9 @@ cyxchat_error_t cyxchat_group_set_description(
         return CYXCHAT_ERR_NULL;
     }
 
-    cyxchat_group_t *group = find_group(ctx, group_id);
+    CYXWIZ_INFO("Finding group..."); cyxchat_group_t *group = find_group(ctx, group_id);
     if (!group) {
-        return CYXCHAT_ERR_NOT_FOUND;
+        CYXWIZ_ERROR("Group not found"); return CYXCHAT_ERR_NOT_FOUND;
     }
 
     /* Check admin permission */
@@ -1500,9 +1574,9 @@ cyxchat_error_t cyxchat_group_set_name(
         return CYXCHAT_ERR_NULL;
     }
 
-    cyxchat_group_t *group = find_group(ctx, group_id);
+    CYXWIZ_INFO("Finding group..."); cyxchat_group_t *group = find_group(ctx, group_id);
     if (!group) {
-        return CYXCHAT_ERR_NOT_FOUND;
+        CYXWIZ_ERROR("Group not found"); return CYXCHAT_ERR_NOT_FOUND;
     }
 
     /* Check admin permission */
@@ -1523,13 +1597,14 @@ cyxchat_error_t cyxchat_group_invite(
     const cyxwiz_node_id_t *member,
     const uint8_t *member_pubkey
 ) {
+    CYXWIZ_INFO("=== Group invite called ===");
     if (!ctx || !group_id || !member || !member_pubkey) {
         return CYXCHAT_ERR_NULL;
     }
 
-    cyxchat_group_t *group = find_group(ctx, group_id);
+    CYXWIZ_INFO("Finding group..."); cyxchat_group_t *group = find_group(ctx, group_id);
     if (!group) {
-        return CYXCHAT_ERR_NOT_FOUND;
+        CYXWIZ_ERROR("Group not found"); return CYXCHAT_ERR_NOT_FOUND;
     }
 
     /* Check we are member */
@@ -1771,9 +1846,9 @@ cyxchat_error_t cyxchat_group_leave(
         return CYXCHAT_ERR_NULL;
     }
 
-    cyxchat_group_t *group = find_group(ctx, group_id);
+    CYXWIZ_INFO("Finding group..."); cyxchat_group_t *group = find_group(ctx, group_id);
     if (!group) {
-        return CYXCHAT_ERR_NOT_FOUND;
+        CYXWIZ_ERROR("Group not found"); return CYXCHAT_ERR_NOT_FOUND;
     }
 
     /* Already left */
@@ -1835,9 +1910,9 @@ cyxchat_error_t cyxchat_group_remove_member(
         return CYXCHAT_ERR_NULL;
     }
 
-    cyxchat_group_t *group = find_group(ctx, group_id);
+    CYXWIZ_INFO("Finding group..."); cyxchat_group_t *group = find_group(ctx, group_id);
     if (!group) {
-        return CYXCHAT_ERR_NOT_FOUND;
+        CYXWIZ_ERROR("Group not found"); return CYXCHAT_ERR_NOT_FOUND;
     }
 
     /* Check admin permission */
@@ -1922,7 +1997,7 @@ cyxchat_error_t cyxchat_group_remove_member(
         }
     }
 
-    return CYXCHAT_ERR_NOT_FOUND;
+    CYXWIZ_ERROR("Group not found"); return CYXCHAT_ERR_NOT_FOUND;
 }
 
 cyxchat_error_t cyxchat_group_add_admin(
@@ -1934,9 +2009,9 @@ cyxchat_error_t cyxchat_group_add_admin(
         return CYXCHAT_ERR_NULL;
     }
 
-    cyxchat_group_t *group = find_group(ctx, group_id);
+    CYXWIZ_INFO("Finding group..."); cyxchat_group_t *group = find_group(ctx, group_id);
     if (!group) {
-        return CYXCHAT_ERR_NOT_FOUND;
+        CYXWIZ_ERROR("Group not found"); return CYXCHAT_ERR_NOT_FOUND;
     }
 
     /* Only owner can promote */
@@ -1965,9 +2040,9 @@ cyxchat_error_t cyxchat_group_remove_admin(
         return CYXCHAT_ERR_NULL;
     }
 
-    cyxchat_group_t *group = find_group(ctx, group_id);
+    CYXWIZ_INFO("Finding group..."); cyxchat_group_t *group = find_group(ctx, group_id);
     if (!group) {
-        return CYXCHAT_ERR_NOT_FOUND;
+        CYXWIZ_ERROR("Group not found"); return CYXCHAT_ERR_NOT_FOUND;
     }
 
     /* Only owner can demote */
@@ -2012,9 +2087,9 @@ cyxchat_error_t cyxchat_group_send_text(
         return CYXCHAT_ERR_INVALID;
     }
 
-    cyxchat_group_t *group = find_group(ctx, group_id);
+    CYXWIZ_INFO("Finding group..."); cyxchat_group_t *group = find_group(ctx, group_id);
     if (!group) {
-        return CYXCHAT_ERR_NOT_FOUND;
+        CYXWIZ_ERROR("Group not found"); return CYXCHAT_ERR_NOT_FOUND;
     }
 
     if (!is_member(group, &ctx->local_id) || group->left) {
@@ -2130,9 +2205,9 @@ cyxchat_error_t cyxchat_group_rotate_key(
         return CYXCHAT_ERR_NULL;
     }
 
-    cyxchat_group_t *group = find_group(ctx, group_id);
+    CYXWIZ_INFO("Finding group..."); cyxchat_group_t *group = find_group(ctx, group_id);
     if (!group) {
-        return CYXCHAT_ERR_NOT_FOUND;
+        CYXWIZ_ERROR("Group not found"); return CYXCHAT_ERR_NOT_FOUND;
     }
 
     /* Check admin permission */
@@ -2192,6 +2267,28 @@ cyxchat_group_t* cyxchat_group_find(
     return find_group(ctx, group_id);
 }
 
+cyxchat_error_t cyxchat_group_get_key(
+    cyxchat_group_ctx_t *ctx,
+    const cyxchat_group_id_t *group_id,
+    uint8_t *key_out,
+    uint32_t *version_out
+) {
+    if (!ctx || !group_id || !key_out || !version_out) {
+        return CYXCHAT_ERR_NULL;
+    }
+
+    cyxchat_group_t *group = find_group(ctx, group_id);
+    if (!group) {
+        return CYXCHAT_ERR_NOT_FOUND;
+    }
+
+    memcpy(key_out, group->group_key, 32);
+    *version_out = group->key_version;
+
+    return CYXCHAT_OK;
+}
+
+
 int cyxchat_group_is_member(
     cyxchat_group_ctx_t *ctx,
     const cyxchat_group_id_t *group_id
@@ -2200,7 +2297,7 @@ int cyxchat_group_is_member(
         return 0;
     }
 
-    cyxchat_group_t *group = find_group(ctx, group_id);
+    CYXWIZ_INFO("Finding group..."); cyxchat_group_t *group = find_group(ctx, group_id);
     if (!group || group->left) {
         return 0;
     }
@@ -2216,7 +2313,7 @@ int cyxchat_group_is_admin(
         return 0;
     }
 
-    cyxchat_group_t *group = find_group(ctx, group_id);
+    CYXWIZ_INFO("Finding group..."); cyxchat_group_t *group = find_group(ctx, group_id);
     if (!group || group->left) {
         return 0;
     }
@@ -2232,7 +2329,7 @@ int cyxchat_group_is_owner(
         return 0;
     }
 
-    cyxchat_group_t *group = find_group(ctx, group_id);
+    CYXWIZ_INFO("Finding group..."); cyxchat_group_t *group = find_group(ctx, group_id);
     if (!group || group->left) {
         return 0;
     }
@@ -2248,7 +2345,7 @@ cyxchat_group_role_t cyxchat_group_get_role(
         return CYXCHAT_ROLE_MEMBER;
     }
 
-    cyxchat_group_t *group = find_group(ctx, group_id);
+    CYXWIZ_INFO("Finding group..."); cyxchat_group_t *group = find_group(ctx, group_id);
     if (!group) {
         return CYXCHAT_ROLE_MEMBER;
     }
@@ -3161,9 +3258,9 @@ cyxchat_error_t cyxchat_group_set_admin_permissions(
         return CYXCHAT_ERR_NULL;
     }
 
-    cyxchat_group_t *group = find_group(ctx, group_id);
+    CYXWIZ_INFO("Finding group..."); cyxchat_group_t *group = find_group(ctx, group_id);
     if (!group) {
-        return CYXCHAT_ERR_NOT_FOUND;
+        CYXWIZ_ERROR("Group not found"); return CYXCHAT_ERR_NOT_FOUND;
     }
 
     /* Only owner can set admin permissions */
@@ -3212,7 +3309,7 @@ uint8_t cyxchat_group_get_admin_permissions(
         return 0;
     }
 
-    cyxchat_group_t *group = find_group(ctx, group_id);
+    CYXWIZ_INFO("Finding group..."); cyxchat_group_t *group = find_group(ctx, group_id);
     if (!group) {
         return 0;
     }
@@ -3263,9 +3360,9 @@ cyxchat_error_t cyxchat_group_restrict_member(
         return CYXCHAT_ERR_NULL;
     }
 
-    cyxchat_group_t *group = find_group(ctx, group_id);
+    CYXWIZ_INFO("Finding group..."); cyxchat_group_t *group = find_group(ctx, group_id);
     if (!group) {
-        return CYXCHAT_ERR_NOT_FOUND;
+        CYXWIZ_ERROR("Group not found"); return CYXCHAT_ERR_NOT_FOUND;
     }
 
     /* Check if caller has permission to restrict members */
@@ -3332,7 +3429,7 @@ uint8_t cyxchat_group_get_member_restrictions(
         return 0;
     }
 
-    cyxchat_group_t *group = find_group(ctx, group_id);
+    CYXWIZ_INFO("Finding group..."); cyxchat_group_t *group = find_group(ctx, group_id);
     if (!group) {
         return 0;
     }
@@ -3379,9 +3476,9 @@ cyxchat_error_t cyxchat_group_set_slow_mode(
         return CYXCHAT_ERR_NULL;
     }
 
-    cyxchat_group_t *group = find_group(ctx, group_id);
+    CYXWIZ_INFO("Finding group..."); cyxchat_group_t *group = find_group(ctx, group_id);
     if (!group) {
-        return CYXCHAT_ERR_NOT_FOUND;
+        CYXWIZ_ERROR("Group not found"); return CYXCHAT_ERR_NOT_FOUND;
     }
 
     /* Check if caller can change group settings */
@@ -3409,7 +3506,7 @@ uint16_t cyxchat_group_get_slow_mode(
         return 0;
     }
 
-    cyxchat_group_t *group = find_group(ctx, group_id);
+    CYXWIZ_INFO("Finding group..."); cyxchat_group_t *group = find_group(ctx, group_id);
     if (!group) {
         return 0;
     }
@@ -3429,9 +3526,9 @@ cyxchat_error_t cyxchat_group_set_who_can_add(
         return CYXCHAT_ERR_NULL;
     }
 
-    cyxchat_group_t *group = find_group(ctx, group_id);
+    CYXWIZ_INFO("Finding group..."); cyxchat_group_t *group = find_group(ctx, group_id);
     if (!group) {
-        return CYXCHAT_ERR_NOT_FOUND;
+        CYXWIZ_ERROR("Group not found"); return CYXCHAT_ERR_NOT_FOUND;
     }
 
     /* Only owner can change this setting */
@@ -3458,9 +3555,9 @@ cyxchat_error_t cyxchat_group_set_who_can_edit(
         return CYXCHAT_ERR_NULL;
     }
 
-    cyxchat_group_t *group = find_group(ctx, group_id);
+    CYXWIZ_INFO("Finding group..."); cyxchat_group_t *group = find_group(ctx, group_id);
     if (!group) {
-        return CYXCHAT_ERR_NOT_FOUND;
+        CYXWIZ_ERROR("Group not found"); return CYXCHAT_ERR_NOT_FOUND;
     }
 
     /* Only owner can change this setting */
@@ -3486,7 +3583,7 @@ cyxchat_group_type_t cyxchat_group_get_type(
         return CYXCHAT_GROUP_TYPE_BASIC;
     }
 
-    cyxchat_group_t *group = find_group(ctx, group_id);
+    CYXWIZ_INFO("Finding group..."); cyxchat_group_t *group = find_group(ctx, group_id);
     if (!group) {
         return CYXCHAT_GROUP_TYPE_BASIC;
     }
@@ -3505,9 +3602,9 @@ cyxchat_error_t cyxchat_group_upgrade_to_supergroup(
         return CYXCHAT_ERR_NULL;
     }
 
-    cyxchat_group_t *group = find_group(ctx, group_id);
+    CYXWIZ_INFO("Finding group..."); cyxchat_group_t *group = find_group(ctx, group_id);
     if (!group) {
-        return CYXCHAT_ERR_NOT_FOUND;
+        CYXWIZ_ERROR("Group not found"); return CYXCHAT_ERR_NOT_FOUND;
     }
 
     /* Only owner can upgrade */
@@ -3598,9 +3695,9 @@ cyxchat_error_t cyxchat_group_edit_message(
         return CYXCHAT_ERR_INVALID;
     }
 
-    cyxchat_group_t *group = find_group(ctx, group_id);
+    CYXWIZ_INFO("Finding group..."); cyxchat_group_t *group = find_group(ctx, group_id);
     if (!group) {
-        return CYXCHAT_ERR_NOT_FOUND;
+        CYXWIZ_ERROR("Group not found"); return CYXCHAT_ERR_NOT_FOUND;
     }
 
     if (!is_member(group, &ctx->local_id)) {
@@ -3702,9 +3799,9 @@ cyxchat_error_t cyxchat_group_delete_message(
         return CYXCHAT_ERR_NULL;
     }
 
-    cyxchat_group_t *group = find_group(ctx, group_id);
+    CYXWIZ_INFO("Finding group..."); cyxchat_group_t *group = find_group(ctx, group_id);
     if (!group) {
-        return CYXCHAT_ERR_NOT_FOUND;
+        CYXWIZ_ERROR("Group not found"); return CYXCHAT_ERR_NOT_FOUND;
     }
 
     if (!is_member(group, &ctx->local_id)) {
@@ -3811,9 +3908,9 @@ cyxchat_error_t cyxchat_group_pin_message(
         return CYXCHAT_ERR_NULL;
     }
 
-    cyxchat_group_t *group = find_group(ctx, group_id);
+    CYXWIZ_INFO("Finding group..."); cyxchat_group_t *group = find_group(ctx, group_id);
     if (!group) {
-        return CYXCHAT_ERR_NOT_FOUND;
+        CYXWIZ_ERROR("Group not found"); return CYXCHAT_ERR_NOT_FOUND;
     }
 
     /* Check admin permission */
@@ -3940,9 +4037,9 @@ cyxchat_error_t cyxchat_group_unpin_message(
         return CYXCHAT_ERR_NULL;
     }
 
-    cyxchat_group_t *group = find_group(ctx, group_id);
+    CYXWIZ_INFO("Finding group..."); cyxchat_group_t *group = find_group(ctx, group_id);
     if (!group) {
-        return CYXCHAT_ERR_NOT_FOUND;
+        CYXWIZ_ERROR("Group not found"); return CYXCHAT_ERR_NOT_FOUND;
     }
 
     /* Check admin permission */
@@ -4070,9 +4167,9 @@ cyxchat_error_t cyxchat_group_unpin_all(
         return CYXCHAT_ERR_NULL;
     }
 
-    cyxchat_group_t *group = find_group(ctx, group_id);
+    CYXWIZ_INFO("Finding group..."); cyxchat_group_t *group = find_group(ctx, group_id);
     if (!group) {
-        return CYXCHAT_ERR_NOT_FOUND;
+        CYXWIZ_ERROR("Group not found"); return CYXCHAT_ERR_NOT_FOUND;
     }
 
     cyxchat_group_role_t role = get_role(group, &ctx->local_id);
@@ -4187,7 +4284,7 @@ cyxchat_error_t cyxchat_group_forward_message(
 
     cyxchat_group_t *to_group = find_group(ctx, to_group_id);
     if (!to_group) {
-        return CYXCHAT_ERR_NOT_FOUND;
+        CYXWIZ_ERROR("Group not found"); return CYXCHAT_ERR_NOT_FOUND;
     }
 
     if (!is_member(to_group, &ctx->local_id)) {
@@ -4295,9 +4392,9 @@ cyxchat_error_t cyxchat_group_create_invite_link(
     }
 
     /* Find group and verify we have permission */
-    cyxchat_group_t *group = find_group(ctx, group_id);
+    CYXWIZ_INFO("Finding group..."); cyxchat_group_t *group = find_group(ctx, group_id);
     if (!group) {
-        return CYXCHAT_ERR_NOT_FOUND;
+        CYXWIZ_ERROR("Group not found"); return CYXCHAT_ERR_NOT_FOUND;
     }
 
     /* Only admins can create invite links */
@@ -4419,9 +4516,9 @@ cyxchat_error_t cyxchat_group_revoke_invite_link(
     }
 
     /* Find group */
-    cyxchat_group_t *group = find_group(ctx, group_id);
+    CYXWIZ_INFO("Finding group..."); cyxchat_group_t *group = find_group(ctx, group_id);
     if (!group) {
-        return CYXCHAT_ERR_NOT_FOUND;
+        CYXWIZ_ERROR("Group not found"); return CYXCHAT_ERR_NOT_FOUND;
     }
 
     /* Only admins can revoke links */
@@ -4433,7 +4530,7 @@ cyxchat_error_t cyxchat_group_revoke_invite_link(
     /* Find link storage */
     int idx = find_invite_links_index(ctx, group_id);
     if (idx < 0) {
-        return CYXCHAT_ERR_NOT_FOUND;
+        CYXWIZ_ERROR("Group not found"); return CYXCHAT_ERR_NOT_FOUND;
     }
 
     /* Find the link */
@@ -4447,7 +4544,7 @@ cyxchat_error_t cyxchat_group_revoke_invite_link(
     }
 
     if (!link) {
-        return CYXCHAT_ERR_NOT_FOUND;
+        CYXWIZ_ERROR("Group not found"); return CYXCHAT_ERR_NOT_FOUND;
     }
 
     /* Mark as revoked */
@@ -4597,7 +4694,7 @@ cyxchat_error_t cyxchat_group_get_invite_link(
 
     int idx = find_invite_links_index(ctx, group_id);
     if (idx < 0) {
-        return CYXCHAT_ERR_NOT_FOUND;
+        CYXWIZ_ERROR("Group not found"); return CYXCHAT_ERR_NOT_FOUND;
     }
 
     for (size_t i = 0; i < ctx->invite_links[idx].count; i++) {
@@ -4608,7 +4705,7 @@ cyxchat_error_t cyxchat_group_get_invite_link(
         }
     }
 
-    return CYXCHAT_ERR_NOT_FOUND;
+    CYXWIZ_ERROR("Group not found"); return CYXCHAT_ERR_NOT_FOUND;
 }
 
 /**
@@ -4783,9 +4880,9 @@ cyxchat_error_t cyxchat_group_log_admin_action(
     }
 
     /* Verify group exists and we are admin */
-    cyxchat_group_t *group = find_group(ctx, group_id);
+    CYXWIZ_INFO("Finding group..."); cyxchat_group_t *group = find_group(ctx, group_id);
     if (!group) {
-        return CYXCHAT_ERR_NOT_FOUND;
+        CYXWIZ_ERROR("Group not found"); return CYXCHAT_ERR_NOT_FOUND;
     }
 
     cyxchat_group_member_t *self = find_member(group, &ctx->local_id);
@@ -5024,7 +5121,7 @@ cyxchat_error_t cyxchat_group_get_admin_action(
         }
     }
 
-    return CYXCHAT_ERR_NOT_FOUND;
+    CYXWIZ_ERROR("Group not found"); return CYXCHAT_ERR_NOT_FOUND;
 }
 
 /**
@@ -5129,9 +5226,9 @@ cyxchat_error_t cyxchat_group_send_file(
     }
 
     // Check if we are a member
-    cyxchat_group_t *group = find_group(ctx, group_id);
+    CYXWIZ_INFO("Finding group..."); cyxchat_group_t *group = find_group(ctx, group_id);
     if (!group) {
-        return CYXCHAT_ERR_NOT_FOUND;
+        CYXWIZ_ERROR("Group not found"); return CYXCHAT_ERR_NOT_FOUND;
     }
 
     // Check if member has media restriction
@@ -5194,9 +5291,9 @@ cyxchat_error_t cyxchat_group_send_voice(
     }
 
     // Check if we are a member
-    cyxchat_group_t *group = find_group(ctx, group_id);
+    CYXWIZ_INFO("Finding group..."); cyxchat_group_t *group = find_group(ctx, group_id);
     if (!group) {
-        return CYXCHAT_ERR_NOT_FOUND;
+        CYXWIZ_ERROR("Group not found"); return CYXCHAT_ERR_NOT_FOUND;
     }
 
     // Check if member has media restriction
@@ -5248,9 +5345,9 @@ cyxchat_error_t cyxchat_group_send_image(
     }
 
     // Check if we are a member
-    cyxchat_group_t *group = find_group(ctx, group_id);
+    CYXWIZ_INFO("Finding group..."); cyxchat_group_t *group = find_group(ctx, group_id);
     if (!group) {
-        return CYXCHAT_ERR_NOT_FOUND;
+        CYXWIZ_ERROR("Group not found"); return CYXCHAT_ERR_NOT_FOUND;
     }
 
     // Check if member has media restriction
@@ -5301,9 +5398,9 @@ cyxchat_error_t cyxchat_group_get_media(
     }
 
     // Check if we are a member
-    cyxchat_group_t *group = find_group(ctx, group_id);
+    CYXWIZ_INFO("Finding group..."); cyxchat_group_t *group = find_group(ctx, group_id);
     if (!group) {
-        return CYXCHAT_ERR_NOT_FOUND;
+        CYXWIZ_ERROR("Group not found"); return CYXCHAT_ERR_NOT_FOUND;
     }
 
     // TODO: Implement media gallery query
@@ -5324,7 +5421,7 @@ size_t cyxchat_group_get_media_count(
     }
 
     // Check if we are a member
-    cyxchat_group_t *group = find_group(ctx, group_id);
+    CYXWIZ_INFO("Finding group..."); cyxchat_group_t *group = find_group(ctx, group_id);
     if (!group) {
         return 0;
     }

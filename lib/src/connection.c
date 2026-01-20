@@ -45,6 +45,8 @@ typedef struct {
     uint64_t start_time;
     uint8_t punch_attempts;
     int active;
+    uint8_t pubkey[32];             /* Peer's X25519 public key */
+    int has_pubkey;                 /* 1 if pubkey is valid */
 } cyxchat_pending_conn_t;
 
 /* Throttle interval for sending ANNOUNCEs to same peer (60 seconds) */
@@ -64,6 +66,8 @@ typedef struct {
     int8_t rssi;
     int is_relayed;
     int active;
+    uint8_t pubkey[32];             /* Peer's X25519 public key */
+    int has_pubkey;                 /* 1 if pubkey is valid */
 } cyxchat_peer_conn_t;
 
 /* DHT find callback wrapper */
@@ -485,6 +489,7 @@ static void on_peer_key_received(const cyxwiz_node_id_t *peer_id,
             snprintf(hex_id + i*2, 3, "%02x", peer_id->bytes[i]);
         }
         CYXWIZ_INFO("Key exchange complete with peer %.16s...", hex_id);
+/* Store pubkey in peer connection for later retrieval */        if (conn) {            memcpy(conn->pubkey, peer_pubkey, 32);            conn->has_pubkey = 1;        }
 
         /* WORKAROUND: Explicitly set peer to CONNECTED state after successful key exchange. */
         if (ctx->peer_table) {
@@ -1131,6 +1136,44 @@ int cyxchat_conn_has_peer_key(cyxchat_conn_ctx_t *ctx, const cyxwiz_node_id_t *p
 {
     if (!ctx || !peer_id || !ctx->onion) return 0;
     return cyxwiz_onion_has_key(ctx->onion, peer_id) ? 1 : 0;
+}
+cyxchat_error_t cyxchat_conn_get_peer_pubkey(
+    cyxchat_conn_ctx_t *ctx,
+    const cyxwiz_node_id_t *peer_id,
+    uint8_t *pubkey_out)
+{
+    if (!ctx || !peer_id || !pubkey_out) {
+        return CYXCHAT_ERR_NULL;
+    }
+
+    char peer_hex[17] = {0};
+    for (int i = 0; i < 8; i++) {
+        snprintf(peer_hex + i*2, 3, "%02x", peer_id->bytes[i]);
+    }
+
+    /* Try exact match first */
+    cyxchat_peer_conn_t *conn = find_peer_conn(ctx, peer_id);
+    if (conn && conn->has_pubkey) {
+        memcpy(pubkey_out, conn->pubkey, 32);
+        CYXWIZ_INFO("Found pubkey for peer %.16s (exact match)", peer_hex);
+        return CYXCHAT_OK;
+    }
+
+    /* Fallback: match by first 8 bytes only (for short node ID lookups).
+     * This handles the case where user enters short ID like "cb1f012e1e7b4067"
+     * but the connection context stores full 32-byte node IDs. */
+    for (size_t i = 0; i < CYXCHAT_MAX_PEER_CONNECTIONS; i++) {
+        if (ctx->peers[i].active &&
+            memcmp(&ctx->peers[i].peer_id, peer_id, 8) == 0 &&
+            ctx->peers[i].has_pubkey) {
+            memcpy(pubkey_out, ctx->peers[i].pubkey, 32);
+            CYXWIZ_INFO("Found pubkey for peer %.16s (prefix match)", peer_hex);
+            return CYXCHAT_OK;
+        }
+    }
+
+    CYXWIZ_INFO("No pubkey for peer %.16s (conn=%p)", peer_hex, (void*)conn);
+    return CYXCHAT_ERR_NOT_FOUND;
 }
 
 const char* cyxchat_conn_nat_type_name(cyxwiz_nat_type_t nat_type)

@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:ffi/ffi.dart';
 
 /// Native callback type for file request
@@ -569,6 +570,31 @@ class CyxChatBindings {
     return _native.cyxchat_conn_has_peer_key(_connCtx!, peerId) != 0;
   }
 
+  /// Get peer's X25519 public key by hex node ID
+  /// Returns the 32-byte public key or null if not found
+  List<int>? connGetPeerPubkeyHex(String peerIdHex) {
+    if (_connCtx == null) return null;
+
+    final peerIdBytes = _hexToBytes(peerIdHex);
+    final peerIdPtr = calloc<Uint8>(32);
+    final pubkeyOut = calloc<Uint8>(32);
+
+    try {
+      for (int i = 0; i < 32 && i < peerIdBytes.length; i++) {
+        peerIdPtr[i] = peerIdBytes[i];
+      }
+
+      final result = _native.cyxchat_conn_get_peer_pubkey(_connCtx!, peerIdPtr, pubkeyOut);
+      if (result == 0) {
+        return List<int>.generate(32, (i) => pubkeyOut[i]);
+      }
+      return null;
+    } finally {
+      calloc.free(peerIdPtr);
+      calloc.free(pubkeyOut);
+    }
+  }
+
   /// Get connection state name
   String connStateName(int state) {
     final ptr = _native.cyxchat_conn_state_name(state);
@@ -937,6 +963,57 @@ class CyxChatBindings {
     }
   }
 
+  /// Restore a group from saved data (for app restart)
+  /// Returns 0 on success, error code otherwise
+  int groupRestore({
+    required String groupIdHex,
+    required String name,
+    required Uint8List groupKey,
+    required int keyVersion,
+    required String creatorIdHex,
+    required int myRole,
+  }) {
+    if (_groupCtx == null) return CyxChatError.errNull;
+    if (groupKey.length != 32) return CyxChatError.errInvalid;
+
+    final groupIdPtr = calloc<Uint8>(8);
+    final namePtr = name.toNativeUtf8();
+    final groupKeyPtr = calloc<Uint8>(32);
+    final creatorIdPtr = calloc<Uint8>(32);
+
+    try {
+      // Parse group ID from hex
+      final parseGroupId = groupIdFromHex(groupIdHex, groupIdPtr);
+      if (parseGroupId != 0) return parseGroupId;
+
+      // Parse creator ID from hex
+      for (int i = 0; i < 16 && i * 2 < creatorIdHex.length; i++) {
+        creatorIdPtr[i] = int.parse(creatorIdHex.substring(i * 2, i * 2 + 2), radix: 16);
+      }
+
+      // Copy group key
+      for (int i = 0; i < 32; i++) {
+        groupKeyPtr[i] = groupKey[i];
+      }
+
+      return _native.cyxchat_group_restore(
+        _groupCtx!,
+        groupIdPtr,
+        namePtr.cast(),
+        groupKeyPtr,
+        keyVersion,
+        creatorIdPtr,
+        myRole,
+      );
+    } finally {
+      calloc.free(groupIdPtr);
+      calloc.free(namePtr);
+      calloc.free(groupKeyPtr);
+      calloc.free(creatorIdPtr);
+    }
+  }
+
+
   /// Set group description
   int groupSetDescription(String groupIdHex, String description) {
     if (_groupCtx == null) return CyxChatError.errNull;
@@ -1120,6 +1197,36 @@ class CyxChatBindings {
       calloc.free(groupIdPtr);
     }
   }
+
+  /// Get group key (for persistence)
+  /// Returns null if group not found, otherwise (key, version)
+  (Uint8List, int)? groupGetKey(String groupIdHex) {
+    if (_groupCtx == null) return null;
+    final groupIdPtr = calloc<Uint8>(8);
+    final keyPtr = calloc<Uint8>(32);
+    final versionPtr = calloc<Uint32>();
+    try {
+      final parseResult = groupIdFromHex(groupIdHex, groupIdPtr);
+      if (parseResult != 0) return null;
+      final result = _native.cyxchat_group_get_key(
+        _groupCtx!,
+        groupIdPtr,
+        keyPtr,
+        versionPtr,
+      );
+      if (result != 0) return null;
+      final key = Uint8List(32);
+      for (int i = 0; i < 32; i++) {
+        key[i] = keyPtr[i];
+      }
+      return (key, versionPtr.value);
+    } finally {
+      calloc.free(groupIdPtr);
+      calloc.free(keyPtr);
+      calloc.free(versionPtr);
+    }
+  }
+
 
   /// Check if we are admin of group
   bool groupIsAdmin(String groupIdHex) {
@@ -3264,6 +3371,7 @@ class CyxChatNative {
   late final cyxchat_conn_has_peer_key = _lib.lookupFunction<
       Int32 Function(Pointer<Void>, Pointer<Uint8>),
       int Function(Pointer<Void>, Pointer<Uint8>)>('cyxchat_conn_has_peer_key');
+late final cyxchat_conn_get_peer_pubkey = _lib.lookupFunction<      Int32 Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>),      int Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>)>('cyxchat_conn_get_peer_pubkey');
 
   late final cyxchat_conn_state_name = _lib.lookupFunction<
       Pointer<Int8> Function(Int32),
@@ -3484,6 +3592,12 @@ class CyxChatNative {
       int Function(Pointer<Void>, Pointer<Int8>, Pointer<Uint8>)>(
       'cyxchat_group_create');
 
+  late final cyxchat_group_restore = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>, Pointer<Int8>, Pointer<Uint8>, Uint32, Pointer<Uint8>, Int32),
+      int Function(Pointer<Void>, Pointer<Uint8>, Pointer<Int8>, Pointer<Uint8>, int, Pointer<Uint8>, int)>(
+      'cyxchat_group_restore');
+
+
   late final cyxchat_group_set_description = _lib.lookupFunction<
       Int32 Function(Pointer<Void>, Pointer<Uint8>, Pointer<Int8>),
       int Function(Pointer<Void>, Pointer<Uint8>, Pointer<Int8>)>(
@@ -3531,6 +3645,12 @@ class CyxChatNative {
   late final cyxchat_group_count = _lib.lookupFunction<
       Size Function(Pointer<Void>),
       int Function(Pointer<Void>)>('cyxchat_group_count');
+
+  late final cyxchat_group_get_key = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>, Pointer<Uint32>),
+      int Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>, Pointer<Uint32>)>(
+      'cyxchat_group_get_key');
+
 
   late final cyxchat_group_is_member = _lib.lookupFunction<
       Int32 Function(Pointer<Void>, Pointer<Uint8>),

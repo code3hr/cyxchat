@@ -13,9 +13,12 @@ import '../providers/voice_provider.dart';
 import '../providers/call_provider.dart';
 import '../providers/settings_provider.dart';
 import '../providers/contact_provider.dart';
+import '../providers/group_ffi_provider.dart';
 import '../ffi/bindings.dart' show CyxChatFileState, CyxChatFileConst;
 import '../models/models.dart';
+import '../services/group_service.dart';
 import 'active_call_screen.dart';
+import 'group_chat_screen.dart';
 
 class ChatScreen extends ConsumerStatefulWidget {
   final String conversationId;
@@ -614,6 +617,12 @@ class _MessageBubbleState extends ConsumerState<_MessageBubble> {
                       _FileMessageContent(
                         message: widget.message,
                         isOutgoing: isOutgoing,
+                        colorScheme: colorScheme,
+                      )
+                    else if (widget.message.type == MessageType.system &&
+                             widget.message.content.startsWith('GROUP_INVITE|'))
+                      _GroupInviteMessageContent(
+                        message: widget.message,
                         colorScheme: colorScheme,
                       )
                     else
@@ -1389,6 +1398,125 @@ class _VoiceMessageContent extends ConsumerWidget {
     } else {
       // Play new file
       player.playFromBytes(fileId, fileData);
+    }
+  }
+}
+
+/// Group invite message widget with accept button
+class _GroupInviteMessageContent extends ConsumerWidget {
+  final Message message;
+  final ColorScheme colorScheme;
+
+  const _GroupInviteMessageContent({
+    required this.message,
+    required this.colorScheme,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    // Parse invite: GROUP_INVITE|groupId|groupName
+    final parts = message.content.split('|');
+    final groupId = parts.length > 1 ? parts[1] : '';
+    final groupName = parts.length > 2 ? parts[2] : 'Unknown Group';
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: colorScheme.primaryContainer.withOpacity(0.3),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: colorScheme.primary.withOpacity(0.3),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.group_add,
+                color: colorScheme.primary,
+                size: 20,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Group Invitation',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    color: colorScheme.onSurface,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'You\'ve been invited to join "$groupName"',
+            style: TextStyle(
+              color: colorScheme.onSurface.withOpacity(0.8),
+            ),
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: () => _acceptInvite(context, ref, groupId, groupName),
+              icon: const Icon(Icons.check, size: 18),
+              label: const Text('Accept Invite'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: colorScheme.primary,
+                foregroundColor: colorScheme.onPrimary,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _acceptInvite(
+    BuildContext context,
+    WidgetRef ref,
+    String groupId,
+    String groupName,
+  ) async {
+    // Check if we have a pending invite in FFI provider
+    final ffiProvider = ref.read(groupFFINotifierProvider);
+    final pendingInvite = ffiProvider.pendingInvites
+        .where((inv) => inv.groupId == groupId)
+        .firstOrNull;
+
+    if (pendingInvite != null) {
+      // Accept via FFI
+      final success = await GroupService.instance.acceptInvite(groupId);
+      if (success && context.mounted) {
+        ref.invalidate(conversationsProvider);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Joined "$groupName"!')),
+        );
+        // Navigate to group chat
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(
+            builder: (context) => GroupChatScreen(groupId: groupId),
+          ),
+        );
+      } else if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to join group. Try again.')),
+        );
+      }
+    } else {
+      // No pending invite in FFI - show instructions
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Invite expired. Ask for a new invitation.'),
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
     }
   }
 }

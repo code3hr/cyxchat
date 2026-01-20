@@ -15,15 +15,26 @@ CyxChat is a decentralized, privacy-first messaging application built on the Cyx
 
 ## Current Status
 
-**Focus**: 1:1 P2P chat between two devices on different networks behind NAT.
+**Focus**: 1:1 P2P chat and group chat between devices on different networks behind NAT.
 
 | Component | Status | Notes |
 |-----------|--------|-------|
-| C Library (libcyxchat) | Complete | Chat, connection, relay all working |
+| C Library (libcyxchat) | Complete | Chat, connection, relay, group all working |
 | FFI Bindings | Complete | Full Dart-to-C bridge |
 | Bootstrap Server | Complete | Docker-ready, handles registration + relay |
 | Flutter UI | Complete | Auto-connect, real-time message updates |
 | File Transfer | Complete | Chunked transfer via onion routing, max 64KB |
+| Group Chat | In Progress | Groups persist in SQLite, invites require key exchange |
+
+### Known Issues
+
+**Group Invite Requires Key Exchange**: When inviting a member to a group, the inviter needs the member's X25519 public key to encrypt the group key. The pubkey lookup chain is:
+1. Connection context (from live key exchange) - preferred
+2. Contact database (stored from previous exchanges)
+
+If neither source has the pubkey, the invite fails with "No pubkey for peer". **Solution**: Both peers must be online and have completed key exchange before group invites work.
+
+**Group Persistence**: Groups are stored in SQLite but the C library loses them on app restart. The `cyxchat_group_restore()` function re-registers groups with the C library on startup.
 
 ## Platform-Specific Security Considerations
 
@@ -173,7 +184,8 @@ cyxchat/
 │   │   ├── services/       # Business logic
 │   │   │   ├── database_service.dart
 │   │   │   ├── identity_service.dart
-│   │   │   └── chat_service.dart
+│   │   │   ├── chat_service.dart
+│   │   │   └── group_service.dart
 │   │   ├── providers/      # State management (Riverpod)
 │   │   │   ├── network_provider.dart    # ConnectionActions (connect/disconnect)
 │   │   │   ├── connection_provider.dart # Low-level FFI connection
@@ -181,12 +193,17 @@ cyxchat/
 │   │   │   ├── conversation_provider.dart # UI providers for messages
 │   │   │   ├── dns_provider.dart        # Username resolution
 │   │   │   ├── dht_provider.dart        # Distributed hash table
+│   │   │   ├── group_provider.dart      # Group UI providers
+│   │   │   ├── group_ffi_provider.dart  # Group FFI operations
 │   │   │   └── settings_provider.dart   # App settings (bootstrap server)
 │   │   └── screens/        # UI screens
 │   │       ├── home_screen.dart
 │   │       ├── chat_screen.dart
 │   │       ├── contacts_screen.dart
-│   │       └── settings_screen.dart
+│   │       ├── settings_screen.dart
+│   │       ├── create_group_screen.dart
+│   │       ├── group_chat_screen.dart
+│   │       └── group_info_screen.dart
 │   └── pubspec.yaml
 │
 └── docs/                   # Documentation
@@ -333,6 +350,68 @@ Received files show "Tap to save" with download icon. Tapping opens a save dialo
 ### FFI Callback Note
 File callbacks use `NativeCallable.listener()` which creates async callbacks. The C pointers may become stale before Dart processes them. Solution: copy data immediately in the callback handler using `_bytesToHex(fileId, 8)` before any async operations.
 
+## Group Chat
+
+Groups use rotating symmetric keys for message encryption, with X25519 ECDH for key distribution.
+
+### Architecture
+- **Group Key**: Random 32-byte symmetric key, versioned for rotation
+- **Key Distribution**: Group key encrypted per-member using ECDH shared secrets
+- **Key Derivation**: `derive_member_key(shared_secret, sender_id, recipient_id)` using BLAKE2b
+- **Message Encryption**: XChaCha20-Poly1305 with group key
+
+### Flow
+```
+CREATING GROUP:
+UI (CreateGroupScreen) → GroupService.createGroup() → SQLite insert
+    → GroupFFIProvider.createGroup() → FFI → cyxchat_group_create()
+    → Generates group key + registers locally
+
+INVITING MEMBER:
+UI (GroupInfoScreen) → GroupService.inviteMember()
+    → Lookup member pubkey (connection context → contact DB)
+    → GroupFFIProvider.inviteMember() → FFI → cyxchat_group_invite()
+    → ECDH: derive shared secret → encrypt group key → send invite
+
+RECEIVING INVITE:
+Network → cyxchat_group_poll() → onGroupInvite callback
+    → GroupFFIProvider._handleGroupInvite() → Dart callback
+    → GroupService.handleGroupInvite() → Show in UI / auto-accept
+
+SENDING MESSAGE:
+UI (GroupChatScreen) → GroupService.sendMessage()
+    → GroupFFIProvider.sendMessage() → FFI → cyxchat_group_send_text()
+    → Encrypt with group key → broadcast to members via onion routing
+```
+
+### Pubkey Lookup Chain
+When inviting a member, the inviter needs their X25519 public key:
+1. **Connection context** (`cyxchat_conn_get_peer_pubkey`) - from live key exchange
+2. **Contact database** - stored from previous exchanges
+
+Code in `group_service.dart:inviteMember()`:
+```dart
+// Priority: 1) provided, 2) connection context, 3) contact DB
+List<int>? pubkey = memberPubkey;
+if (pubkey == null && _ffiProvider != null) {
+  final connPubkey = _ffiProvider!.bindings.connGetPeerPubkeyHex(nodeId);
+  if (connPubkey != null && connPubkey.any((b) => b != 0)) {
+    pubkey = connPubkey;  // From connection context
+  }
+}
+if (pubkey == null && contacts.isNotEmpty) {
+  // Fallback to contact database
+}
+```
+
+### Group Persistence
+Groups stored in SQLite tables:
+- `groups` - group metadata (id, name, owner, settings)
+- `group_members` - member list with roles
+- `group_messages` - message history
+
+On app restart, `GroupService._restoreGroupsToC()` calls `cyxchat_group_restore()` to re-register each group with the C library.
+
 ## FFI Patterns
 
 When adding new C functions:
@@ -431,6 +510,11 @@ To test P2P messaging locally:
 | `chatActionsProvider` | Send message, mark read, etc. |
 | `fileNotifierProvider` | File transfer state + received file data |
 | `fileActionsProvider` | Send file, accept/reject transfers |
+| `groupFFINotifierProvider` | Group FFI operations + callbacks |
+| `groupsProvider` | List of groups from DB |
+| `groupProvider(id)` | Single group details |
+| `groupMembersProvider(id)` | Members of a group |
+| `groupActionsProvider` | Create group, invite, leave, etc. |
 
 ## Startup Flow
 
@@ -441,8 +525,11 @@ To test P2P messaging locally:
    - DNSProvider (username resolution)
    - ChatProvider (message sending/receiving)
    - DHTProvider (decentralized peer discovery)
+   - GroupFFIProvider (group operations)
 4. `ChatService.connectProvider()` → subscribes to message streams
-5. App is ready for P2P messaging
+5. `GroupService.connectProvider()` → subscribes to group events + restores groups
+6. `GroupService._restoreGroupsToC()` → re-registers SQLite groups with C library
+7. App is ready for P2P and group messaging
 
 ## Related Documentation
 

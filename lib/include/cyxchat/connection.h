@@ -277,6 +277,22 @@ CYXCHAT_API int cyxchat_conn_has_peer_key(
     cyxchat_conn_ctx_t *ctx,
     const cyxwiz_node_id_t *peer_id
 );
+/**
+ * Get peer's X25519 public key
+ *
+ * Retrieves the peer's public key from the onion context if available.
+ * The key is obtained during the key exchange when connecting to the peer.
+ *
+ * @param ctx           Connection context
+ * @param peer_id       Peer node ID
+ * @param pubkey_out    Output buffer for public key (32 bytes)
+ * @return              CYXCHAT_OK on success, error code otherwise
+ */
+CYXCHAT_API cyxchat_error_t cyxchat_conn_get_peer_pubkey(
+    cyxchat_conn_ctx_t *ctx,
+    const cyxwiz_node_id_t *peer_id,
+    uint8_t *pubkey_out
+);
 
 /**
  * Get NAT type name string

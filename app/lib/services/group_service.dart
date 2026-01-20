@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 import 'package:sqflite/sqflite.dart' show ConflictAlgorithm, Sqflite;
 import 'package:uuid/uuid.dart';
 import '../models/models.dart';
@@ -29,7 +30,7 @@ class GroupService {
   Stream<Group> get groupUpdateStream => _groupUpdateController.stream;
 
   /// Connect to the FFI provider for network operations
-  void connectProvider(GroupFFIProvider provider) {
+  Future<void> connectProvider(GroupFFIProvider provider) async {
     if (_ffiProvider != null) {
       _log.warning('GroupService already connected to FFI provider',
           source: 'GroupService');
@@ -39,6 +40,9 @@ class GroupService {
     _ffiProvider = provider;
     _setupStreamSubscriptions();
     _log.info('Connected to GroupFFIProvider', source: 'GroupService');
+
+    // Restore existing groups from database to C library
+    await _restoreGroupsToLibrary();
   }
 
   /// Disconnect from FFI provider
@@ -76,6 +80,74 @@ class GroupService {
       provider.inviteStream.listen(_handleGroupInvite),
     );
   }
+
+  /// Restore existing groups from database to C library on startup
+  Future<void> _restoreGroupsToLibrary() async {
+    final provider = _ffiProvider;
+    if (provider == null) return;
+
+    final identity = IdentityService.instance.currentIdentity;
+    if (identity == null) return;
+
+    final db = await DatabaseService.instance.database;
+
+    // Get all groups with their keys
+    final rows = await db.rawQuery('''
+      SELECT g.id, g.name, g.creator_id, g.group_key_encrypted, g.key_version,
+             m.role
+      FROM groups g
+      LEFT JOIN group_members m ON g.id = m.group_id AND m.node_id = ?
+      WHERE m.node_id IS NOT NULL
+    ''', [identity.nodeId]);
+
+    _log.info('Restoring ${rows.length} groups to C library', source: 'GroupService');
+
+    for (final row in rows) {
+      final groupId = row['id'] as String;
+      final name = row['name'] as String;
+      final creatorId = row['creator_id'] as String;
+      final keyBlob = row['group_key_encrypted'];
+      final keyVersion = row['key_version'] as int? ?? 1;
+      final role = row['role'] as int? ?? 0;
+
+      if (keyBlob == null) {
+        _log.warning('Group $groupId has no key, skipping restore', source: 'GroupService');
+        continue;
+      }
+
+      // Convert key blob to Uint8List
+      final Uint8List groupKey;
+      if (keyBlob is List<int>) {
+        groupKey = Uint8List.fromList(keyBlob);
+      } else if (keyBlob is Uint8List) {
+        groupKey = keyBlob;
+      } else {
+        _log.warning('Group $groupId has invalid key format: ${keyBlob.runtimeType}', source: 'GroupService');
+        continue;
+      }
+
+      if (groupKey.length != 32) {
+        _log.warning('Group $groupId has invalid key length: ${groupKey.length}', source: 'GroupService');
+        continue;
+      }
+
+      final result = provider.bindings.groupRestore(
+        groupIdHex: groupId,
+        name: name,
+        groupKey: groupKey,
+        keyVersion: keyVersion,
+        creatorIdHex: creatorId,
+        myRole: role,
+      );
+
+      if (result == 0) {
+        _log.info('Restored group $groupId (role: $role)', source: 'GroupService');
+      } else {
+        _log.warning('Failed to restore group $groupId: error $result', source: 'GroupService');
+      }
+    }
+  }
+
 
   /// Handle incoming group message from FFI
   Future<void> _handleIncomingMessage(GroupMessageReceived msg) async {
@@ -246,8 +318,76 @@ class GroupService {
   Future<void> _handleGroupInvite(GroupInvite invite) async {
     _log.info('Received invite to group "${invite.groupName}"',
         source: 'GroupService');
-    // Invites are managed by GroupFFIProvider.pendingInvites
-    // UI can listen to that provider for invite list
+
+    final db = await DatabaseService.instance.database;
+
+    // Get or create direct conversation with inviter
+    final convRows = await db.query(
+      'conversations',
+      where: 'peer_id = ? AND type = ?',
+      whereArgs: [invite.inviterId, ConversationType.direct.index],
+    );
+
+    String conversationId;
+    if (convRows.isNotEmpty) {
+      conversationId = convRows.first['id'] as String;
+    } else {
+      // Create new conversation with inviter
+      conversationId = _uuid.v4();
+
+      // Look up contact's display name
+      String? displayName;
+      final contactRows = await db.query(
+        'contacts',
+        columns: ['display_name'],
+        where: 'node_id = ?',
+        whereArgs: [invite.inviterId],
+      );
+      if (contactRows.isNotEmpty && contactRows.first['display_name'] != null) {
+        displayName = contactRows.first['display_name'] as String;
+      }
+
+      await db.insert('conversations', {
+        'id': conversationId,
+        'type': ConversationType.direct.index,
+        'peer_id': invite.inviterId,
+        'display_name': displayName,
+        'is_pinned': 0,
+        'is_archived': 0,
+        'is_muted': 0,
+        'last_activity_at': DateTime.now().millisecondsSinceEpoch,
+      });
+    }
+
+    // Create system message with invite info
+    // Format: GROUP_INVITE|groupId|groupName
+    // This format allows the UI to parse and display an "Accept Invite" button
+    final inviteContent = 'GROUP_INVITE|${invite.groupId}|${invite.groupName}';
+
+    final message = Message(
+      id: _uuid.v4(),
+      conversationId: conversationId,
+      senderId: invite.inviterId,
+      type: MessageType.system,
+      content: inviteContent,
+      timestamp: invite.receivedAt,
+      status: MessageStatus.delivered,
+      isOutgoing: false,
+    );
+
+    // Save to database
+    await db.insert('messages', message.toMap());
+
+    // Update conversation timestamp and unread count
+    await db.rawUpdate('''
+      UPDATE conversations
+      SET last_activity_at = ?,
+          unread_count = unread_count + 1
+      WHERE id = ?
+    ''', [invite.receivedAt.millisecondsSinceEpoch, conversationId]);
+
+    _log.info('Created invite message in conversation with ${invite.inviterId.substring(0, 8)}...',
+        source: 'GroupService');
   }
 
   // ============================================================
@@ -372,6 +512,24 @@ class GroupService {
     // Save group to database
     await db.insert('groups', group.toMap());
 
+    // Get and save the group key for persistence
+    if (_ffiProvider != null && _ffiProvider!.initialized) {
+      final keyData = _ffiProvider!.bindings.groupGetKey(groupId);
+      if (keyData != null) {
+        final (groupKey, keyVersion) = keyData;
+        await db.update(
+          'groups',
+          {'group_key_encrypted': groupKey, 'key_version': keyVersion},
+          where: 'id = ?',
+          whereArgs: [groupId],
+        );
+        _log.info('Saved group key for $groupId (version: $keyVersion)', source: 'GroupService');
+      } else {
+        _log.warning('Could not get group key for $groupId', source: 'GroupService');
+      }
+    }
+
+
     // Add ourselves as owner
     final selfMember = GroupMember(
       groupId: groupId,
@@ -434,33 +592,62 @@ class GroupService {
         ? contacts.first['display_name'] as String?
         : null;
 
-    // Get pubkey from contact if not provided
+    // Get pubkey - priority: 1) provided, 2) connection context, 3) contact DB
     List<int>? pubkey = memberPubkey;
+
+    // Try to get pubkey from connection context (live key exchange data)
+    if (pubkey == null && _ffiProvider != null) {
+      final connPubkey = _ffiProvider!.bindings.connGetPeerPubkeyHex(nodeId);
+      if (connPubkey != null && connPubkey.length == 32) {
+        // Verify it's not all zeros
+        final hasNonZero = connPubkey.any((b) => b != 0);
+        if (hasNonZero) {
+          pubkey = connPubkey;
+          _log.info('Got pubkey from connection context', source: 'GroupService');
+        }
+      }
+    }
+
+    // Fall back to contact database
     if (pubkey == null && contacts.isNotEmpty) {
       final pubkeyData = contacts.first['public_key'];
+      _log.info('Contact DB pubkey data type: ${pubkeyData?.runtimeType}, value: $pubkeyData', source: 'GroupService');
       if (pubkeyData != null) {
+        List<int>? candidatePubkey;
         // public_key is stored as BLOB, read as bytes directly
         if (pubkeyData is List<int>) {
-          pubkey = pubkeyData;
+          candidatePubkey = pubkeyData;
         } else if (pubkeyData is String) {
           // Legacy data: might be stored as raw character codes or hex
           // If string length is 32, it's likely raw bytes stored via String.fromCharCodes
           // If string length is 64, it's likely hex
           if (pubkeyData.length == 32) {
             // Raw bytes stored as string
-            pubkey = pubkeyData.codeUnits;
+            candidatePubkey = pubkeyData.codeUnits;
           } else if (pubkeyData.length >= 64) {
             // Hex string format
             try {
-              pubkey = _hexToBytes(pubkeyData);
+              candidatePubkey = _hexToBytes(pubkeyData);
             } catch (e) {
               // If hex parsing fails, try as raw bytes
-              pubkey = pubkeyData.codeUnits;
+              candidatePubkey = pubkeyData.codeUnits;
             }
           } else {
             // Unknown format, try as raw bytes
-            pubkey = pubkeyData.codeUnits;
+            candidatePubkey = pubkeyData.codeUnits;
           }
+        }
+        // Verify it's not all zeros (same validation as connection context path)
+        if (candidatePubkey != null && candidatePubkey.length == 32) {
+          final hasNonZero = candidatePubkey.any((b) => b != 0);
+          if (hasNonZero) {
+            pubkey = candidatePubkey;
+            _log.info('Got pubkey from contact DB (valid, non-zero)', source: 'GroupService');
+          } else {
+            _log.warning('Contact DB has all-zero pubkey, ignoring', source: 'GroupService');
+          }
+        } else {
+          _log.warning('Contact DB pubkey invalid length: ${candidatePubkey?.length}', source: 'GroupService');
         }
       }
     }
@@ -468,10 +655,14 @@ class GroupService {
     // Send invite via FFI
     if (_ffiProvider != null && _ffiProvider!.initialized) {
       if (pubkey == null || pubkey.length != 32) {
-        _log.error('Cannot invite: missing public key for member',
+        _log.error('Cannot invite: missing public key for member (pubkey=$pubkey, len=${pubkey?.length})',
             source: 'GroupService');
         return false;
       }
+
+      // Log the pubkey being used for invite
+      final pubkeyHex = pubkey.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+      _log.info('Inviting with pubkey: $pubkeyHex', source: 'GroupService');
 
       final success = await _ffiProvider!.inviteMember(
         groupId: groupId,
