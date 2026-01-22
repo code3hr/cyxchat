@@ -919,6 +919,7 @@ class GroupFFIProvider extends ChangeNotifier {
   }
 
   void _onGroupMessage(String groupId, String from, String msgId, String text) {
+    print("DEBUG GroupFFI: _onGroupMessage called - groupId=$groupId, from=${from.substring(0, 16)}, msgId=$msgId");
     final log = LogService.instance;
     final shortFrom = from.length > 8 ? from.substring(0, 8) : from;
     final preview = text.length > 20 ? '${text.substring(0, 20)}...' : text;
@@ -931,6 +932,7 @@ class GroupFFIProvider extends ChangeNotifier {
       msgId: msgId,
       text: text,
     ));
+    print("DEBUG GroupFFI: Added to messageStream");
   }
 
   void _onGroupInvite(String groupId, String groupName, String inviter) {

@@ -152,6 +152,8 @@ class GroupService {
 
   /// Handle incoming group message from FFI
   Future<void> _handleIncomingMessage(GroupMessageReceived msg) async {
+    print("DEBUG GroupService: _handleIncomingMessage called");
+    print("DEBUG GroupService: groupId=${msg.groupId.substring(0, 8)}, from=${msg.fromNodeId.substring(0, 16)}, text=${msg.text}");
     _log.info(
         'Received group message from ${msg.fromNodeId.substring(0, 8)}...',
         source: 'GroupService');
@@ -925,6 +927,7 @@ class GroupService {
     String content, {
     String? replyToId,
   }) async {
+    print("DEBUG GroupService.sendMessage: groupId=$groupId, content=$content");
     final db = await DatabaseService.instance.database;
     final identity = IdentityService.instance.currentIdentity;
     if (identity == null) {
@@ -947,6 +950,7 @@ class GroupService {
       }
       msgId = result.msgId!;
       status = MessageStatus.sent;
+      print("DEBUG GroupService.sendMessage: FFI success, msgId=$msgId");
     } else {
       // Fallback for testing/offline
       msgId = _uuid.v4();

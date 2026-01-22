@@ -1499,7 +1499,8 @@ class CyxChatBindings {
     Pointer<Void> msg,
     Pointer<Void> userData,
   ) {
-    if (onGroupMessage == null) return;
+    print("DEBUG FFI: _handleGroupMessage called");
+    if (onGroupMessage == null) { print("DEBUG FFI: onGroupMessage callback is NULL!"); return; }
 
     final groupIdHex = _ptrToHex(groupId, 8);
     final fromHex = _ptrToHex(from, 32);
@@ -1523,6 +1524,7 @@ class CyxChatBindings {
     }
     final text = String.fromCharCodes(textBytes);
 
+    print("DEBUG FFI: Parsed - msgId=$msgIdHex, textLen=${text.length}, text=${text.substring(0, text.length > 30 ? 30 : text.length)}...");
     onGroupMessage!(groupIdHex, fromHex, msgIdHex, text);
   }
 

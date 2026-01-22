@@ -6,6 +6,7 @@ import 'package:file_picker/file_picker.dart';
 import '../main.dart';
 import '../providers/group_provider.dart';
 import '../providers/group_ffi_provider.dart';
+import '../providers/conversation_provider.dart';
 import '../models/models.dart';
 import '../services/identity_service.dart';
 import '../widgets/media_message_content.dart';
@@ -33,6 +34,22 @@ class _GroupChatScreenState extends ConsumerState<GroupChatScreen> {
     // Mark as read when opening
     WidgetsBinding.instance.addPostFrameCallback((_) {
       ref.read(groupActionsProvider).markAsRead(widget.groupId);
+      _setupMessageListener();
+    });
+  }
+
+  /// Listen for incoming group messages and refresh UI
+  void _setupMessageListener() {
+    ref.listen<AsyncValue<Message>>(groupMessageStreamProvider, (previous, next) {
+      next.whenData((message) {
+        // Refresh if message is for this group
+        if (message.conversationId == widget.groupId) {
+          ref.invalidate(groupMessagesProvider(widget.groupId));
+        }
+        // Also refresh group list for last message preview
+        ref.invalidate(groupsProvider);
+        ref.invalidate(conversationsProvider);
+      });
     });
   }
 
