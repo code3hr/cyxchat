@@ -295,6 +295,24 @@ CYXCHAT_API cyxchat_error_t cyxchat_conn_get_peer_pubkey(
 );
 
 /**
+ * Get full node ID from a prefix (first 8 bytes)
+ *
+ * This function looks up a peer by the first 8 bytes of their node ID
+ * and returns the full 32-byte node ID. Useful when the Dart layer passes
+ * short node IDs but onion routing needs the full ID for key lookup.
+ *
+ * @param ctx           Connection context
+ * @param prefix_id     Node ID prefix (only first 8 bytes used for matching)
+ * @param full_id_out   Output buffer for full node ID (32 bytes)
+ * @return              CYXCHAT_OK on success, CYXCHAT_ERR_NOT_FOUND if no match
+ */
+CYXCHAT_API cyxchat_error_t cyxchat_conn_get_full_node_id(
+    cyxchat_conn_ctx_t *ctx,
+    const cyxwiz_node_id_t *prefix_id,
+    cyxwiz_node_id_t *full_id_out
+);
+
+/**
  * Get NAT type name string
  */
 CYXCHAT_API const char* cyxchat_conn_nat_type_name(cyxwiz_nat_type_t nat_type);

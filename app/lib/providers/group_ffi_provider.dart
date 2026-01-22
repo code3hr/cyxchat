@@ -294,7 +294,19 @@ class GroupFFIProvider extends ChangeNotifier {
     final log = LogService.instance;
     if (!_initialized) return false;
 
-    final memberIdBytes = NodeIdUtils.toBytesAsList(memberId);
+    // Try to resolve the full 32-byte node ID from the connection context
+    // This is needed because the onion layer uses exact 32-byte node ID matching
+    List<int>? fullNodeId = _bindings.connGetFullNodeIdHex(memberId);
+    final memberIdBytes = fullNodeId ?? NodeIdUtils.toBytesAsList(memberId);
+    
+    if (fullNodeId != null) {
+      log.debug('Resolved full node ID for ${memberId.substring(0, 8)}...', 
+          source: 'GroupFFI');
+    } else {
+      log.debug('Using padded node ID for ${memberId.substring(0, 8)}... (no full ID found)',
+          source: 'GroupFFI');
+    }
+    
     final memberIdPtr = calloc<Uint8>(32);
     final pubkeyPtr = calloc<Uint8>(32);
 
@@ -922,6 +934,8 @@ class GroupFFIProvider extends ChangeNotifier {
   }
 
   void _onGroupInvite(String groupId, String groupName, String inviter) {
+    print("DEBUG: GroupFFIProvider._onGroupInvite called!");
+    print("DEBUG:   groupId=$groupId, groupName=$groupName, inviter=$inviter");
     final log = LogService.instance;
     log.info('Received invite to "$groupName" from ${inviter.substring(0, 8)}...',
         source: 'GroupFFI');
@@ -934,8 +948,10 @@ class GroupFFIProvider extends ChangeNotifier {
     );
 
     _pendingInvites[groupId] = invite;
+    print("DEBUG: Added to _pendingInvites, now has ${_pendingInvites.length} invites");
     _inviteController.add(invite);
     notifyListeners();
+    print("DEBUG: GroupFFIProvider._onGroupInvite completed");
   }
 
   void _onMemberJoin(String groupId, String memberId) {

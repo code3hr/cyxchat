@@ -6,6 +6,7 @@ import '../models/models.dart';
 import '../providers/group_ffi_provider.dart';
 import 'database_service.dart';
 import 'identity_service.dart';
+import 'chat_service.dart';
 import 'log_service.dart';
 
 /// Service for group chat operations
@@ -388,6 +389,9 @@ class GroupService {
 
     _log.info('Created invite message in conversation with ${invite.inviterId.substring(0, 8)}...',
         source: 'GroupService');
+
+    // Emit to ChatService stream so UI gets notified
+    ChatService.instance.emitMessage(message);
   }
 
   // ============================================================

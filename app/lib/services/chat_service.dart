@@ -68,6 +68,11 @@ class ChatService {
   /// Stream of new messages
   Stream<Message> get messageStream => _messageController.stream;
 
+  /// Emit a message to the stream (for other services to use)
+  void emitMessage(Message message) {
+    _messageController.add(message);
+  }
+
   /// Get all conversations
   Future<List<Conversation>> getConversations() async {
     final db = await DatabaseService.instance.database;
@@ -847,3 +852,4 @@ class ChatService {
     _messageController.close();
   }
 }
+

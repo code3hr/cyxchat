@@ -1459,17 +1459,25 @@ class _GroupInviteMessageContent extends ConsumerWidget {
             ),
           ),
           const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              onPressed: () => _acceptInvite(context, ref, groupId, groupName),
-              icon: const Icon(Icons.check, size: 18),
-              label: const Text('Accept Invite'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: colorScheme.primary,
-                foregroundColor: colorScheme.onPrimary,
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              OutlinedButton.icon(
+                onPressed: () => _declineInvite(context, ref, groupId),
+                icon: const Icon(Icons.close, size: 18),
+                label: const Text('Decline'),
               ),
-            ),
+              ElevatedButton.icon(
+                onPressed: () => _acceptInvite(context, ref, groupId, groupName),
+                icon: const Icon(Icons.check, size: 18),
+                label: const Text('Accept'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: colorScheme.primary,
+                  foregroundColor: colorScheme.onPrimary,
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -1517,6 +1525,19 @@ class _GroupInviteMessageContent extends ConsumerWidget {
           ),
         );
       }
+    }
+  }
+
+  Future<void> _declineInvite(
+    BuildContext context,
+    WidgetRef ref,
+    String groupId,
+  ) async {
+    final success = await GroupService.instance.declineInvite(groupId);
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(success ? 'Invitation declined' : 'Failed to decline')),
+      );
     }
   }
 }

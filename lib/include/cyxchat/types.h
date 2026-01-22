@@ -233,7 +233,8 @@ typedef enum {
     CYXCHAT_ERR_NOT_OWNER      = -20,   /* Only message owner can edit */
     CYXCHAT_ERR_ALREADY_PINNED = -21,   /* Message already pinned */
     CYXCHAT_ERR_NOT_PINNED     = -22,   /* Message not pinned */
-    CYXCHAT_ERR_PIN_LIMIT      = -23    /* Max pinned messages reached */
+    CYXCHAT_ERR_PIN_LIMIT      = -23,   /* Max pinned messages reached */
+    CYXCHAT_ERR_NO_KEY         = -24    /* No shared key with peer (key exchange not complete) */
 } cyxchat_error_t;
 
 /* ============================================================

@@ -265,6 +265,14 @@ CYXCHAT_API cyxchat_error_t cyxchat_group_decline_invite(
 );
 
 /**
+ * Free a group invite (must be called after accept/decline to avoid memory leak)
+ * The invite is heap-allocated for async Dart callbacks.
+ */
+CYXCHAT_API void cyxchat_group_free_invite(
+    cyxchat_group_invite_t *invite
+);
+
+/**
  * Leave group
  */
 CYXCHAT_API cyxchat_error_t cyxchat_group_leave(

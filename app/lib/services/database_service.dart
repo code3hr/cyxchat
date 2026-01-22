@@ -27,7 +27,7 @@ class DatabaseService {
 
     return await openDatabase(
       path,
-      version: 8,
+      version: 9,
       onCreate: _createDatabase,
       onUpgrade: _upgradeDatabase,
     );
@@ -72,6 +72,7 @@ class DatabaseService {
         avatar_url TEXT,
         unread_count INTEGER DEFAULT 0,
         is_pinned INTEGER DEFAULT 0,
+        is_archived INTEGER DEFAULT 0,
         is_muted INTEGER DEFAULT 0,
         last_activity_at INTEGER,
         FOREIGN KEY (peer_id) REFERENCES contacts(node_id)
@@ -437,6 +438,11 @@ class DatabaseService {
       await db.execute(
         'CREATE INDEX IF NOT EXISTS idx_messages_media ON messages(conversation_id, media_type) WHERE media_type IS NOT NULL'
       );
+    }
+
+    if (oldVersion < 9) {
+      // Version 9: Add is_archived column to conversations table
+      await db.execute('ALTER TABLE conversations ADD COLUMN is_archived INTEGER DEFAULT 0');
     }
   }
 

@@ -1628,6 +1628,27 @@ cyxchat_error_t cyxchat_group_invite(
         return CYXCHAT_ERR_NETWORK;
     }
 
+    /* Check if we have the member's pubkey (key exchange must be complete).
+     * Note: We check member_pubkey instead of cyxwiz_onion_has_key() because
+     * the onion context uses exact 32-byte node ID matching, but short node IDs
+     * (e.g., 16-char hex) get padded with zeros which may not match the stored ID.
+     * Since the pubkey was already found (via prefix match in connection layer),
+     * we can proceed with ECDH using the provided pubkey. */
+    int has_nonzero_pubkey = 0;
+    for (int i = 0; i < 32; i++) {
+        if (member_pubkey[i] != 0) {
+            has_nonzero_pubkey = 1;
+            break;
+        }
+    }
+    if (!has_nonzero_pubkey) {
+        char member_hex[65];
+        cyxchat_node_id_to_hex(member, member_hex);
+        CYXWIZ_ERROR("Cannot send group invite - no pubkey for member %.16s... (key exchange not complete)", member_hex);
+        CYXWIZ_INFO("Hint: Send a direct message first to establish key exchange");
+        return CYXCHAT_ERR_NO_KEY;
+    }
+
     /* Compute ECDH shared secret with recipient's public key */
     uint8_t shared_secret[32];
     cyxwiz_error_t err = cyxwiz_onion_compute_ecdh(onion, member_pubkey, shared_secret);
@@ -1836,6 +1857,14 @@ cyxchat_error_t cyxchat_group_decline_invite(
     (void)invite;
     /* No action needed - just don't accept */
     return CYXCHAT_OK;
+}
+
+void cyxchat_group_free_invite(cyxchat_group_invite_t *invite) {
+    if (invite) {
+        /* Zero out sensitive data before freeing */
+        cyxwiz_secure_zero(invite, sizeof(cyxchat_group_invite_t));
+        free(invite);
+    }
 }
 
 cyxchat_error_t cyxchat_group_leave(
@@ -2705,21 +2734,27 @@ static void handle_group_invite(
         return;
     }
 
-    /* Build invite structure for callback */
-    cyxchat_group_invite_t invite;
-    memset(&invite, 0, sizeof(invite));
+    /* Build invite structure for callback - HEAP allocated because Dart
+     * callback runs asynchronously via NativeCallable.listener(), so stack
+     * variables would be invalid by the time Dart reads them.
+     * The Dart side must free this via cyxchat_group_free_invite(). */
+    cyxchat_group_invite_t *invite = calloc(1, sizeof(cyxchat_group_invite_t));
+    if (!invite) {
+        CYXWIZ_ERROR("Failed to allocate memory for invite");
+        return;
+    }
 
-    invite.header.version = CYXCHAT_PROTOCOL_VERSION;
-    invite.header.type = CYXCHAT_MSG_GROUP_INVITE;
-    invite.header.timestamp = cyxchat_timestamp_ms();
-    memcpy(&invite.header.msg_id, &msg_id, sizeof(cyxchat_msg_id_t));
+    invite->header.version = CYXCHAT_PROTOCOL_VERSION;
+    invite->header.type = CYXCHAT_MSG_GROUP_INVITE;
+    invite->header.timestamp = cyxchat_timestamp_ms();
+    memcpy(&invite->header.msg_id, &msg_id, sizeof(cyxchat_msg_id_t));
 
-    memcpy(&invite.group_id, &group_id, sizeof(cyxchat_group_id_t));
-    memcpy(invite.group_name, group_name, CYXCHAT_MAX_DISPLAY_NAME);
-    invite.key_version = key_version;
-    memcpy(invite.encrypted_key, encrypted_key, CYXCHAT_ENCRYPTED_KEY_SIZE);
-    memcpy(&invite.inviter, &inviter_id, sizeof(cyxwiz_node_id_t));
-    memcpy(invite.inviter_pubkey, inviter_pubkey, 32);
+    memcpy(&invite->group_id, &group_id, sizeof(cyxchat_group_id_t));
+    memcpy(invite->group_name, group_name, CYXCHAT_MAX_DISPLAY_NAME);
+    invite->key_version = key_version;
+    memcpy(invite->encrypted_key, encrypted_key, CYXCHAT_ENCRYPTED_KEY_SIZE);
+    memcpy(&invite->inviter, &inviter_id, sizeof(cyxwiz_node_id_t));
+    memcpy(invite->inviter_pubkey, inviter_pubkey, 32);
 
     char group_hex[17];
     cyxchat_group_id_to_hex(&group_id, group_hex);
@@ -2730,7 +2765,10 @@ static void handle_group_invite(
 
     /* Invoke callback - app decides whether to accept/decline */
     if (ctx->on_invite) {
-        ctx->on_invite(ctx, &invite, ctx->on_invite_data);
+        ctx->on_invite(ctx, invite, ctx->on_invite_data);
+    } else {
+        /* No callback registered, free the invite */
+        free(invite);
     }
 }
 

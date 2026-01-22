@@ -595,6 +595,31 @@ class CyxChatBindings {
     }
   }
 
+  /// Get full 32-byte node ID from a prefix (first 8 bytes)
+  /// Useful when the onion layer needs the full ID for key lookup
+  List<int>? connGetFullNodeIdHex(String prefixIdHex) {
+    if (_connCtx == null) return null;
+
+    final prefixBytes = _hexToBytes(prefixIdHex);
+    final prefixPtr = calloc<Uint8>(32);
+    final fullIdOut = calloc<Uint8>(32);
+
+    try {
+      for (int i = 0; i < 32 && i < prefixBytes.length; i++) {
+        prefixPtr[i] = prefixBytes[i];
+      }
+
+      final result = _native.cyxchat_conn_get_full_node_id(_connCtx!, prefixPtr, fullIdOut);
+      if (result == 0) {
+        return List<int>.generate(32, (i) => fullIdOut[i]);
+      }
+      return null;
+    } finally {
+      calloc.free(prefixPtr);
+      calloc.free(fullIdOut);
+    }
+  }
+
   /// Get connection state name
   String connStateName(int state) {
     final ptr = _native.cyxchat_conn_state_name(state);
@@ -920,6 +945,9 @@ class CyxChatBindings {
       final result = _native.cyxchat_group_ctx_create(ctxPtr, chatCtx);
       if (result == 0) {
         _groupCtx = ctxPtr.value;
+        // Link group context to chat context for message routing
+        _native.cyxchat_set_group_ctx(chatCtx, _groupCtx!);
+        print("DEBUG: Linked group context to chat context");
       }
       return result;
     } finally {
@@ -986,9 +1014,13 @@ class CyxChatBindings {
       final parseGroupId = groupIdFromHex(groupIdHex, groupIdPtr);
       if (parseGroupId != 0) return parseGroupId;
 
-      // Parse creator ID from hex
-      for (int i = 0; i < 16 && i * 2 < creatorIdHex.length; i++) {
-        creatorIdPtr[i] = int.parse(creatorIdHex.substring(i * 2, i * 2 + 2), radix: 16);
+      // Parse creator ID from hex (with validation)
+      final cleanCreatorHex = creatorIdHex.replaceAll('-', '');
+      if (cleanCreatorHex.length < 32 || !RegExp(r'^[0-9a-fA-F]+$').hasMatch(cleanCreatorHex)) {
+        return CyxChatError.errInvalid; // Invalid creator ID hex format
+      }
+      for (int i = 0; i < 16; i++) {
+        creatorIdPtr[i] = int.parse(cleanCreatorHex.substring(i * 2, i * 2 + 2), radix: 16);
       }
 
       // Copy group key
@@ -1500,34 +1532,50 @@ class CyxChatBindings {
     Pointer<Void> invite,
     Pointer<Void> userData,
   ) {
-    if (onGroupInvite == null) return;
+    print("DEBUG: _handleGroupInvite called");
+    if (onGroupInvite == null) {
+      print("DEBUG: onGroupInvite is NULL");
+      return;
+    }
+    print("DEBUG: onGroupInvite callback is SET, parsing invite...");
 
     // Parse invite structure
     final inviteBytes = invite.cast<Uint8>();
 
-    // Header: version(1) + type(1) + flags(2) + timestamp(8) + msg_id(8) = 20 bytes
+    // Header: version(1) + type(1) + flags(2) + PADDING(4) + timestamp(8) + msg_id(8) = 24 bytes
+    // (64-bit alignment adds 4 bytes padding before timestamp)
     // Then: group_id(8) + group_name(64) + key_version(4) + encrypted_key(72) + inviter(32) + inviter_pubkey(32)
 
-    // Group ID at offset 20
-    final groupIdHex = _ptrToHex(inviteBytes.elementAt(20), 8);
+    // Group ID at offset 24 (header is 24 bytes with padding)
+    final groupIdHex = _ptrToHex(inviteBytes.elementAt(24), 8);
+    print("DEBUG: Parsed groupId: $groupIdHex");
 
-    // Group name at offset 28 (null-terminated, max 64 bytes)
+    // Group name at offset 32 (24 + 8)
     final nameBytes = <int>[];
     for (int i = 0; i < 64; i++) {
-      final c = inviteBytes[28 + i];
+      final c = inviteBytes[32 + i];
       if (c == 0) break;
       nameBytes.add(c);
     }
     final groupName = String.fromCharCodes(nameBytes);
+    print("DEBUG: Parsed groupName: $groupName");
 
-    // Inviter at offset 28 + 64 + 4 + 72 = 168
-    final inviterHex = _ptrToHex(inviteBytes.elementAt(168), 32);
+    // Inviter at offset 32 + 64 + 4 + 72 = 172
+    final inviterHex = _ptrToHex(inviteBytes.elementAt(172), 32);
+    print("DEBUG: Parsed inviter: $inviterHex");
 
     // Store the invite pointer for accept/decline (we need to copy it since the original may be freed)
     // For now, we'll store the pointer - caller must accept/decline before it's freed
     _pendingInvites[groupIdHex] = invite;
+    print("DEBUG: Stored invite in _pendingInvites, calling onGroupInvite callback...");
 
-    onGroupInvite!(groupIdHex, groupName, inviterHex);
+    try {
+      onGroupInvite!(groupIdHex, groupName, inviterHex);
+      print("DEBUG: onGroupInvite callback completed successfully");
+    } catch (e, st) {
+      print("DEBUG: onGroupInvite callback threw exception: $e");
+      print("DEBUG: Stack trace: $st");
+    }
   }
 
   /// Accept a pending group invite
@@ -1535,7 +1583,10 @@ class CyxChatBindings {
     if (_groupCtx == null) return CyxChatError.errNull;
     final invite = _pendingInvites.remove(groupIdHex);
     if (invite == null) return CyxChatError.errNotFound;
-    return _native.cyxchat_group_accept_invite(_groupCtx!, invite);
+    final result = _native.cyxchat_group_accept_invite(_groupCtx!, invite);
+    // Free the heap-allocated invite
+    _native.cyxchat_group_free_invite(invite);
+    return result;
   }
 
   /// Decline a pending group invite
@@ -1543,7 +1594,10 @@ class CyxChatBindings {
     if (_groupCtx == null) return CyxChatError.errNull;
     final invite = _pendingInvites.remove(groupIdHex);
     if (invite == null) return CyxChatError.errNotFound;
-    return _native.cyxchat_group_decline_invite(_groupCtx!, invite);
+    final result = _native.cyxchat_group_decline_invite(_groupCtx!, invite);
+    // Free the heap-allocated invite
+    _native.cyxchat_group_free_invite(invite);
+    return result;
   }
 
   /// Handle member join
@@ -3373,6 +3427,10 @@ class CyxChatNative {
       int Function(Pointer<Void>, Pointer<Uint8>)>('cyxchat_conn_has_peer_key');
 late final cyxchat_conn_get_peer_pubkey = _lib.lookupFunction<      Int32 Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>),      int Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>)>('cyxchat_conn_get_peer_pubkey');
 
+  late final cyxchat_conn_get_full_node_id = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>),
+      int Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>)>('cyxchat_conn_get_full_node_id');
+
   late final cyxchat_conn_state_name = _lib.lookupFunction<
       Pointer<Int8> Function(Int32),
       Pointer<Int8> Function(int)>('cyxchat_conn_state_name');
@@ -3583,6 +3641,10 @@ late final cyxchat_conn_get_peer_pubkey = _lib.lookupFunction<      Int32 Functi
       Void Function(Pointer<Void>),
       void Function(Pointer<Void>)>('cyxchat_group_ctx_destroy');
 
+  late final cyxchat_set_group_ctx = _lib.lookupFunction<
+      Void Function(Pointer<Void>, Pointer<Void>),
+      void Function(Pointer<Void>, Pointer<Void>)>('cyxchat_set_group_ctx');
+
   late final cyxchat_group_poll = _lib.lookupFunction<
       Int32 Function(Pointer<Void>, Uint64),
       int Function(Pointer<Void>, int)>('cyxchat_group_poll');
@@ -3683,6 +3745,10 @@ late final cyxchat_conn_get_peer_pubkey = _lib.lookupFunction<      Int32 Functi
   late final cyxchat_group_decline_invite = _lib.lookupFunction<
       Int32 Function(Pointer<Void>, Pointer<Void>),
       int Function(Pointer<Void>, Pointer<Void>)>('cyxchat_group_decline_invite');
+
+  late final cyxchat_group_free_invite = _lib.lookupFunction<
+      Void Function(Pointer<Void>),
+      void Function(Pointer<Void>)>('cyxchat_group_free_invite');
 
   late final cyxchat_group_key_dist_progress = _lib.lookupFunction<
       Int32 Function(Pointer<Void>, Pointer<Uint8>, Pointer<Size>, Pointer<Size>, Pointer<Size>),
@@ -4090,6 +4156,16 @@ class CyxChatError {
   static const errNotAdmin = -12;
   static const errFileTooLarge = -13;
   static const errTransfer = -14;
+  static const errNoPermission = -15;
+  static const errRestricted = -16;
+  static const errMuted = -17;
+  static const errSlowMode = -18;
+  static const errEditExpired = -19;
+  static const errNotOwner = -20;
+  static const errAlreadyPinned = -21;
+  static const errNotPinned = -22;
+  static const errPinLimit = -23;
+  static const errNoKey = -24;  // No shared key with peer (key exchange not complete)
 }
 
 // Connection states

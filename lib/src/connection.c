@@ -1176,6 +1176,43 @@ cyxchat_error_t cyxchat_conn_get_peer_pubkey(
     return CYXCHAT_ERR_NOT_FOUND;
 }
 
+cyxchat_error_t cyxchat_conn_get_full_node_id(
+    cyxchat_conn_ctx_t *ctx,
+    const cyxwiz_node_id_t *prefix_id,
+    cyxwiz_node_id_t *full_id_out)
+{
+    if (!ctx || !prefix_id || !full_id_out) {
+        return CYXCHAT_ERR_NULL;
+    }
+
+    char prefix_hex[17];
+    for (int i = 0; i < 8; i++) {
+        snprintf(prefix_hex + i*2, 3, "%02x", prefix_id->bytes[i]);
+    }
+    prefix_hex[16] = 0;
+
+    /* First try exact match */
+    cyxchat_peer_conn_t *conn = find_peer_conn(ctx, prefix_id);
+    if (conn && conn->active) {
+        memcpy(full_id_out, &conn->peer_id, sizeof(cyxwiz_node_id_t));
+        CYXWIZ_INFO("Found full node ID for prefix %.16s (exact match)", prefix_hex);
+        return CYXCHAT_OK;
+    }
+
+    /* Fallback: match by first 8 bytes only */
+    for (size_t i = 0; i < CYXCHAT_MAX_PEER_CONNECTIONS; i++) {
+        if (ctx->peers[i].active &&
+            memcmp(&ctx->peers[i].peer_id, prefix_id, 8) == 0) {
+            memcpy(full_id_out, &ctx->peers[i].peer_id, sizeof(cyxwiz_node_id_t));
+            CYXWIZ_INFO("Found full node ID for prefix %.16s (prefix match)", prefix_hex);
+            return CYXCHAT_OK;
+        }
+    }
+
+    CYXWIZ_INFO("No full node ID for prefix %.16s", prefix_hex);
+    return CYXCHAT_ERR_NOT_FOUND;
+}
+
 const char* cyxchat_conn_nat_type_name(cyxwiz_nat_type_t nat_type)
 {
     switch (nat_type) {
