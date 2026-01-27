@@ -27,7 +27,7 @@ class DatabaseService {
 
     return await openDatabase(
       path,
-      version: 9,
+      version: 10,
       onCreate: _createDatabase,
       onUpgrade: _upgradeDatabase,
     );
@@ -271,9 +271,17 @@ class DatabaseService {
         data BLOB NOT NULL,
         created_at INTEGER NOT NULL,
         retry_count INTEGER DEFAULT 0,
+        last_attempt_at INTEGER,
+        next_retry_at INTEGER NOT NULL DEFAULT 0,
+        last_error TEXT,
         FOREIGN KEY (message_id) REFERENCES messages(id)
       )
     ''');
+
+    // Index for efficient queue processing
+    await db.execute(
+      'CREATE INDEX idx_offline_queue_retry ON offline_queue(next_retry_at ASC)'
+    );
   }
 
   Future<void> _upgradeDatabase(Database db, int oldVersion, int newVersion) async {
@@ -443,6 +451,18 @@ class DatabaseService {
     if (oldVersion < 9) {
       // Version 9: Add is_archived column to conversations table
       await db.execute('ALTER TABLE conversations ADD COLUMN is_archived INTEGER DEFAULT 0');
+    }
+
+    if (oldVersion < 10) {
+      // Version 10: Enhanced offline message queue for retry logic
+      await db.execute('ALTER TABLE offline_queue ADD COLUMN last_attempt_at INTEGER');
+      await db.execute('ALTER TABLE offline_queue ADD COLUMN next_retry_at INTEGER NOT NULL DEFAULT 0');
+      await db.execute('ALTER TABLE offline_queue ADD COLUMN last_error TEXT');
+
+      // Index for efficient queue processing
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_offline_queue_retry ON offline_queue(next_retry_at ASC)'
+      );
     }
   }
 

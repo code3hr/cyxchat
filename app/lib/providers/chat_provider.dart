@@ -192,6 +192,40 @@ class SendResult {
   SendResult.failure(this.error) : success = false, nativeMsgId = null;
 }
 
+/// Tracks a sent message awaiting ACK
+class _PendingAck {
+  final String nativeMsgId;
+  final String localMsgId;
+  final String recipientId;
+  final String content;
+  final DateTime sentAt;
+
+  _PendingAck({
+    required this.nativeMsgId,
+    required this.localMsgId,
+    required this.recipientId,
+    required this.content,
+    required this.sentAt,
+  });
+
+  bool isTimedOut(Duration timeout) {
+    return DateTime.now().difference(sentAt) > timeout;
+  }
+}
+
+/// Data for ACK timeout event
+class AckTimeoutData {
+  final String localMsgId;
+  final String recipientId;
+  final String content;
+
+  AckTimeoutData({
+    required this.localMsgId,
+    required this.recipientId,
+    required this.content,
+  });
+}
+
 /// Chat provider for managing peer-to-peer messaging via FFI
 class ChatProvider extends ChangeNotifier {
   final CyxChatBindings _bindings = CyxChatBindings.instance;
@@ -216,6 +250,13 @@ class ChatProvider extends ChangeNotifier {
   final Map<String, TypingStatus> _typingStatuses = {};
   static const _typingTimeout = Duration(seconds: 5);
 
+  // ACK timeout tracking
+  final Map<String, _PendingAck> _pendingAcks = {};
+  Timer? _ackTimeoutTimer;
+  static const _ackTimeout = Duration(seconds: 30);
+  static const _ackTimeoutCheckInterval = Duration(seconds: 5);
+  final _ackTimeoutController = StreamController<AckTimeoutData>.broadcast();
+
   // Getters
   bool get initialized => _initialized;
   String? get localNodeId => _localNodeId;
@@ -237,6 +278,9 @@ class ChatProvider extends ChangeNotifier {
 
   /// Stream of edit requests
   Stream<EditData> get editStream => _editController.stream;
+
+  /// Stream of ACK timeouts (messages that weren't acknowledged in time)
+  Stream<AckTimeoutData> get ackTimeoutStream => _ackTimeoutController.stream;
 
   /// Get current typing statuses (filtered by timeout)
   Map<String, TypingStatus> get typingStatuses {
@@ -269,6 +313,7 @@ class ChatProvider extends ChangeNotifier {
 
       _initialized = true;
       _startPolling();
+      _startAckTimeoutCheck();
       notifyListeners();
       return true;
     } finally {
@@ -279,22 +324,26 @@ class ChatProvider extends ChangeNotifier {
   /// Shutdown chat provider
   void shutdown() {
     _stopPolling();
+    _stopAckTimeoutCheck();
 
     if (_initialized) {
       _bindings.chatDestroy();
       _initialized = false;
       _localNodeId = null;
       _typingStatuses.clear();
+      _pendingAcks.clear();
       notifyListeners();
     }
   }
 
   /// Send text message to peer
   /// Returns SendResult with native message ID on success
+  /// If localMsgId is provided, the message will be tracked for ACK timeout
   Future<SendResult> sendText({
     required String toPeerId,
     required String text,
     String? replyToMsgId,
+    String? localMsgId,
   }) async {
     final log = LogService.instance;
     if (!_initialized) {
@@ -319,6 +368,18 @@ class ChatProvider extends ChangeNotifier {
 
       if (msgIdHex != null) {
         log.info('Message sent to $shortPeerId... (${text.length} chars)', source: 'Chat');
+
+        // Track for ACK timeout if localMsgId provided
+        if (localMsgId != null) {
+          _pendingAcks[msgIdHex] = _PendingAck(
+            nativeMsgId: msgIdHex,
+            localMsgId: localMsgId,
+            recipientId: toPeerId,
+            content: text,
+            sentAt: DateTime.now(),
+          );
+        }
+
         return SendResult.success(msgIdHex);
       } else {
         log.error('Failed to send message to $shortPeerId...', source: 'Chat');
@@ -327,6 +388,27 @@ class ChatProvider extends ChangeNotifier {
     } finally {
       calloc.free(peerIdPtr);
     }
+  }
+
+  /// Track a sent message for ACK timeout (used by external retry logic)
+  void trackForAck({
+    required String nativeMsgId,
+    required String localMsgId,
+    required String recipientId,
+    required String content,
+  }) {
+    _pendingAcks[nativeMsgId] = _PendingAck(
+      nativeMsgId: nativeMsgId,
+      localMsgId: localMsgId,
+      recipientId: recipientId,
+      content: content,
+      sentAt: DateTime.now(),
+    );
+  }
+
+  /// Remove a message from ACK tracking (e.g., when manually retrying)
+  void cancelAckTracking(String nativeMsgId) {
+    _pendingAcks.remove(nativeMsgId);
   }
 
   /// Send ACK for received message
@@ -512,6 +594,8 @@ class ChatProvider extends ChangeNotifier {
       case CyxChatMsgType.ack:
         final ack = received.parseAck();
         if (ack != null) {
+          // Remove from pending ACKs - message was acknowledged
+          _pendingAcks.remove(ack.msgId);
           _ackController.add(ack);
         }
         break;
@@ -571,11 +655,55 @@ class ChatProvider extends ChangeNotifier {
     return _bindings.getHopCount();
   }
 
+  // ============================================================
+  // ACK Timeout Handling
+  // ============================================================
+
+  /// Start the ACK timeout check timer
+  void _startAckTimeoutCheck() {
+    _ackTimeoutTimer?.cancel();
+    _ackTimeoutTimer = Timer.periodic(_ackTimeoutCheckInterval, (_) {
+      _checkAckTimeouts();
+    });
+  }
+
+  /// Stop the ACK timeout check timer
+  void _stopAckTimeoutCheck() {
+    _ackTimeoutTimer?.cancel();
+    _ackTimeoutTimer = null;
+  }
+
+  /// Check for messages that haven't received an ACK in time
+  void _checkAckTimeouts() {
+    final timedOut = _pendingAcks.entries
+        .where((e) => e.value.isTimedOut(_ackTimeout))
+        .toList();
+
+    for (final entry in timedOut) {
+      final pending = entry.value;
+      _pendingAcks.remove(entry.key);
+
+      debugPrint(
+          'ChatProvider: ACK timeout for message ${pending.localMsgId}');
+
+      // Emit timeout event so queue provider can handle it
+      _ackTimeoutController.add(AckTimeoutData(
+        localMsgId: pending.localMsgId,
+        recipientId: pending.recipientId,
+        content: pending.content,
+      ));
+    }
+  }
+
+  /// Get count of pending ACKs (for debugging)
+  int get pendingAckCount => _pendingAcks.length;
+
   @override
   void dispose() {
     shutdown();
     _messageController.close();
     _ackController.close();
+    _ackTimeoutController.close();
     _typingController.close();
     _reactionController.close();
     _deleteController.close();

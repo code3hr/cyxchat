@@ -8,6 +8,7 @@ import 'chat_provider.dart';
 import 'dht_provider.dart';
 import 'file_provider.dart';
 import 'group_ffi_provider.dart';
+import 'queue_provider.dart';
 import 'settings_provider.dart';
 import '../services/identity_service.dart';
 import '../services/chat_service.dart';
@@ -75,6 +76,7 @@ final connectionActionsProvider = Provider((ref) => ConnectionActions(ref));
 class ConnectionActions {
   final Ref _ref;
   Timer? _retryTimer;
+  StreamSubscription? _ackTimeoutSubscription;
   static const RetryConfig _defaultConfig = RetryConfig();
 
   ConnectionActions(this._ref);
@@ -202,6 +204,37 @@ class ConnectionActions {
       // Connect ChatService to ChatProvider for message handling
       ChatService.instance.connectProvider(chatProvider);
       log.info('Chat service ready for messaging', source: 'Network');
+
+      // Initialize offline message queue
+      final queueProvider = _ref.read(queueNotifierProvider);
+      await queueProvider.initialize();
+
+      // Set up retry callback for queue
+      queueProvider.setRetrySendCallback((messageId, recipientId, data) async {
+        return await ChatService.instance.retrySendFromQueue(
+          messageId,
+          recipientId,
+          data,
+        );
+      });
+
+      // Subscribe to ACK timeouts to enqueue messages
+      _ackTimeoutSubscription?.cancel();
+      _ackTimeoutSubscription = chatProvider.ackTimeoutStream.listen((timeout) {
+        log.warning(
+          'ACK timeout for message ${timeout.localMsgId}, enqueueing for retry',
+          source: 'Network',
+        );
+        queueProvider.addToQueue(
+          messageId: timeout.localMsgId,
+          recipientId: timeout.recipientId,
+          content: timeout.content,
+        );
+      });
+
+      // Notify queue that we're connected
+      queueProvider.onConnected();
+      log.info('Offline message queue ready', source: 'Network');
     }
 
     // Initialize Group FFI provider for group chat (requires chat context)
@@ -277,6 +310,13 @@ class ConnectionActions {
   }
 
   void disconnect() {
+    // Notify queue we're disconnecting
+    _ref.read(queueNotifierProvider).onDisconnected();
+
+    // Cancel ACK timeout subscription
+    _ackTimeoutSubscription?.cancel();
+    _ackTimeoutSubscription = null;
+
     ChatService.instance.disconnectProvider();
     GroupService.instance.disconnectProvider();
     final fileProvider = _ref.read(fileNotifierProvider);

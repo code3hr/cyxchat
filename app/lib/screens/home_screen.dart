@@ -6,6 +6,7 @@ import '../providers/conversation_provider.dart';
 import '../providers/network_provider.dart';
 import '../providers/settings_provider.dart';
 import '../providers/group_ffi_provider.dart';
+import '../providers/queue_provider.dart';
 import '../services/group_service.dart';
 import '../models/models.dart';
 import '../models/invite_link.dart';
@@ -170,6 +171,8 @@ class _ChatsTab extends ConsumerWidget {
               const SizedBox(width: 8),
             ],
           ),
+          // Queue banner (if messages are pending)
+          const _QueueBanner(),
           // Content
           conversationsAsync.when(
             data: (conversations) {
@@ -1224,6 +1227,73 @@ class _NetworkInfoRow extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Banner showing when messages are queued for sending
+class _QueueBanner extends ConsumerWidget {
+  const _QueueBanner();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final queueState = ref.watch(queueNotifierProvider).state;
+
+    if (!queueState.hasQueuedMessages) {
+      return const SliverToBoxAdapter(child: SizedBox.shrink());
+    }
+
+    return SliverToBoxAdapter(
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: Colors.orange.shade100,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.orange.shade300),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              Icons.schedule,
+              color: Colors.orange.shade700,
+              size: 20,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '${queueState.totalQueued} message${queueState.totalQueued > 1 ? 's' : ''} waiting to send',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      color: Colors.orange.shade900,
+                      fontSize: 14,
+                    ),
+                  ),
+                  if (queueState.expiringWithin24h > 0)
+                    Text(
+                      '${queueState.expiringWithin24h} expiring within 24h',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.orange.shade700,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            TextButton(
+              onPressed: () => ref.read(queueActionsProvider).flushQueue(),
+              style: TextButton.styleFrom(
+                foregroundColor: Colors.orange.shade800,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              ),
+              child: const Text('Retry All'),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 import '../models/models.dart';
@@ -6,6 +7,7 @@ import '../providers/chat_provider.dart';
 import '../utils/node_id_utils.dart';
 import 'database_service.dart';
 import 'identity_service.dart';
+import 'queue_service.dart';
 
 /// Service for chat operations
 class ChatService {
@@ -265,7 +267,7 @@ class ChatService {
           whereArgs: [message.id],
         );
       } else {
-        // Send failed - mark as failed
+        // Send failed - mark as failed and enqueue for retry
         resultMessage = message.copyWith(status: MessageStatus.failed);
         await db.update(
           'messages',
@@ -273,15 +275,39 @@ class ChatService {
           where: 'id = ?',
           whereArgs: [message.id],
         );
-        debugPrint('ChatService: Send failed: ${result.error}');
+
+        // Enqueue for automatic retry
+        await QueueService.instance.enqueue(
+          messageId: message.id,
+          recipientId: conversation.peerId!,
+          data: utf8.encode(content),
+        );
+        debugPrint('ChatService: Send failed, queued for retry: ${result.error}');
       }
     } else {
       if (type == MessageType.file) {
         // File messages are sent via FileProvider - mark as sending
         resultMessage = message.copyWith(status: MessageStatus.sending);
         debugPrint('ChatService: File message saved, transfer in progress');
+      } else if (conversation.peerId != null) {
+        // No native chat available for text - mark as failed and enqueue
+        resultMessage = message.copyWith(status: MessageStatus.failed);
+        await db.update(
+          'messages',
+          {'status': MessageStatus.failed.index},
+          where: 'id = ?',
+          whereArgs: [message.id],
+        );
+
+        // Enqueue for automatic retry when connection is available
+        await QueueService.instance.enqueue(
+          messageId: message.id,
+          recipientId: conversation.peerId!,
+          data: utf8.encode(content),
+        );
+        debugPrint('ChatService: No native chat available, message queued for retry');
       } else {
-        // No native chat available for text - mark as pending
+        // No peer ID - mark as pending (group messages, etc.)
         resultMessage = message.copyWith(status: MessageStatus.pending);
         await db.update(
           'messages',
@@ -289,7 +315,7 @@ class ChatService {
           where: 'id = ?',
           whereArgs: [message.id],
         );
-        debugPrint('ChatService: No native chat available, message queued');
+        debugPrint('ChatService: No peer ID, message saved as pending');
       }
     }
 
@@ -767,6 +793,10 @@ class ChatService {
           where: 'id = ?',
           whereArgs: [messageId],
         );
+
+        // Remove from offline queue if present
+        await QueueService.instance.dequeue(messageId);
+
         debugPrint('ChatService: Retry successful for message $messageId');
         return true;
       } else {
@@ -801,6 +831,70 @@ class ChatService {
       where: 'id = ?',
       whereArgs: [messageId],
     );
+  }
+
+  /// Retry sending a message from the offline queue
+  /// This is called by QueueProvider for automatic retries
+  /// Returns true if send was successful
+  Future<bool> retrySendFromQueue(
+    String messageId,
+    String recipientId,
+    List<int> data,
+  ) async {
+    if (_chatProvider == null) {
+      debugPrint('ChatService: No chat provider for queue retry');
+      return false;
+    }
+
+    final db = await DatabaseService.instance.database;
+
+    // Decode message content
+    final content = utf8.decode(data, allowMalformed: true);
+
+    // Update status to sending
+    await db.update(
+      'messages',
+      {'status': MessageStatus.sending.index},
+      where: 'id = ?',
+      whereArgs: [messageId],
+    );
+
+    // Try to send via native chat
+    final result = await _chatProvider!.sendText(
+      toPeerId: recipientId,
+      text: content,
+      replyToMsgId: null, // Don't preserve reply on retry
+    );
+
+    if (result.success && result.nativeMsgId != null) {
+      // Store mapping
+      _nativeMsgIdToLocalId[result.nativeMsgId!] = messageId;
+      _localIdToNativeMsgId[messageId] = result.nativeMsgId!;
+
+      // Update status to sent
+      await db.update(
+        'messages',
+        {'status': MessageStatus.sent.index},
+        where: 'id = ?',
+        whereArgs: [messageId],
+      );
+
+      // Remove from queue
+      await QueueService.instance.dequeue(messageId);
+
+      debugPrint('ChatService: Queue retry successful for message $messageId');
+      return true;
+    } else {
+      // Keep as failed - QueueProvider will handle retry scheduling
+      await db.update(
+        'messages',
+        {'status': MessageStatus.failed.index},
+        where: 'id = ?',
+        whereArgs: [messageId],
+      );
+      debugPrint('ChatService: Queue retry failed: ${result.error}');
+      return false;
+    }
   }
 
   /// Parse size string (e.g., "12.5 KB", "1.2 MB") to bytes

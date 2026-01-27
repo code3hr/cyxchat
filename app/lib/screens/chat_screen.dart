@@ -14,6 +14,8 @@ import '../providers/call_provider.dart';
 import '../providers/settings_provider.dart';
 import '../providers/contact_provider.dart';
 import '../providers/group_ffi_provider.dart';
+import '../providers/queue_provider.dart';
+import '../models/queued_message.dart';
 import '../ffi/bindings.dart' show CyxChatFileState, CyxChatFileConst;
 import '../models/models.dart';
 import '../services/group_service.dart';
@@ -650,37 +652,7 @@ class _MessageBubbleState extends ConsumerState<_MessageBubble> {
                         ),
                         if (isOutgoing) ...[
                           const SizedBox(width: 4),
-                          if (widget.message.status == MessageStatus.failed)
-                            GestureDetector(
-                              onTap: () => _retryMessage(context),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(
-                                    Icons.error_outline,
-                                    size: 14,
-                                    color: Colors.red.shade300,
-                                  ),
-                                  const SizedBox(width: 2),
-                                  Text(
-                                    'Retry',
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      color: Colors.red.shade300,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            )
-                          else
-                            Text(
-                              widget.message.status.icon,
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: colorScheme.onPrimary.withOpacity(0.7),
-                              ),
-                            ),
+                          _buildStatusIndicator(context, colorScheme, isOutgoing),
                         ],
                       ],
                     ),
@@ -723,6 +695,233 @@ class _MessageBubbleState extends ConsumerState<_MessageBubble> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Failed to send. Try again later.'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    }
+  }
+
+  Widget _buildStatusIndicator(
+    BuildContext context,
+    ColorScheme colorScheme,
+    bool isOutgoing,
+  ) {
+    final message = widget.message;
+
+    if (message.status == MessageStatus.failed) {
+      // Check if message is in offline queue
+      final queueState = ref.watch(queueNotifierProvider).state;
+      final queuedMessage = queueState.pendingMessages
+          .cast<QueuedMessage?>()
+          .firstWhere((m) => m?.messageId == message.id, orElse: () => null);
+
+      if (queuedMessage != null) {
+        // Message is queued for retry - show clock icon with retry count
+        return GestureDetector(
+          onTap: () => _showQueuedMessageSheet(context, queuedMessage),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.schedule,
+                size: 14,
+                color: Colors.orange.shade400,
+              ),
+              const SizedBox(width: 2),
+              Text(
+                'Queued (${queuedMessage.retryCount})',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: Colors.orange.shade400,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        );
+      } else {
+        // Failed but not queued - show retry button
+        return GestureDetector(
+          onTap: () => _retryMessage(context),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.error_outline,
+                size: 14,
+                color: Colors.red.shade300,
+              ),
+              const SizedBox(width: 2),
+              Text(
+                'Retry',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: Colors.red.shade300,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        );
+      }
+    }
+
+    // Normal status icon
+    return Text(
+      message.status.icon,
+      style: TextStyle(
+        fontSize: 11,
+        color: colorScheme.onPrimary.withOpacity(0.7),
+      ),
+    );
+  }
+
+  void _showQueuedMessageSheet(BuildContext context, QueuedMessage qm) {
+    showModalBottomSheet(
+      context: context,
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.schedule, color: Colors.orange.shade400),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Message Queued',
+                      style: Theme.of(sheetContext).textTheme.titleLarge,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                _buildInfoRow('Retry attempts', '${qm.retryCount}'),
+                _buildInfoRow('Next retry', _formatNextRetry(qm.nextRetryAt)),
+                _buildInfoRow('Queued since', _formatDuration(qm.createdAt)),
+                if (qm.lastError != null)
+                  _buildInfoRow('Last error', qm.lastError!),
+                _buildInfoRow('Expires', _formatExpiry(qm.createdAt)),
+                const SizedBox(height: 24),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () {
+                          Navigator.pop(sheetContext);
+                          _removeFromQueue(qm.messageId);
+                        },
+                        icon: const Icon(Icons.delete_outline),
+                        label: const Text('Remove'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: () {
+                          Navigator.pop(sheetContext);
+                          _retryNow(qm.messageId);
+                        },
+                        icon: const Icon(Icons.refresh),
+                        label: const Text('Retry Now'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildInfoRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              color: Colors.grey.shade600,
+              fontSize: 14,
+            ),
+          ),
+          Text(
+            value,
+            style: const TextStyle(
+              fontWeight: FontWeight.w500,
+              fontSize: 14,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatNextRetry(DateTime? nextRetry) {
+    if (nextRetry == null) return 'Soon';
+    final diff = nextRetry.difference(DateTime.now());
+    if (diff.isNegative) return 'Now';
+    if (diff.inSeconds < 60) return '${diff.inSeconds}s';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m';
+    return '${diff.inHours}h';
+  }
+
+  String _formatDuration(DateTime createdAt) {
+    final diff = DateTime.now().difference(createdAt);
+    if (diff.inMinutes < 1) return 'Just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    return '${diff.inDays}d ago';
+  }
+
+  String _formatExpiry(DateTime createdAt) {
+    final expiryTime = createdAt.add(const Duration(days: 7));
+    final diff = expiryTime.difference(DateTime.now());
+    if (diff.isNegative) return 'Expired';
+    if (diff.inHours < 24) return 'In ${diff.inHours}h';
+    return 'In ${diff.inDays}d';
+  }
+
+  Future<void> _removeFromQueue(String messageId) async {
+    await ref.read(queueActionsProvider).removeFromQueue(messageId);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Message removed from queue'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
+  Future<void> _retryNow(String messageId) async {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Retrying...'),
+        duration: Duration(seconds: 1),
+      ),
+    );
+
+    final success = await ref.read(queueActionsProvider).retryMessage(messageId);
+    if (mounted) {
+      if (success) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Message sent'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Still queued. Will retry automatically.'),
             duration: Duration(seconds: 2),
           ),
         );
