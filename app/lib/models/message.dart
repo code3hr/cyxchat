@@ -12,17 +12,34 @@ enum MessageStatus {
   String get icon {
     switch (this) {
       case MessageStatus.pending:
-        return '○';
+        return '⏳'; // Waiting to send
       case MessageStatus.sending:
-        return '◐';
+        return '↗'; // Sending in progress
       case MessageStatus.sent:
-        return '●';
+        return '✓'; // Sent, awaiting delivery confirmation
       case MessageStatus.delivered:
-        return '●●';
+        return '✓✓'; // Delivered to recipient
       case MessageStatus.read:
-        return '●●';
+        return '✓✓'; // Read by recipient (colored blue in UI)
       case MessageStatus.failed:
-        return '⚠';
+        return '✗'; // Failed to send
+    }
+  }
+
+  String get label {
+    switch (this) {
+      case MessageStatus.pending:
+        return 'Pending';
+      case MessageStatus.sending:
+        return 'Sending...';
+      case MessageStatus.sent:
+        return 'Sent';
+      case MessageStatus.delivered:
+        return 'Delivered';
+      case MessageStatus.read:
+        return 'Read';
+      case MessageStatus.failed:
+        return 'Failed';
     }
   }
 

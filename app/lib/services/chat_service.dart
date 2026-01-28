@@ -252,6 +252,7 @@ class ChatService {
         toPeerId: conversation.peerId!,
         text: content,
         replyToMsgId: nativeReplyToId,
+        localMsgId: message.id, // Track for ACK timeout
       );
 
       if (result.success && result.nativeMsgId != null) {
@@ -780,6 +781,7 @@ class ChatService {
         toPeerId: conversation.peerId!,
         text: message.content,
         replyToMsgId: null, // Don't preserve reply on retry
+        localMsgId: messageId, // Track for ACK timeout
       );
 
       if (result.success && result.nativeMsgId != null) {
@@ -864,6 +866,7 @@ class ChatService {
       toPeerId: recipientId,
       text: content,
       replyToMsgId: null, // Don't preserve reply on retry
+      // Don't track queue retries for ACK - already retrying
     );
 
     if (result.success && result.nativeMsgId != null) {

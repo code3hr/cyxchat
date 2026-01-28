@@ -767,12 +767,37 @@ class _MessageBubbleState extends ConsumerState<_MessageBubble> {
       }
     }
 
-    // Normal status icon
-    return Text(
-      message.status.icon,
-      style: TextStyle(
-        fontSize: 11,
-        color: colorScheme.onPrimary.withOpacity(0.7),
+    // Normal status icon with color coding
+    Color statusColor;
+    switch (message.status) {
+      case MessageStatus.read:
+        statusColor = Colors.blue.shade300; // Blue for read
+        break;
+      case MessageStatus.delivered:
+        statusColor = colorScheme.onPrimary.withOpacity(0.8); // White/light for delivered
+        break;
+      case MessageStatus.sent:
+        statusColor = colorScheme.onPrimary.withOpacity(0.6); // Dimmer for sent
+        break;
+      case MessageStatus.sending:
+        statusColor = colorScheme.onPrimary.withOpacity(0.5); // Dimmer for sending
+        break;
+      case MessageStatus.pending:
+        statusColor = Colors.orange.shade300; // Orange for pending
+        break;
+      case MessageStatus.failed:
+        statusColor = Colors.red.shade300; // Red for failed
+        break;
+    }
+    
+    return Tooltip(
+      message: message.status.label,
+      child: Text(
+        message.status.icon,
+        style: TextStyle(
+          fontSize: 12,
+          color: statusColor,
+        ),
       ),
     );
   }

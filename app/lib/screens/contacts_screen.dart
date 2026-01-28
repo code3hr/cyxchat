@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/contact.dart';
 import '../providers/conversation_provider.dart';
 import '../providers/contact_provider.dart';
+import '../providers/network_provider.dart';
 import 'chat_screen.dart';
 import 'add_contact_screen.dart';
 
@@ -139,23 +140,12 @@ class _ContactTile extends ConsumerWidget {
               ),
             ),
           ),
-          if (contact.isOnline)
-            Positioned(
-              right: 0,
-              bottom: 0,
-              child: Container(
-                width: 12,
-                height: 12,
-                decoration: BoxDecoration(
-                  color: Colors.green,
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                    color: Theme.of(context).scaffoldBackgroundColor,
-                    width: 2,
-                  ),
-                ),
-              ),
-            ),
+          // Presence indicator - green online, blue away, red offline
+          Positioned(
+            right: 0,
+            bottom: 0,
+            child: _PresenceIndicator(contact: contact),
+          ),
         ],
       ),
       title: Row(
@@ -220,6 +210,47 @@ class _ContactTile extends ConsumerWidget {
           ),
         );
       },
+    );
+  }
+}
+
+/// Presence indicator widget showing online/away/offline status
+class _PresenceIndicator extends ConsumerWidget {
+  final Contact contact;
+  const _PresenceIndicator({required this.contact});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final connProvider = ref.watch(connectionNotifierProvider);
+    final isReachable = connProvider.hasPeerKey(contact.nodeId);
+    
+    Color indicatorColor;
+    if (isReachable) {
+      switch (contact.presence) {
+        case PresenceStatus.away:
+          indicatorColor = Colors.blue;
+          break;
+        case PresenceStatus.busy:
+          indicatorColor = Colors.orange;
+          break;
+        default:
+          indicatorColor = Colors.green;
+      }
+    } else {
+      indicatorColor = Colors.red;
+    }
+
+    return Container(
+      width: 12,
+      height: 12,
+      decoration: BoxDecoration(
+        color: indicatorColor,
+        shape: BoxShape.circle,
+        border: Border.all(
+          color: Theme.of(context).scaffoldBackgroundColor,
+          width: 2,
+        ),
+      ),
     );
   }
 }
