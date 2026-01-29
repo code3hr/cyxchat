@@ -143,6 +143,31 @@ class GroupService {
 
       if (result == 0) {
         _log.info('Restored group $groupId (role: $role)', source: 'GroupService');
+
+        // Now restore all members for this group
+        final memberRows = await db.query(
+          'group_members',
+          where: 'group_id = ?',
+          whereArgs: [groupId],
+        );
+
+        _log.info('Restoring ${memberRows.length} members for group $groupId', source: 'GroupService');
+
+        for (final memberRow in memberRows) {
+          final memberId = memberRow['node_id'] as String;
+          final memberRole = memberRow['role'] as int? ?? 0;
+
+          final memberResult = provider.bindings.groupRestoreMember(
+            groupIdHex: groupId,
+            memberIdHex: memberId,
+            role: memberRole,
+          );
+
+          if (memberResult != 0) {
+            _log.warning('Failed to restore member ${memberId.substring(0, 8)}... to group: error $memberResult',
+                source: 'GroupService');
+          }
+        }
       } else {
         _log.warning('Failed to restore group $groupId: error $result', source: 'GroupService');
       }

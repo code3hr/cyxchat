@@ -1536,6 +1536,42 @@ cyxchat_error_t cyxchat_group_restore(
     return CYXCHAT_OK;
 }
 
+cyxchat_error_t cyxchat_group_restore_member(
+    cyxchat_group_ctx_t *ctx,
+    const cyxchat_group_id_t *group_id,
+    const cyxwiz_node_id_t *member_id,
+    cyxchat_group_role_t role
+) {
+    if (!ctx || !group_id || !member_id) {
+        return CYXCHAT_ERR_NULL;
+    }
+
+    cyxchat_group_t *group = find_group(ctx, group_id);
+    if (!group) {
+        return CYXCHAT_ERR_NOT_FOUND;
+    }
+
+    /* Check if member already exists */
+    for (size_t i = 0; i < group->member_count; i++) {
+        if (memcmp(&group->members[i].node_id, member_id, sizeof(cyxwiz_node_id_t)) == 0) {
+            return CYXCHAT_OK; /* Already exists */
+        }
+    }
+
+    if (group->member_count >= CYXCHAT_MAX_GROUP_MEMBERS) {
+        return CYXCHAT_ERR_FULL;
+    }
+
+    cyxchat_group_member_t *member = &group->members[group->member_count];
+    memset(member, 0, sizeof(cyxchat_group_member_t));
+    memcpy(&member->node_id, member_id, sizeof(cyxwiz_node_id_t));
+    member->role = role;
+    member->joined_at = cyxchat_timestamp_ms();
+    group->member_count++;
+
+    return CYXCHAT_OK;
+}
+
 
 cyxchat_error_t cyxchat_group_set_description(
     cyxchat_group_ctx_t *ctx,
@@ -2619,6 +2655,7 @@ static void handle_group_text(
         char group_hex[17];
         cyxchat_group_id_to_hex(&group_id, group_hex);
         CYXWIZ_WARN("Received message for unknown group: %s", group_hex);
+        { FILE *dbg = fopen("group_debug.log", "a"); if (dbg) { fprintf(dbg, "UNKNOWN GROUP: %s\n", group_hex); fclose(dbg); } }
         return;
     }
 
@@ -2632,6 +2669,7 @@ static void handle_group_text(
     if (key_version != group->key_version) {
         CYXWIZ_WARN("Key version mismatch: got %u, expected %u",
                     key_version, group->key_version);
+        { FILE *dbg = fopen("group_debug.log", "a"); if (dbg) { fprintf(dbg, "KEY MISMATCH: got=%u expected=%u\n", key_version, group->key_version); fclose(dbg); } }
         /* TODO: Request key update from admin */
         return;
     }
@@ -2648,6 +2686,7 @@ static void handle_group_text(
 
     if (err != CYXWIZ_OK) {
         CYXWIZ_ERROR("Failed to decrypt group message: %d", err);
+        { FILE *dbg = fopen("group_debug.log", "a"); if (dbg) { fprintf(dbg, "DECRYPT FAIL: %d\n", err); fclose(dbg); } }
         return;
     }
 
@@ -2693,9 +2732,33 @@ static void handle_group_text(
     CYXWIZ_INFO("Received group message in %s from %.16s... (%u bytes)",
                 group_hex, sender_hex, text_len);
 
-    /* Invoke callback */
+    /* Invoke callback - ALL data in one heap string to avoid stale pointers.
+     * Format: "<16-hex-groupid>:<64-hex-senderid>:<16-hex-msgid>:<text>" */
     if (ctx->on_message) {
-        ctx->on_message(ctx, &group_id, &sender_id, &msg, ctx->on_message_data);
+        /* groupid(16) + : + senderid(64) + : + msgid(16) + : + text + NUL */
+        size_t payload_len = 16 + 1 + 64 + 1 + 16 + 1 + text_len + 1;
+        char *payload = (char *)malloc(payload_len);
+        if (payload) {
+            int pi;
+            /* Group ID hex (16 chars) */
+            for (pi = 0; pi < 8; pi++)
+                snprintf(payload + pi * 2, 3, "%02x", group_id.bytes[pi]);
+            payload[16] = ':';
+            /* Sender ID hex (64 chars) */
+            for (pi = 0; pi < 32; pi++)
+                snprintf(payload + 17 + pi * 2, 3, "%02x", sender_id.bytes[pi]);
+            payload[81] = ':';
+            /* Message ID hex (16 chars) */
+            for (pi = 0; pi < 8; pi++)
+                snprintf(payload + 82 + pi * 2, 3, "%02x", msg.header.msg_id.bytes[pi]);
+            payload[98] = ':';
+            /* Text */
+            memcpy(payload + 99, msg.text, text_len);
+            payload[99 + text_len] = 0;
+            { FILE *dbg = fopen("group_debug.log", "a"); if (dbg) { fprintf(dbg, "CALLBACK: %.99s...text=%s\n", payload, payload + 99); fclose(dbg); } }
+            ctx->on_message(ctx, &group_id, &sender_id, payload, ctx->on_message_data);
+            { FILE *dbg = fopen("group_debug.log", "a"); if (dbg) { fprintf(dbg, "MSG CB returned ok\n"); fclose(dbg); } }
+        }
     }
 }
 
@@ -2837,7 +2900,11 @@ static void handle_group_join(
 
     /* Invoke callback */
     if (ctx->on_member_join) {
+        { FILE *dbg = fopen("group_debug.log", "a"); if (dbg) { fprintf(dbg, "JOIN CB: member=%.16s group=%s ptr=%p\n", member_hex, group_hex, (void*)ctx->on_member_join); fclose(dbg); } }
         ctx->on_member_join(ctx, &group_id, &member_id, ctx->on_member_join_data);
+        { FILE *dbg = fopen("group_debug.log", "a"); if (dbg) { fprintf(dbg, "JOIN CB returned ok\n"); fclose(dbg); } }
+    } else {
+        { FILE *dbg = fopen("group_debug.log", "a"); if (dbg) { fprintf(dbg, "JOIN: no callback!\n"); fclose(dbg); } }
     }
 }
 
@@ -3182,6 +3249,7 @@ void cyxchat_group_handle_message(
     }
 
     CYXWIZ_DEBUG("Group handling message type=0x%02x, len=%zu", type, len);
+    { FILE *dbg = fopen("group_debug.log", "a"); if (dbg) { fprintf(dbg, "group_handle_message: type=0x%02x len=%zu\n", type, len); fclose(dbg); } }
 
     switch (type) {
         case CYXCHAT_MSG_GROUP_TEXT:

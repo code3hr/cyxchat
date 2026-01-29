@@ -122,7 +122,7 @@ typedef void (*cyxchat_on_group_message_t)(
     cyxchat_group_ctx_t *ctx,
     const cyxchat_group_id_t *group_id,
     const cyxwiz_node_id_t *from,
-    const cyxchat_group_msg_t *msg,
+    const char *msg_payload,
     void *user_data
 );
 
@@ -217,6 +217,25 @@ CYXCHAT_API cyxchat_error_t cyxchat_group_restore(
     uint32_t key_version,
     const cyxwiz_node_id_t *creator_id,
     cyxchat_group_role_t my_role
+);
+
+/**
+ * Add a member to a restored group (used after cyxchat_group_restore)
+ *
+ * After restoring a group from database, call this function for each
+ * member to populate the in-memory member list so messages can be sent.
+ *
+ * @param ctx           Group context
+ * @param group_id      Group ID
+ * @param member_id     Member's node ID to add
+ * @param role          Member's role (OWNER, ADMIN, or MEMBER)
+ * @return              CYXCHAT_OK on success
+ */
+CYXCHAT_API cyxchat_error_t cyxchat_group_restore_member(
+    cyxchat_group_ctx_t *ctx,
+    const cyxchat_group_id_t *group_id,
+    const cyxwiz_node_id_t *member_id,
+    cyxchat_group_role_t role
 );
 
 

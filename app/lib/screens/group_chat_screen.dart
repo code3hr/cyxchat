@@ -9,6 +9,7 @@ import '../providers/group_ffi_provider.dart';
 import '../providers/conversation_provider.dart';
 import '../models/models.dart';
 import '../services/identity_service.dart';
+import '../services/group_service.dart';
 import '../widgets/media_message_content.dart';
 import 'group_info_screen.dart';
 import 'group_media_gallery_screen.dart';
@@ -27,6 +28,7 @@ class _GroupChatScreenState extends ConsumerState<GroupChatScreen> {
   final _scrollController = ScrollController();
   String? _replyToId;
   Message? _editingMessage;
+  dynamic _messageSubscription;
 
   @override
   void initState() {
@@ -40,21 +42,20 @@ class _GroupChatScreenState extends ConsumerState<GroupChatScreen> {
 
   /// Listen for incoming group messages and refresh UI
   void _setupMessageListener() {
-    ref.listen<AsyncValue<Message>>(groupMessageStreamProvider, (previous, next) {
-      next.whenData((message) {
-        // Refresh if message is for this group
-        if (message.conversationId == widget.groupId) {
-          ref.invalidate(groupMessagesProvider(widget.groupId));
-        }
-        // Also refresh group list for last message preview
-        ref.invalidate(groupsProvider);
-        ref.invalidate(conversationsProvider);
-      });
+    // Direct stream subscription for reliable real-time updates
+    _messageSubscription = GroupService.instance.messageStream.listen((message) {
+      if (message.conversationId == widget.groupId && mounted) {
+        ref.invalidate(groupMessagesProvider(widget.groupId));
+        setState(() {});
+      }
+      ref.invalidate(groupsProvider);
+      ref.invalidate(conversationsProvider);
     });
   }
 
   @override
   void dispose() {
+    _messageSubscription?.cancel();
     _textController.dispose();
     _scrollController.dispose();
     super.dispose();

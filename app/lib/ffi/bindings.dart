@@ -35,6 +35,7 @@ typedef _FileErrorCallback = Void Function(
     Pointer<Void> userData);
 
 /// Native callback type for group message
+/// msg_payload is a C string: "<16-hex-msg-id>:<text>"
 typedef _GroupMessageCallback = Void Function(
     Pointer<Void> ctx,
     Pointer<Uint8> groupId,
@@ -1045,6 +1046,44 @@ class CyxChatBindings {
     }
   }
 
+  /// Restore a member to a restored group (call after groupRestore)
+  /// Returns 0 on success, error code otherwise
+  int groupRestoreMember({
+    required String groupIdHex,
+    required String memberIdHex,
+    required int role,
+  }) {
+    if (_groupCtx == null) return CyxChatError.errNull;
+
+    final groupIdPtr = calloc<Uint8>(8);
+    final memberIdPtr = calloc<Uint8>(32);
+
+    try {
+      // Parse group ID from hex
+      final parseGroupId = groupIdFromHex(groupIdHex, groupIdPtr);
+      if (parseGroupId != 0) return parseGroupId;
+
+      // Parse member ID from hex
+      final cleanMemberHex = memberIdHex.replaceAll('-', '');
+      if (cleanMemberHex.length < 32 || !RegExp(r'^[0-9a-fA-F]+$').hasMatch(cleanMemberHex)) {
+        return CyxChatError.errInvalid;
+      }
+      for (int i = 0; i < 16; i++) {
+        memberIdPtr[i] = int.parse(cleanMemberHex.substring(i * 2, i * 2 + 2), radix: 16);
+      }
+
+      return _native.cyxchat_group_restore_member(
+        _groupCtx!,
+        groupIdPtr,
+        memberIdPtr,
+        role,
+      );
+    } finally {
+      calloc.free(groupIdPtr);
+      calloc.free(memberIdPtr);
+    }
+  }
+
 
   /// Set group description
   int groupSetDescription(String groupIdHex, String description) {
@@ -1414,7 +1453,7 @@ class CyxChatBindings {
     if (_groupCtx == null) return;
 
     // Group message callback
-    _onGroupMessage = NativeCallable<_GroupMessageCallback>.listener(
+    _onGroupMessage = NativeCallable<_GroupMessageCallback>.isolateLocal(
       _handleGroupMessage,
     );
     _native.cyxchat_group_set_on_message(
@@ -1492,40 +1531,40 @@ class CyxChatBindings {
   }
 
   /// Handle incoming group message
+  /// Payload is ALL-in-one heap string: "<16-hex-groupid>:<64-hex-senderid>:<16-hex-msgid>:<text>"
+  /// All data encoded in payload to avoid stale pointer issues with .listener()
   void _handleGroupMessage(
     Pointer<Void> ctx,
     Pointer<Uint8> groupId,
     Pointer<Uint8> from,
-    Pointer<Void> msg,
+    Pointer<Void> msgPayload,
     Pointer<Void> userData,
   ) {
+    try { File('D:/Dev/conspiracy/cyxchat/dart_debug.log').writeAsStringSync('\${DateTime.now()}: callback fired\n', mode: FileMode.append); } catch (_) {}
     print("DEBUG FFI: _handleGroupMessage called");
     if (onGroupMessage == null) { print("DEBUG FFI: onGroupMessage callback is NULL!"); return; }
 
-    final groupIdHex = _ptrToHex(groupId, 8);
-    final fromHex = _ptrToHex(from, 32);
+    // Parse ALL-in-one payload (don't read groupId/from pointers - they may be stale)
+    // Format: "<16-hex-groupid>:<64-hex-senderid>:<16-hex-msgid>:<text>"
+    final payload = msgPayload.cast<Utf8>().toDartString();
+    print("DEBUG FFI: payload='\${payload.substring(0, payload.length.clamp(0, 120))}'");
 
-    // Parse message structure: header(20) + group_id(8) + key_version(4) + text_len(2) + text + reply_to(8)
-    // We need to extract msg_id from header and text
-    final msgBytes = msg.cast<Uint8>();
-
-    // Header: version(1) + type(1) + flags(2) + timestamp(8) + msg_id(8) = 20 bytes
-    final msgIdHex = _ptrToHex(msgBytes.elementAt(12), 8);
-
-    // After header(20) + group_id(8) + key_version(4) = offset 32
-    final textLenLow = msgBytes[32];
-    final textLenHigh = msgBytes[33];
-    final textLen = textLenLow | (textLenHigh << 8);
-
-    // Text starts at offset 34
-    final textBytes = <int>[];
-    for (int i = 0; i < textLen && i < 4096; i++) {
-      textBytes.add(msgBytes[34 + i]);
+    if (payload.length < 99) {
+      print("DEBUG FFI: payload too short: \${payload.length}");
+      return;
     }
-    final text = String.fromCharCodes(textBytes);
 
-    print("DEBUG FFI: Parsed - msgId=$msgIdHex, textLen=${text.length}, text=${text.substring(0, text.length > 30 ? 30 : text.length)}...");
-    onGroupMessage!(groupIdHex, fromHex, msgIdHex, text);
+    final groupIdHex = payload.substring(0, 16);
+    // payload[16] == ':'
+    final fromHex = payload.substring(17, 81);
+    // payload[81] == ':'
+    final msgIdHex = payload.substring(82, 98);
+    // payload[98] == ':'
+    final textStr = payload.length > 99 ? payload.substring(99) : '';
+
+    try { File('D:/Dev/conspiracy/cyxchat/dart_debug.log').writeAsStringSync('\${DateTime.now()}: group=$groupIdHex from=\${fromHex.substring(0,16)} msgId=$msgIdHex text=$textStr\n', mode: FileMode.append); } catch (_) {}
+    print("DEBUG FFI: group=$groupIdHex from=\${fromHex.substring(0,16)} msgId=$msgIdHex text=$textStr");
+    onGroupMessage!(groupIdHex, fromHex, msgIdHex, textStr);
   }
 
   /// Handle incoming group invite
@@ -3660,6 +3699,10 @@ late final cyxchat_conn_get_peer_pubkey = _lib.lookupFunction<      Int32 Functi
       Int32 Function(Pointer<Void>, Pointer<Uint8>, Pointer<Int8>, Pointer<Uint8>, Uint32, Pointer<Uint8>, Int32),
       int Function(Pointer<Void>, Pointer<Uint8>, Pointer<Int8>, Pointer<Uint8>, int, Pointer<Uint8>, int)>(
       'cyxchat_group_restore');
+
+  late final cyxchat_group_restore_member = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>, Int32),
+      int Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>, int)>('cyxchat_group_restore_member');
 
 
   late final cyxchat_group_set_description = _lib.lookupFunction<
