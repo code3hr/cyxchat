@@ -331,6 +331,18 @@ class ConnectionProvider extends ChangeNotifier {
     }
   }
 
+  /// Get all server info from registry
+  List<Map<String, dynamic>> getServersInfo() {
+    return _bindings.connGetServersInfo();
+  }
+
+  /// Get server counts
+  int get serverCount => _bindings.connServerCount();
+  int get healthyServerCount => _bindings.connHealthyServerCount();
+
+  /// Add a server to the registry
+  int addServer(String addr) => _bindings.connAddServer(addr);
+
   @override
   void dispose() {
     shutdown();

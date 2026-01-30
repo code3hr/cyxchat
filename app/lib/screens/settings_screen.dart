@@ -1474,6 +1474,9 @@ class _ServerConfigTileState extends ConsumerState<_ServerConfigTile> {
               ),
             ),
           ),
+        // Server registry status
+        if (isConnected)
+          _ServerRegistryStatus(),
       ],
     );
   }
@@ -1646,6 +1649,84 @@ class _ServerConfigTileState extends ConsumerState<_ServerConfigTile> {
             child: const Text('Save'),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Server registry health status display
+class _ServerRegistryStatus extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final connProvider = ref.watch(connectionNotifierProvider);
+    final servers = connProvider.getServersInfo();
+
+    if (servers.isEmpty) return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: AppColors.bgDarkTertiary,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.dns_rounded, size: 14, color: AppColors.textDarkSecondary),
+                const SizedBox(width: 6),
+                Text(
+                  'Servers (${connProvider.healthyServerCount}/${connProvider.serverCount} healthy)',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textDarkSecondary,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            ...servers.map((s) {
+              final isHealthy = s['is_healthy'] as bool;
+              final state = s['state'] as String;
+              final latency = s['avg_latency_ms'] as int;
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Row(
+                  children: [
+                    Icon(
+                      isHealthy ? Icons.check_circle : Icons.radio_button_unchecked,
+                      size: 12,
+                      color: isHealthy ? AppColors.accentGreen : AppColors.textDarkSecondary,
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        s['addr'] as String,
+                        style: const TextStyle(
+                          fontSize: 11,
+                          fontFamily: 'monospace',
+                          color: AppColors.textDark,
+                        ),
+                      ),
+                    ),
+                    Text(
+                      latency > 0 ? '${latency}ms' : state,
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: isHealthy ? AppColors.accentGreen : AppColors.textDarkSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }),
+          ],
+        ),
       ),
     );
   }

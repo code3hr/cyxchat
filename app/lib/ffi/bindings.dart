@@ -644,6 +644,58 @@ class CyxChatBindings {
     }
   }
 
+  /// Add a server to the registry
+  int connAddServer(String addr) {
+    if (_connCtx == null) return CyxChatError.errNull;
+    final addrPtr = addr.toNativeUtf8();
+    try {
+      return _native.cyxchat_conn_add_server(
+          _connCtx!, addrPtr.cast(), nullptr.cast());
+    } finally {
+      calloc.free(addrPtr);
+    }
+  }
+
+  /// Get number of servers in registry
+  int connServerCount() {
+    if (_connCtx == null) return 0;
+    return _native.cyxchat_conn_server_count(_connCtx!);
+  }
+
+  /// Get number of healthy servers
+  int connHealthyServerCount() {
+    if (_connCtx == null) return 0;
+    return _native.cyxchat_conn_healthy_server_count(_connCtx!);
+  }
+
+  /// Get all server info as a list of maps
+  /// Each entry: {addr, state, latency_ms, avg_latency_ms, is_seed, is_healthy}
+  List<Map<String, dynamic>> connGetServersInfo() {
+    if (_connCtx == null) return [];
+    final buf = calloc<Uint8>(4096);
+    try {
+      final written = _native.cyxchat_conn_get_servers_info(
+          _connCtx!, buf.cast(), 4096);
+      if (written <= 0) return [];
+
+      final str = buf.cast<Utf8>().toDartString(length: written);
+      final lines = str.split('\n').where((l) => l.isNotEmpty);
+      return lines.map((line) {
+        final parts = line.split('|');
+        return {
+          'addr': parts.isNotEmpty ? parts[0] : '',
+          'state': parts.length > 1 ? parts[1] : 'unknown',
+          'latency_ms': parts.length > 2 ? int.tryParse(parts[2]) ?? 0 : 0,
+          'avg_latency_ms': parts.length > 3 ? int.tryParse(parts[3]) ?? 0 : 0,
+          'is_seed': parts.length > 4 ? parts[4] == '1' : false,
+          'is_healthy': parts.length > 5 ? parts[5] == '1' : false,
+        };
+      }).toList();
+    } finally {
+      calloc.free(buf);
+    }
+  }
+
   /// Get number of relay connections
   int connRelayCount() {
     if (_connCtx == null) return 0;
@@ -3595,6 +3647,43 @@ late final cyxchat_conn_get_peer_pubkey = _lib.lookupFunction<      Int32 Functi
   late final cyxchat_conn_set_file_ctx = _lib.lookupFunction<
       Void Function(Pointer<Void>, Pointer<Void>),
       void Function(Pointer<Void>, Pointer<Void>)>('cyxchat_conn_set_file_ctx');
+
+  // Server registry functions
+  late final cyxchat_conn_get_server_registry = _lib.lookupFunction<
+      Pointer<Void> Function(Pointer<Void>),
+      Pointer<Void> Function(Pointer<Void>)>('cyxchat_conn_get_server_registry');
+
+  late final cyxchat_conn_add_server = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Utf8>, Pointer<Uint8>),
+      int Function(Pointer<Void>, Pointer<Utf8>, Pointer<Uint8>)>('cyxchat_conn_add_server');
+
+  late final cyxchat_server_registry_count = _lib.lookupFunction<
+      Size Function(Pointer<Void>),
+      int Function(Pointer<Void>)>('cyxchat_server_registry_count');
+
+  late final cyxchat_server_registry_healthy_count = _lib.lookupFunction<
+      Size Function(Pointer<Void>),
+      int Function(Pointer<Void>)>('cyxchat_server_registry_healthy_count');
+
+  late final cyxchat_server_registry_get_all = _lib.lookupFunction<
+      Size Function(Pointer<Void>, Pointer<Void>, Size),
+      int Function(Pointer<Void>, Pointer<Void>, int)>('cyxchat_server_registry_get_all');
+
+  late final cyxchat_server_state_name = _lib.lookupFunction<
+      Pointer<Utf8> Function(Int32),
+      Pointer<Utf8> Function(int)>('cyxchat_server_state_name');
+
+  late final cyxchat_conn_server_count = _lib.lookupFunction<
+      Size Function(Pointer<Void>),
+      int Function(Pointer<Void>)>('cyxchat_conn_server_count');
+
+  late final cyxchat_conn_healthy_server_count = _lib.lookupFunction<
+      Size Function(Pointer<Void>),
+      int Function(Pointer<Void>)>('cyxchat_conn_healthy_server_count');
+
+  late final cyxchat_conn_get_servers_info = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Utf8>, Size),
+      int Function(Pointer<Void>, Pointer<Utf8>, int)>('cyxchat_conn_get_servers_info');
 
   // DHT functions
   late final cyxchat_conn_dht_bootstrap = _lib.lookupFunction<

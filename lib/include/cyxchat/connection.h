@@ -10,6 +10,7 @@
 #define CYXCHAT_CONNECTION_H
 
 #include "types.h"
+#include "server_registry.h"
 #include <cyxwiz/transport.h>
 #include <cyxwiz/peer.h>
 #include <cyxwiz/onion.h>
@@ -537,6 +538,52 @@ CYXCHAT_API void cyxchat_conn_dht_get_stats(
  * Check if DHT is enabled and has nodes
  */
 CYXCHAT_API int cyxchat_conn_dht_is_ready(cyxchat_conn_ctx_t *ctx);
+
+/* ============================================================
+ * Server Registry
+ * ============================================================ */
+
+/**
+ * Get server registry for querying server status
+ *
+ * @param ctx   Connection context
+ * @return      Server registry, or NULL if not initialized
+ */
+CYXCHAT_API cyxchat_server_registry_t* cyxchat_conn_get_server_registry(
+    cyxchat_conn_ctx_t *ctx
+);
+
+/**
+ * Add a server at runtime (from UI or DHT discovery)
+ *
+ * @param ctx       Connection context
+ * @param addr      Server address "ip:port"
+ * @param pubkey    Expected Ed25519 pubkey (32 bytes), or NULL for unverified
+ * @return          CYXCHAT_OK on success
+ */
+CYXCHAT_API cyxchat_error_t cyxchat_conn_add_server(
+    cyxchat_conn_ctx_t *ctx,
+    const char *addr,
+    const uint8_t *pubkey
+);
+
+/**
+ * Get server count and healthy count from registry
+ */
+CYXCHAT_API size_t cyxchat_conn_server_count(cyxchat_conn_ctx_t *ctx);
+CYXCHAT_API size_t cyxchat_conn_healthy_server_count(cyxchat_conn_ctx_t *ctx);
+
+/**
+ * Get server info as formatted string for FFI
+ *
+ * Format: "addr|state|latency_ms|avg_latency_ms|is_seed|is_healthy\n" per server
+ * Returns number of bytes written to buf (excluding null terminator)
+ */
+CYXCHAT_API int cyxchat_conn_get_servers_info(
+    cyxchat_conn_ctx_t *ctx,
+    char *buf,
+    size_t buf_size
+);
 
 /* ============================================================
  * Manual Peer Addition (for testing/bootstrapping)

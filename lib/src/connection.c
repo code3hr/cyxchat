@@ -109,6 +109,9 @@ struct cyxchat_conn_ctx {
     /* Relay context */
     cyxchat_relay_ctx_t *relay;
 
+    /* Server registry (multi-server health + failover) */
+    cyxchat_server_registry_t *server_registry;
+
     /* Callbacks */
     cyxchat_conn_state_callback_t on_state_change;
     void *state_change_user_data;
@@ -125,6 +128,7 @@ struct cyxchat_conn_ctx {
     /* Timing */
     uint64_t last_stun_time;
     uint64_t last_poll_time;
+    uint64_t last_server_discovery;  /* DHT server discovery timer */
 };
 
 /* ============================================================
@@ -287,6 +291,12 @@ static void on_transport_recv(cyxwiz_transport_t *transport,
 {
     (void)transport;  /* Unused - we use the transport from context */
     cyxchat_conn_ctx_t *ctx = (cyxchat_conn_ctx_t*)user_data;
+
+    /* Check for server registry messages (health pong, challenge response) */
+    if (len > 0 && ctx->server_registry && cyxchat_server_registry_is_message(data[0])) {
+        cyxchat_server_registry_handle_message(ctx->server_registry, data, len);
+        return;
+    }
 
     /* Check for relay messages and handle them */
     if (len > 0 && ctx->relay && cyxchat_relay_is_relay_message(data[0])) {
@@ -728,6 +738,24 @@ cyxchat_error_t cyxchat_conn_create(cyxchat_conn_ctx_t **ctx,
         cyxchat_relay_set_on_data(c->relay, on_relay_data, c);
     }
 
+    /* Create server registry for multi-server health tracking */
+    {
+    cyxchat_error_t reg_err = cyxchat_server_registry_create(&c->server_registry, c->transport, local_id);
+    if (reg_err == CYXCHAT_OK) {
+        /* Load seed servers */
+        size_t seeds = cyxchat_server_registry_load_seeds(c->server_registry);
+        CYXWIZ_INFO("Server registry created, loaded %zu seed servers", seeds);
+
+        /* Also add the user-provided bootstrap server */
+        if (bootstrap && strlen(bootstrap) > 0) {
+            cyxchat_server_registry_add(c->server_registry, bootstrap, NULL);
+        }
+    } else {
+        CYXWIZ_WARN("Failed to create server registry: %d", (int)reg_err);
+        c->server_registry = NULL;
+    }
+    }
+
     /* Start discovery */
     c->transport->ops->discover(c->transport);
 
@@ -763,6 +791,11 @@ void cyxchat_conn_destroy(cyxchat_conn_ctx_t *ctx)
     if (ctx->router) {
         cyxwiz_router_stop(ctx->router);
         cyxwiz_router_destroy(ctx->router);
+    }
+
+    /* Destroy server registry */
+    if (ctx->server_registry) {
+        cyxchat_server_registry_destroy(ctx->server_registry);
     }
 
     /* Destroy relay */
@@ -815,6 +848,22 @@ int cyxchat_conn_poll(cyxchat_conn_ctx_t *ctx, uint64_t now_ms)
     /* Poll DHT */
     if (ctx->dht) {
         cyxwiz_dht_poll(ctx->dht, now_ms);
+    }
+
+    /* Poll server registry (health pings, timeout checks) */
+    if (ctx->server_registry) {
+        events += cyxchat_server_registry_poll(ctx->server_registry, now_ms);
+    }
+
+    /* DHT server discovery (every 10 minutes) */
+    #define CYXCHAT_SERVER_DISCOVERY_INTERVAL_MS 600000
+    if (ctx->dht && ctx->server_registry &&
+        (now_ms - ctx->last_server_discovery) >= CYXCHAT_SERVER_DISCOVERY_INTERVAL_MS) {
+        ctx->last_server_discovery = now_ms;
+        /* TODO: When DHT store/find_value API is available, lookup well-known
+         * key SHA256("cyxchat-servers-v1") to discover server announcements.
+         * For now, servers are discovered via seed list + manual addition. */
+        CYXWIZ_DEBUG("Server discovery tick (DHT store API pending)");
     }
 
     /* Poll discovery for announcements and key exchange */
@@ -1626,4 +1675,64 @@ cyxchat_error_t cyxchat_conn_add_peer_addr(cyxchat_conn_ctx_t *ctx,
     CYXWIZ_INFO("Sent punch to %s:%d for peer discovery", ip_str, port);
 
     return CYXCHAT_OK;
+}
+
+/* ============================================================
+ * Server Registry Access
+ * ============================================================ */
+
+cyxchat_server_registry_t* cyxchat_conn_get_server_registry(cyxchat_conn_ctx_t *ctx)
+{
+    if (!ctx) return NULL;
+    return ctx->server_registry;
+}
+
+cyxchat_error_t cyxchat_conn_add_server(cyxchat_conn_ctx_t *ctx,
+                                         const char *addr,
+                                         const uint8_t *pubkey)
+{
+    if (!ctx || !addr) return CYXCHAT_ERR_NULL;
+    if (!ctx->server_registry) return CYXCHAT_ERR_INVALID;
+    return cyxchat_server_registry_add(ctx->server_registry, addr, pubkey);
+}
+
+size_t cyxchat_conn_server_count(cyxchat_conn_ctx_t *ctx)
+{
+    if (!ctx || !ctx->server_registry) return 0;
+    return cyxchat_server_registry_count(ctx->server_registry);
+}
+
+size_t cyxchat_conn_healthy_server_count(cyxchat_conn_ctx_t *ctx)
+{
+    if (!ctx || !ctx->server_registry) return 0;
+    return cyxchat_server_registry_healthy_count(ctx->server_registry);
+}
+
+int cyxchat_conn_get_servers_info(cyxchat_conn_ctx_t *ctx, char *buf, size_t buf_size)
+{
+    if (!ctx || !buf || buf_size == 0) return 0;
+    if (!ctx->server_registry) {
+        buf[0] = '\0';
+        return 0;
+    }
+
+    cyxchat_server_info_t servers[CYXCHAT_MAX_SERVERS];
+    size_t count = cyxchat_server_registry_get_all(ctx->server_registry, servers, CYXCHAT_MAX_SERVERS);
+
+    int written = 0;
+    for (size_t i = 0; i < count; i++) {
+        const char *state_name = cyxchat_server_state_name(servers[i].state);
+        int is_healthy = (servers[i].state == CYXCHAT_SERVER_HEALTHY) ? 1 : 0;
+        int n = snprintf(buf + written, buf_size - (size_t)written,
+                         "%s|%s|%u|%u|%d|%d\n",
+                         servers[i].addr,
+                         state_name,
+                         servers[i].latency_ms,
+                         servers[i].avg_latency_ms,
+                         servers[i].is_seed,
+                         is_healthy);
+        if (n < 0 || (size_t)(written + n) >= buf_size) break;
+        written += n;
+    }
+    return written;
 }

@@ -162,6 +162,19 @@ static void free_connection(cyxchat_relay_ctx_t *ctx, cyxchat_relay_conn_interna
     }
 }
 
+/* Find best active relay server (returns index, or 0 as fallback) */
+static int find_best_server(cyxchat_relay_ctx_t *ctx)
+{
+    /* For now, return the first active server. When server_registry
+     * health data is synced to relay servers, this will pick lowest latency. */
+    for (size_t i = 0; i < ctx->server_count; i++) {
+        if (ctx->servers[i].active) {
+            return (int)i;
+        }
+    }
+    return 0;  /* Fallback to first */
+}
+
 static int parse_address(const char *addr, uint32_t *ip_out, uint16_t *port_out)
 {
     char host[256];
@@ -363,7 +376,7 @@ cyxchat_error_t cyxchat_relay_connect(cyxchat_relay_ctx_t *ctx,
     conn->connected_at = get_time_ms();
     conn->last_activity = conn->connected_at;
     conn->last_keepalive = conn->connected_at;
-    conn->server_index = 0;  /* Use first relay server */
+    conn->server_index = find_best_server(ctx);
 
     /* Send connect request to relay */
     cyxchat_relay_connect_msg_t msg;
@@ -371,7 +384,7 @@ cyxchat_error_t cyxchat_relay_connect(cyxchat_relay_ctx_t *ctx,
     msg.from = ctx->local_id;
     msg.to = *peer_id;
 
-    cyxchat_error_t err = send_to_relay(ctx, 0, (uint8_t*)&msg, sizeof(msg));
+    cyxchat_error_t err = send_to_relay(ctx, conn->server_index, (uint8_t*)&msg, sizeof(msg));
     if (err != CYXCHAT_OK) {
         free_connection(ctx, conn);
         return err;
