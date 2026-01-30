@@ -29,7 +29,9 @@ include(":app")
 // Must be configured here before subprojects are evaluated
 gradle.beforeProject {
     if (name != "app" && name != rootProject.name) {
-        extensions.create("flutter", FlutterExtension::class.java)
+        if (extensions.findByName("flutter") == null) {
+            extensions.create("flutter", FlutterExtension::class.java)
+        }
     }
 }
 
