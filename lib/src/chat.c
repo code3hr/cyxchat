@@ -95,6 +95,20 @@ typedef struct {
 } cyxchat_frag_entry_t;
 
 /* ============================================================
+ * Pending Message Queue (for retransmission)
+ * ============================================================ */
+
+typedef struct {
+    cyxchat_msg_id_t msg_id;
+    cyxwiz_node_id_t to;
+    uint8_t *wire_data;       /* Heap-allocated serialized message */
+    size_t wire_len;
+    uint64_t sent_at_ms;      /* Last send/retry timestamp */
+    uint8_t retry_count;
+    int active;
+} cyxchat_pending_msg_t;
+
+/* ============================================================
  * Internal Structures
  * ============================================================ */
 
@@ -151,7 +165,117 @@ struct cyxchat_ctx {
 
     cyxchat_on_edit_t on_edit;
     void *on_edit_data;
+
+    cyxchat_on_delivery_failed_t on_delivery_failed;
+    void *on_delivery_failed_data;
+
+    /* Pending message queue for retransmission */
+    cyxchat_pending_msg_t pending_msgs[CYXCHAT_MAX_PENDING_MSGS];
 };
+
+/* ============================================================
+ * Pending Message Helpers (Retransmission)
+ * ============================================================ */
+
+static cyxchat_pending_msg_t* pending_find_slot(cyxchat_ctx_t *ctx) {
+    for (int i = 0; i < CYXCHAT_MAX_PENDING_MSGS; i++) {
+        if (!ctx->pending_msgs[i].active) {
+            return &ctx->pending_msgs[i];
+        }
+    }
+    return NULL;
+}
+
+static cyxchat_pending_msg_t* pending_find_by_msg_id(
+    cyxchat_ctx_t *ctx,
+    const cyxchat_msg_id_t *msg_id
+) {
+    for (int i = 0; i < CYXCHAT_MAX_PENDING_MSGS; i++) {
+        if (ctx->pending_msgs[i].active &&
+            memcmp(ctx->pending_msgs[i].msg_id.bytes, msg_id->bytes,
+                   CYXCHAT_MSG_ID_SIZE) == 0) {
+            return &ctx->pending_msgs[i];
+        }
+    }
+    return NULL;
+}
+
+static void pending_free(cyxchat_pending_msg_t *slot) {
+    if (slot->wire_data) {
+        free(slot->wire_data);
+        slot->wire_data = NULL;
+    }
+    slot->active = 0;
+}
+
+static void pending_free_all(cyxchat_ctx_t *ctx) {
+    for (int i = 0; i < CYXCHAT_MAX_PENDING_MSGS; i++) {
+        if (ctx->pending_msgs[i].active) {
+            pending_free(&ctx->pending_msgs[i]);
+        }
+    }
+}
+
+static void pending_track(
+    cyxchat_ctx_t *ctx,
+    const cyxchat_msg_id_t *msg_id,
+    const cyxwiz_node_id_t *to,
+    const uint8_t *wire_data,
+    size_t wire_len,
+    uint64_t now_ms
+) {
+    cyxchat_pending_msg_t *slot = pending_find_slot(ctx);
+    if (!slot) {
+        CYXWIZ_WARN("Pending message queue full, message sent without retry tracking");
+        return;
+    }
+
+    slot->wire_data = (uint8_t *)malloc(wire_len);
+    if (!slot->wire_data) {
+        CYXWIZ_WARN("Failed to allocate pending message buffer");
+        return;
+    }
+
+    memcpy(&slot->msg_id, msg_id, sizeof(cyxchat_msg_id_t));
+    memcpy(&slot->to, to, sizeof(cyxwiz_node_id_t));
+    memcpy(slot->wire_data, wire_data, wire_len);
+    slot->wire_len = wire_len;
+    slot->sent_at_ms = now_ms;
+    slot->retry_count = 0;
+    slot->active = 1;
+}
+
+static void pending_check_timeouts(cyxchat_ctx_t *ctx, uint64_t now_ms) {
+    for (int i = 0; i < CYXCHAT_MAX_PENDING_MSGS; i++) {
+        cyxchat_pending_msg_t *slot = &ctx->pending_msgs[i];
+        if (!slot->active) continue;
+
+        if (now_ms - slot->sent_at_ms < CYXCHAT_MSG_ACK_TIMEOUT_MS) continue;
+
+        if (slot->retry_count < CYXCHAT_MSG_MAX_RETRIES) {
+            /* Retry */
+            slot->retry_count++;
+            slot->sent_at_ms = now_ms;
+
+            CYXWIZ_INFO("Retransmitting message (retry %u/%u)",
+                        slot->retry_count, CYXCHAT_MSG_MAX_RETRIES);
+
+            cyxwiz_onion_send_to(ctx->onion, &slot->to,
+                                 slot->wire_data, slot->wire_len);
+        } else {
+            /* Max retries exhausted */
+            CYXWIZ_WARN("Message delivery failed after %u retries",
+                        CYXCHAT_MSG_MAX_RETRIES);
+
+            if (ctx->on_delivery_failed) {
+                ctx->on_delivery_failed(ctx, &slot->to, &slot->msg_id,
+                                        ctx->on_delivery_failed_data);
+            }
+
+            pending_free(slot);
+        }
+    }
+}
 
 /* ============================================================
  * Wire Format Serialization
@@ -789,12 +913,22 @@ static void on_onion_delivery(
             break;
 
         case CYXCHAT_MSG_ACK:
-            if (ctx->on_ack && offset + CYXCHAT_MSG_ID_SIZE + 1 <= len) {
+            if (offset + CYXCHAT_MSG_ID_SIZE + 1 <= len) {
                 cyxchat_msg_id_t ack_id;
                 memcpy(&ack_id, data + offset, CYXCHAT_MSG_ID_SIZE);
                 offset += CYXCHAT_MSG_ID_SIZE;
                 uint8_t status = data[offset];
-                ctx->on_ack(ctx, actual_sender, &ack_id, (cyxchat_msg_status_t)status, ctx->on_ack_data);
+
+                /* Clear from pending queue — message was delivered */
+                cyxchat_pending_msg_t *pending = pending_find_by_msg_id(ctx, &ack_id);
+                if (pending) {
+                    CYXWIZ_DEBUG("ACK received, clearing pending message");
+                    pending_free(pending);
+                }
+
+                if (ctx->on_ack) {
+                    ctx->on_ack(ctx, actual_sender, &ack_id, (cyxchat_msg_status_t)status, ctx->on_ack_data);
+                }
             }
             break;
 
@@ -866,6 +1000,7 @@ static void on_onion_delivery(
         case CYXCHAT_MSG_GROUP_INFO:
         case CYXCHAT_MSG_GROUP_ADMIN:
         case CYXCHAT_MSG_GROUP_KEY_ACK:
+        case CYXCHAT_MSG_GROUP_TEXT_ACK:
             /* Route to group module if registered */
             if (ctx->group_ctx) {
                 CYXWIZ_INFO("Routing group message (type=0x%02x) to group module", type);
@@ -918,6 +1053,9 @@ cyxchat_error_t cyxchat_create(
 
 void cyxchat_destroy(cyxchat_ctx_t *ctx) {
     if (ctx) {
+        /* Free pending message buffers */
+        pending_free_all(ctx);
+
         /* Clear callback in onion layer */
         if (ctx->onion) {
             cyxwiz_onion_set_callback(ctx->onion, NULL, NULL);
@@ -937,6 +1075,9 @@ int cyxchat_poll(cyxchat_ctx_t *ctx, uint64_t now_ms) {
 
     /* Expire old incomplete fragments */
     frag_expire_old(ctx, now_ms);
+
+    /* Check pending message timeouts and retry */
+    pending_check_timeouts(ctx, now_ms);
 
     /* Return number of messages in queue */
     if (ctx->recv_head >= ctx->recv_tail) {
@@ -1029,6 +1170,9 @@ cyxchat_error_t cyxchat_send_text(
             CYXWIZ_ERROR("Failed to send message: error %d", err);
             return CYXCHAT_ERR_NETWORK;
         }
+
+        /* Track for retransmission */
+        pending_track(ctx, &msg_id, to, wire_buf, wire_len, cyxchat_timestamp_ms());
 
         CYXWIZ_INFO("Message sent successfully via onion routing");
     } else {
@@ -1301,6 +1445,17 @@ void cyxchat_set_on_edit(
     if (ctx) {
         ctx->on_edit = callback;
         ctx->on_edit_data = user_data;
+    }
+}
+
+void cyxchat_set_on_delivery_failed(
+    cyxchat_ctx_t *ctx,
+    cyxchat_on_delivery_failed_t callback,
+    void *user_data
+) {
+    if (ctx) {
+        ctx->on_delivery_failed = callback;
+        ctx->on_delivery_failed_data = user_data;
     }
 }
 

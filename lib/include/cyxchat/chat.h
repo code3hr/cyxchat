@@ -118,6 +118,13 @@ typedef void (*cyxchat_on_edit_t)(
     void *user_data
 );
 
+typedef void (*cyxchat_on_delivery_failed_t)(
+    cyxchat_ctx_t *ctx,
+    const cyxwiz_node_id_t *to,
+    const cyxchat_msg_id_t *msg_id,
+    void *user_data
+);
+
 /* ============================================================
  * Initialization
  * ============================================================ */
@@ -287,6 +294,12 @@ CYXCHAT_API void cyxchat_set_on_delete(
 CYXCHAT_API void cyxchat_set_on_edit(
     cyxchat_ctx_t *ctx,
     cyxchat_on_edit_t callback,
+    void *user_data
+);
+
+CYXCHAT_API void cyxchat_set_on_delivery_failed(
+    cyxchat_ctx_t *ctx,
+    cyxchat_on_delivery_failed_t callback,
     void *user_data
 );
 

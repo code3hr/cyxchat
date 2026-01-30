@@ -136,6 +136,9 @@ extern "C" {
 #define CYXCHAT_MSG_GROUP_IMAGE       0x74    /* Group image (compressed) */
 #define CYXCHAT_MSG_GROUP_VIDEO       0x75    /* Group video thumbnail + metadata */
 
+/* Retransmission ACK (0x80) - separate range to avoid group message conflicts */
+#define CYXCHAT_MSG_GROUP_TEXT_ACK  0x80    /* Group text delivery ACK */
+
 /* DNS Messages (0xD0-0xD9) - CyxChat internal DNS */
 #define CYXCHAT_MSG_DNS_REGISTER      0xD0  /* Register name with signature */
 #define CYXCHAT_MSG_DNS_REGISTER_ACK  0xD1  /* Registration confirmed */
@@ -416,6 +419,22 @@ typedef struct {
     uint32_t thumbnail_size;                     /* Size of thumbnail data */
     uint64_t timestamp;                          /* When message was sent */
 } cyxchat_group_media_t;
+
+/* ============================================================
+ * Protocol Version
+ * ============================================================ */
+
+/* ============================================================
+ * Retransmission Constants
+ * ============================================================ */
+
+#define CYXCHAT_MAX_PENDING_MSGS           32    /* Max pending 1:1 messages */
+#define CYXCHAT_MSG_ACK_TIMEOUT_MS         5000  /* 5s per retry attempt */
+#define CYXCHAT_MSG_MAX_RETRIES            3     /* Max retries before failure */
+
+#define CYXCHAT_MAX_PENDING_GROUP_MSGS     16    /* Max pending group messages */
+#define CYXCHAT_GROUP_MSG_ACK_TIMEOUT_MS   7000  /* 7s per member retry */
+#define CYXCHAT_GROUP_MSG_MAX_RETRIES      3     /* Max retries per member */
 
 /* ============================================================
  * Protocol Version

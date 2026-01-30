@@ -97,6 +97,27 @@ typedef void (*cyxchat_on_key_dist_complete_t)(
     void *user_data
 );
 
+/* ============================================================
+ * Pending Group Message Tracking (Retransmission)
+ * ============================================================ */
+
+typedef struct {
+    cyxwiz_node_id_t member_id;
+    uint64_t sent_at_ms;
+    uint8_t retry_count;
+    int acked;
+} cyxchat_group_msg_member_track_t;
+
+typedef struct {
+    cyxchat_msg_id_t msg_id;
+    cyxchat_group_id_t group_id;
+    uint8_t *wire_data;
+    size_t wire_len;
+    cyxchat_group_msg_member_track_t members[CYXCHAT_MAX_GROUP_MEMBERS];
+    size_t member_count;
+    int active;
+} cyxchat_pending_group_msg_t;
+
 struct cyxchat_group_ctx {
     cyxchat_ctx_t *chat_ctx;
     cyxwiz_node_id_t local_id;
@@ -173,6 +194,13 @@ struct cyxchat_group_ctx {
         size_t count;
         size_t write_index;  /* Circular buffer write position */
     } admin_actions[CYXCHAT_MAX_GROUPS];
+
+    /* Pending group message queue (retransmission) */
+    cyxchat_pending_group_msg_t pending_group_msgs[CYXCHAT_MAX_PENDING_GROUP_MSGS];
+
+    /* Delivery failure callback */
+    cyxchat_on_group_delivery_failed_t on_delivery_failed;
+    void *on_delivery_failed_data;
 };
 
 /* ============================================================
@@ -217,6 +245,147 @@ static cyxchat_group_role_t get_role(
 ) {
     cyxchat_group_member_t *member = find_member(group, node_id);
     return member ? member->role : CYXCHAT_ROLE_MEMBER;
+}
+
+/* ============================================================
+ * Pending Group Message Helpers (Retransmission)
+ * ============================================================ */
+
+static cyxchat_pending_group_msg_t* pending_grp_find_slot(cyxchat_group_ctx_t *ctx) {
+    for (int i = 0; i < CYXCHAT_MAX_PENDING_GROUP_MSGS; i++) {
+        if (!ctx->pending_group_msgs[i].active) {
+            return &ctx->pending_group_msgs[i];
+        }
+    }
+    return NULL;
+}
+
+static cyxchat_pending_group_msg_t* pending_grp_find_by_msg_id(
+    cyxchat_group_ctx_t *ctx,
+    const cyxchat_msg_id_t *msg_id
+) {
+    for (int i = 0; i < CYXCHAT_MAX_PENDING_GROUP_MSGS; i++) {
+        if (ctx->pending_group_msgs[i].active &&
+            memcmp(ctx->pending_group_msgs[i].msg_id.bytes, msg_id->bytes,
+                   CYXCHAT_MSG_ID_SIZE) == 0) {
+            return &ctx->pending_group_msgs[i];
+        }
+    }
+    return NULL;
+}
+
+static void pending_grp_free(cyxchat_pending_group_msg_t *slot) {
+    if (slot->wire_data) {
+        free(slot->wire_data);
+        slot->wire_data = NULL;
+    }
+    slot->active = 0;
+}
+
+static void pending_grp_free_all(cyxchat_group_ctx_t *ctx) {
+    for (int i = 0; i < CYXCHAT_MAX_PENDING_GROUP_MSGS; i++) {
+        if (ctx->pending_group_msgs[i].active) {
+            pending_grp_free(&ctx->pending_group_msgs[i]);
+        }
+    }
+}
+
+static void pending_grp_track(
+    cyxchat_group_ctx_t *ctx,
+    const cyxchat_msg_id_t *msg_id,
+    const cyxchat_group_id_t *group_id,
+    const uint8_t *wire_data,
+    size_t wire_len,
+    const cyxchat_group_t *group,
+    uint64_t now_ms
+) {
+    cyxchat_pending_group_msg_t *slot = pending_grp_find_slot(ctx);
+    if (!slot) {
+        CYXWIZ_WARN("Pending group message queue full, sent without retry tracking");
+        return;
+    }
+
+    slot->wire_data = (uint8_t *)malloc(wire_len);
+    if (!slot->wire_data) {
+        CYXWIZ_WARN("Failed to allocate pending group message buffer");
+        return;
+    }
+
+    memcpy(&slot->msg_id, msg_id, sizeof(cyxchat_msg_id_t));
+    memcpy(&slot->group_id, group_id, sizeof(cyxchat_group_id_t));
+    memcpy(slot->wire_data, wire_data, wire_len);
+    slot->wire_len = wire_len;
+    slot->member_count = 0;
+    slot->active = 1;
+
+    /* Track each member (skip self) */
+    for (uint8_t i = 0; i < group->member_count; i++) {
+        if (memcmp(&group->members[i].node_id, &ctx->local_id, 32) == 0) {
+            continue;
+        }
+        cyxchat_group_msg_member_track_t *mt = &slot->members[slot->member_count++];
+        memcpy(&mt->member_id, &group->members[i].node_id, sizeof(cyxwiz_node_id_t));
+        mt->sent_at_ms = now_ms;
+        mt->retry_count = 0;
+        mt->acked = 0;
+    }
+}
+
+static void pending_grp_check_timeouts(cyxchat_group_ctx_t *ctx, uint64_t now_ms) {
+    cyxwiz_onion_ctx_t *onion = cyxchat_get_onion(ctx->chat_ctx);
+    if (!onion) return;
+
+    for (int i = 0; i < CYXCHAT_MAX_PENDING_GROUP_MSGS; i++) {
+        cyxchat_pending_group_msg_t *slot = &ctx->pending_group_msgs[i];
+        if (!slot->active) continue;
+
+        int all_done = 1;
+        for (size_t m = 0; m < slot->member_count; m++) {
+            cyxchat_group_msg_member_track_t *mt = &slot->members[m];
+            if (mt->acked) continue;
+
+            if (now_ms - mt->sent_at_ms < CYXCHAT_GROUP_MSG_ACK_TIMEOUT_MS) {
+                all_done = 0;
+                continue;
+            }
+
+            if (mt->retry_count < CYXCHAT_GROUP_MSG_MAX_RETRIES) {
+                mt->retry_count++;
+                mt->sent_at_ms = now_ms;
+                all_done = 0;
+
+                CYXWIZ_INFO("Retransmitting group message to member (retry %u/%u)",
+                            mt->retry_count, CYXCHAT_GROUP_MSG_MAX_RETRIES);
+
+                cyxwiz_onion_send_to(onion, &mt->member_id,
+                                     slot->wire_data, slot->wire_len);
+            }
+            /* else: max retries exhausted for this member, leave acked=0 */
+        }
+
+        if (!all_done) continue;
+
+        /* All members either acked or exhausted retries */
+        /* Collect failed members */
+        cyxwiz_node_id_t failed[CYXCHAT_MAX_GROUP_MEMBERS];
+        size_t failed_count = 0;
+
+        for (size_t m = 0; m < slot->member_count; m++) {
+            if (!slot->members[m].acked) {
+                memcpy(&failed[failed_count++], &slot->members[m].member_id,
+                       sizeof(cyxwiz_node_id_t));
+            }
+        }
+
+        if (failed_count > 0 && ctx->on_delivery_failed) {
+            CYXWIZ_WARN("Group message delivery failed for %zu members", failed_count);
+            ctx->on_delivery_failed(ctx, &slot->group_id, &slot->msg_id,
+                                    failed, failed_count,
+                                    ctx->on_delivery_failed_data);
+        }
+
+        pending_grp_free(slot);
+    }
 }
 
 /* ============================================================
@@ -1370,6 +1539,9 @@ cyxchat_error_t cyxchat_group_ctx_create(
 
 void cyxchat_group_ctx_destroy(cyxchat_group_ctx_t *ctx) {
     if (ctx) {
+        /* Free pending group message buffers */
+        pending_grp_free_all(ctx);
+
         /* Clean up active key distribution jobs */
         for (int i = 0; i < CYXCHAT_MAX_KEY_DIST_JOBS; i++) {
             if (ctx->key_dist_jobs[i].active) {
@@ -1390,6 +1562,9 @@ int cyxchat_group_poll(cyxchat_group_ctx_t *ctx, uint64_t now_ms) {
     if (!ctx) return 0;
 
     int events = 0;
+
+    /* Check pending group message timeouts and retry */
+    pending_grp_check_timeouts(ctx, now_ms);
 
     /* Process active key distribution jobs */
     for (int i = 0; i < CYXCHAT_MAX_KEY_DIST_JOBS; i++) {
@@ -2251,6 +2426,12 @@ cyxchat_error_t cyxchat_group_send_text(
 
     CYXWIZ_INFO("Group message sent to %d/%u members", sent_count, group->member_count - 1);
 
+    /* Track for retransmission */
+    if (sent_count > 0) {
+        pending_grp_track(ctx, &msg_id, group_id, wire, wire_len, group,
+                          cyxchat_timestamp_ms());
+    }
+
     if (msg_id_out) {
         memcpy(msg_id_out, &msg_id, sizeof(cyxchat_msg_id_t));
     }
@@ -2511,6 +2692,17 @@ void cyxchat_group_set_on_key_dist_complete(
     }
 }
 
+void cyxchat_group_set_on_delivery_failed(
+    cyxchat_group_ctx_t *ctx,
+    cyxchat_on_group_delivery_failed_t callback,
+    void *user_data
+) {
+    if (ctx) {
+        ctx->on_delivery_failed = callback;
+        ctx->on_delivery_failed_data = user_data;
+    }
+}
+
 /* ============================================================
  * Key Distribution Progress Query
  * ============================================================ */
@@ -2758,6 +2950,27 @@ static void handle_group_text(
             { FILE *dbg = fopen("group_debug.log", "a"); if (dbg) { fprintf(dbg, "CALLBACK: %.99s...text=%s\n", payload, payload + 99); fclose(dbg); } }
             ctx->on_message(ctx, &group_id, &sender_id, payload, ctx->on_message_data);
             { FILE *dbg = fopen("group_debug.log", "a"); if (dbg) { fprintf(dbg, "MSG CB returned ok\n"); fclose(dbg); } }
+        }
+    }
+
+    /* Send GROUP_TEXT_ACK back to sender */
+    {
+        cyxwiz_onion_ctx_t *onion = cyxchat_get_onion(ctx->chat_ctx);
+        if (onion) {
+            /* Wire format: type(1) + flags(1) + msg_id(8) + sender_id(32) + group_id(8) = 50 bytes */
+            uint8_t ack_buf[50];
+            size_t ack_len = 0;
+            ack_buf[ack_len++] = CYXCHAT_MSG_GROUP_TEXT_ACK;
+            ack_buf[ack_len++] = 0; /* flags */
+            memcpy(ack_buf + ack_len, msg_id.bytes, CYXCHAT_MSG_ID_SIZE);
+            ack_len += CYXCHAT_MSG_ID_SIZE;
+            memcpy(ack_buf + ack_len, ctx->local_id.bytes, 32);
+            ack_len += 32;
+            memcpy(ack_buf + ack_len, group_id.bytes, CYXCHAT_GROUP_ID_SIZE);
+            ack_len += CYXCHAT_GROUP_ID_SIZE;
+
+            cyxwiz_onion_send_to(onion, &sender_id, ack_buf, ack_len);
+            CYXWIZ_DEBUG("Sent GROUP_TEXT_ACK for message in group %s", group_hex);
         }
     }
 }
@@ -3235,6 +3448,60 @@ static void handle_group_key_ack(
 }
 
 /**
+ * Handle incoming GROUP_TEXT_ACK message
+ */
+static void handle_group_text_ack(
+    cyxchat_group_ctx_t *ctx,
+    const cyxwiz_node_id_t *from,
+    const uint8_t *data,
+    size_t len
+) {
+    /* Wire format: type(1) + flags(1) + msg_id(8) + sender_id(32) + group_id(8) = 50 */
+    if (len < 50) {
+        CYXWIZ_WARN("GROUP_TEXT_ACK too short: %zu", len);
+        return;
+    }
+
+    size_t offset = 2; /* skip type + flags */
+    cyxchat_msg_id_t msg_id;
+    memcpy(&msg_id, data + offset, CYXCHAT_MSG_ID_SIZE);
+    offset += CYXCHAT_MSG_ID_SIZE;
+
+    cyxwiz_node_id_t acker_id;
+    memcpy(&acker_id, data + offset, 32);
+    offset += 32;
+
+    /* Find pending group message */
+    cyxchat_pending_group_msg_t *slot = pending_grp_find_by_msg_id(ctx, &msg_id);
+    if (!slot) {
+        CYXWIZ_DEBUG("GROUP_TEXT_ACK for unknown/already-completed message");
+        return;
+    }
+
+    /* Mark member as acked */
+    for (size_t m = 0; m < slot->member_count; m++) {
+        if (memcmp(&slot->members[m].member_id, &acker_id, 32) == 0) {
+            slot->members[m].acked = 1;
+            CYXWIZ_DEBUG("GROUP_TEXT_ACK received from member %zu", m);
+            break;
+        }
+    }
+
+    /* Check if all members acked */
+    int all_acked = 1;
+    for (size_t m = 0; m < slot->member_count; m++) {
+        if (!slot->members[m].acked) {
+            all_acked = 0;
+            break;
+        }
+    }
+    if (all_acked) {
+        CYXWIZ_INFO("All group members ACKed message");
+        pending_grp_free(slot);
+    }
+}
+
+/**
  * Handle incoming group message (called by chat module)
  */
 void cyxchat_group_handle_message(
@@ -3288,6 +3555,10 @@ void cyxchat_group_handle_message(
 
         case CYXCHAT_MSG_GROUP_KEY_ACK:
             handle_group_key_ack(ctx, from, data, len);
+            break;
+
+        case CYXCHAT_MSG_GROUP_TEXT_ACK:
+            handle_group_text_ack(ctx, from, data, len);
             break;
 
         default:
