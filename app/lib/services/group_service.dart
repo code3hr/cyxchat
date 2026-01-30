@@ -102,7 +102,6 @@ class GroupService {
     ''', [identity.nodeId]);
 
     _log.info('Restoring ${rows.length} groups to C library', source: 'GroupService');
-
     for (final row in rows) {
       final groupId = row['id'] as String;
       final name = row['name'] as String;
@@ -145,11 +144,33 @@ class GroupService {
         _log.info('Restored group $groupId (role: $role)', source: 'GroupService');
 
         // Now restore all members for this group
-        final memberRows = await db.query(
+        var memberRows = await db.query(
           'group_members',
           where: 'group_id = ?',
           whereArgs: [groupId],
         );
+
+        // Ensure creator is in group_members (fix for groups accepted before this fix)
+        if (creatorId.isNotEmpty) {
+          final creatorExists = memberRows.any((r) => r['node_id'] == creatorId);
+          if (!creatorExists) {
+            await db.insert('group_members', {
+              'group_id': groupId,
+              'node_id': creatorId,
+              'role': GroupRole.owner.index,
+              'joined_at': DateTime.now().millisecondsSinceEpoch,
+            }, conflictAlgorithm: ConflictAlgorithm.ignore);
+            _log.info('Auto-added missing creator $creatorId to group $groupId',
+                source: 'GroupService');
+            // Re-query to include the new member
+            final updatedRows = await db.query(
+              'group_members',
+              where: 'group_id = ?',
+              whereArgs: [groupId],
+            );
+            memberRows = updatedRows;
+          }
+        }
 
         _log.info('Restoring ${memberRows.length} members for group $groupId', source: 'GroupService');
 
@@ -180,8 +201,6 @@ class GroupService {
   final Set<String> _recentGroupMsgIds = {};
 
   Future<void> _handleIncomingMessage(GroupMessageReceived msg) async {
-    print("DEBUG GroupService: _handleIncomingMessage called");
-    print("DEBUG GroupService: groupId=${msg.groupId.substring(0, 8)}, from=${msg.fromNodeId.substring(0, 16)}, text=${msg.text}");
     _log.info(
         'Received group message from ${msg.fromNodeId.substring(0, 8)}...',
         source: 'GroupService');
@@ -968,7 +987,6 @@ class GroupService {
     String content, {
     String? replyToId,
   }) async {
-    print("DEBUG GroupService.sendMessage: groupId=$groupId, content=$content");
     final db = await DatabaseService.instance.database;
     final identity = IdentityService.instance.currentIdentity;
     if (identity == null) {
@@ -991,7 +1009,6 @@ class GroupService {
       }
       msgId = result.msgId!;
       status = MessageStatus.sent;
-      print("DEBUG GroupService.sendMessage: FFI success, msgId=$msgId");
     } else {
       // Fallback for testing/offline
       msgId = _uuid.v4();
@@ -1544,6 +1561,32 @@ class GroupService {
         'display_name': identity.displayName,
         'joined_at': now.millisecondsSinceEpoch,
       });
+
+      // Add the inviter (owner) as a member so we can send messages to them
+      if (invite != null && invite.inviterId.isNotEmpty) {
+        // Look up display name from contacts
+        String? inviterDisplayName;
+        final inviterContact = await db.query(
+          'contacts',
+          columns: ['display_name'],
+          where: 'node_id = ?',
+          whereArgs: [invite.inviterId],
+        );
+        if (inviterContact.isNotEmpty) {
+          inviterDisplayName = inviterContact.first['display_name'] as String?;
+        }
+
+        await db.insert('group_members', {
+          'group_id': groupId,
+          'node_id': invite.inviterId,
+          'role': GroupRole.owner.index,
+          'display_name': inviterDisplayName,
+          'joined_at': now.millisecondsSinceEpoch,
+        }, conflictAlgorithm: ConflictAlgorithm.ignore);
+
+        _log.info('Added inviter ${invite.inviterId.substring(0, 8)}... as group owner',
+            source: 'GroupService');
+      }
 
       // Create conversation entry
       await db.insert('conversations', {

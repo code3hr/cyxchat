@@ -2420,11 +2420,14 @@ cyxchat_error_t cyxchat_group_send_text(
 
         char member_hex[65];
         cyxchat_node_id_to_hex(&group->members[i].node_id, member_hex);
-        CYXWIZ_DEBUG("Sending to member %u: %.16s...", i, member_hex);
+        CYXWIZ_INFO("Sending to member %u: %s (onion peer_keys=%zu)",
+                    i, member_hex,
+                    cyxwiz_onion_peer_key_count(onion));
 
         err = cyxwiz_onion_send_to(onion, &group->members[i].node_id, wire, wire_len);
         if (err != CYXWIZ_OK) {
-            CYXWIZ_WARN("Failed to send to member %u: %d", i, err);
+            CYXWIZ_WARN("Failed to send to member %u: %d (%s)", i, err,
+                        cyxwiz_strerror(err));
             /* Continue trying other members */
         } else {
             sent_count++;
@@ -2433,17 +2436,18 @@ cyxchat_error_t cyxchat_group_send_text(
 
     CYXWIZ_INFO("Group message sent to %d/%u members", sent_count, group->member_count - 1);
 
-    /* Track for retransmission */
-    if (sent_count > 0) {
-        pending_grp_track(ctx, &msg_id, group_id, wire, wire_len, group,
-                          cyxchat_timestamp_ms());
-    }
+    /* Track for retransmission (even if no members reached yet —
+     * the retry timer will resend once peers complete key exchange) */
+    pending_grp_track(ctx, &msg_id, group_id, wire, wire_len, group,
+                      cyxchat_timestamp_ms());
 
     if (msg_id_out) {
         memcpy(msg_id_out, &msg_id, sizeof(cyxchat_msg_id_t));
     }
 
-    return (sent_count > 0) ? CYXCHAT_OK : CYXCHAT_ERR_NETWORK;
+    /* Return OK even if 0 members reached — the message is tracked for retry.
+     * This prevents the app from throwing and losing the message entirely. */
+    return CYXCHAT_OK;
 }
 
 /* ============================================================
