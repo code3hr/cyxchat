@@ -145,7 +145,7 @@ typedef struct {
 
 static const cyxchat_seed_server_t SEED_SERVERS[] = {
     /* Primary server */
-    { "129.151.146.219:7777", NULL },
+    { "129.151.146.219:7777", "87a16820981e16be773d64a49ef434cb62c233abaf1785bfb5ed25affad7640b" },
     /* Add more seed servers here as they come online:
      * { "IP:PORT", "ED25519_PUBKEY_HEX_64_CHARS" },
      */
