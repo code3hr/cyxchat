@@ -411,6 +411,21 @@ static void on_peer_discovered(cyxwiz_transport_t *transport,
         conn->last_activity = now;
     }
 
+    /* Auto-create pending connection for bootstrap-discovered peers so that
+     * relay fallback triggers if hole punch fails (e.g. hairpin NAT) */
+    if (conn && !pending && conn->state == CYXCHAT_CONN_DISCONNECTED) {
+        pending = alloc_pending(ctx);
+        if (pending) {
+            pending->peer_id = peer->id;
+            pending->callback = NULL;
+            pending->user_data = NULL;
+            pending->start_time = now;
+            pending->punch_attempts = 0;
+            set_peer_state(ctx, conn, CYXCHAT_CONN_CONNECTING);
+            CYXWIZ_INFO("Auto-created pending connection for relay fallback");
+        }
+    }
+
     /* Send discovery ANNOUNCE to initiate key exchange (with throttling) */
     if (conn && ctx->onion) {
         uint64_t elapsed = now - conn->last_announce_sent;

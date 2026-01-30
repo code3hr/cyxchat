@@ -20,6 +20,11 @@ class ChatService {
   final Map<String, String> _nativeMsgIdToLocalId = {};
   final Map<String, String> _localIdToNativeMsgId = {};
 
+  // Deduplication: track recently received messages to prevent duplicates
+  // Key: "fromNodeId:contentHash", Value: timestamp of first receipt
+  final Map<String, DateTime> _recentlyReceived = {};
+  static const _dedupWindowMs = 30000; // 30 second dedup window
+
   // ChatProvider reference (set after initialization)
   ChatProvider? _chatProvider;
 
@@ -571,6 +576,23 @@ class ChatService {
     if (parsed == null) {
       debugPrint('ChatService: Failed to parse text message');
       return;
+    }
+
+    // Deduplication: reject messages with same sender+content within window
+    final dedupKey = '${received.fromNodeId}:${parsed.text.hashCode}';
+    final now = DateTime.now();
+    final previous = _recentlyReceived[dedupKey];
+    if (previous != null &&
+        now.difference(previous).inMilliseconds < _dedupWindowMs) {
+      debugPrint('ChatService: Duplicate message suppressed from ${received.fromNodeId}');
+      return;
+    }
+    _recentlyReceived[dedupKey] = now;
+
+    // Prune old dedup entries periodically
+    if (_recentlyReceived.length > 128) {
+      _recentlyReceived.removeWhere((_, ts) =>
+          now.difference(ts).inMilliseconds > _dedupWindowMs);
     }
 
     try {

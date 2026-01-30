@@ -176,12 +176,28 @@ class GroupService {
 
 
   /// Handle incoming group message from FFI
+  // Deduplication for group messages
+  final Set<String> _recentGroupMsgIds = {};
+
   Future<void> _handleIncomingMessage(GroupMessageReceived msg) async {
     print("DEBUG GroupService: _handleIncomingMessage called");
     print("DEBUG GroupService: groupId=${msg.groupId.substring(0, 8)}, from=${msg.fromNodeId.substring(0, 16)}, text=${msg.text}");
     _log.info(
         'Received group message from ${msg.fromNodeId.substring(0, 8)}...',
         source: 'GroupService');
+
+    // Deduplication: reject messages with same native msg_id
+    if (_recentGroupMsgIds.contains(msg.msgId)) {
+      _log.info('Duplicate group message suppressed: ${msg.msgId}',
+          source: 'GroupService');
+      return;
+    }
+    _recentGroupMsgIds.add(msg.msgId);
+    if (_recentGroupMsgIds.length > 256) {
+      // Remove oldest entries (first added)
+      final toRemove = _recentGroupMsgIds.take(_recentGroupMsgIds.length - 128).toList();
+      _recentGroupMsgIds.removeAll(toRemove);
+    }
 
     final db = await DatabaseService.instance.database;
 
@@ -1500,6 +1516,25 @@ class GroupService {
         'created_at': now.millisecondsSinceEpoch,
         'updated_at': now.millisecondsSinceEpoch,
       });
+
+      // Retrieve and persist group key from C library for offline restore
+      if (_ffiProvider != null && _ffiProvider!.initialized) {
+        final keyData = _ffiProvider!.bindings.groupGetKey(groupId);
+        if (keyData != null) {
+          final (groupKey, keyVersion) = keyData;
+          await db.update(
+            'groups',
+            {'group_key_encrypted': groupKey, 'key_version': keyVersion},
+            where: 'id = ?',
+            whereArgs: [groupId],
+          );
+          _log.info('Saved group key for accepted invite $groupId (version: $keyVersion)',
+              source: 'GroupService');
+        } else {
+          _log.warning('Could not retrieve group key after accepting invite $groupId',
+              source: 'GroupService');
+        }
+      }
 
       // Add ourselves as member
       await db.insert('group_members', {
