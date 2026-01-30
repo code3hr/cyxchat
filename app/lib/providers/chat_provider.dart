@@ -234,9 +234,12 @@ class ChatProvider extends ChangeNotifier {
   bool _initialized = false;
   String? _localNodeId;
 
-  // Polling timer
+  // Polling timer with adaptive interval
   Timer? _pollTimer;
-  static const _pollInterval = Duration(milliseconds: 50);
+  static const _pollIntervalActive = Duration(milliseconds: 50);
+  static const _pollIntervalIdle = Duration(milliseconds: 500);
+  int _idlePollCount = 0;
+  static const _idleThreshold = 200; // Switch to idle after 200 empty polls (~10s)
 
   // Stream controllers
   final _messageController = StreamController<ReceivedMessage>.broadcast();
@@ -542,12 +545,32 @@ class ChatProvider extends ChangeNotifier {
 
   void _startPolling() {
     _pollTimer?.cancel();
-    _pollTimer = Timer.periodic(_pollInterval, (_) => _poll());
+    _idlePollCount = 0;
+    _pollTimer = Timer.periodic(_pollIntervalActive, (_) => _poll());
   }
 
   void _stopPolling() {
     _pollTimer?.cancel();
     _pollTimer = null;
+  }
+
+  /// Switch polling rate based on activity
+  void _adjustPollingRate(bool hadActivity) {
+    if (hadActivity) {
+      if (_idlePollCount >= _idleThreshold) {
+        // Was idle, switch back to active polling
+        _pollTimer?.cancel();
+        _pollTimer = Timer.periodic(_pollIntervalActive, (_) => _poll());
+      }
+      _idlePollCount = 0;
+    } else {
+      _idlePollCount++;
+      if (_idlePollCount == _idleThreshold) {
+        // Switch to idle polling
+        _pollTimer?.cancel();
+        _pollTimer = Timer.periodic(_pollIntervalIdle, (_) => _poll());
+      }
+    }
   }
 
   void _poll() {
@@ -557,12 +580,16 @@ class ChatProvider extends ChangeNotifier {
     _bindings.chatPoll(now);
 
     // Process all queued messages
+    bool hadMessages = false;
     while (true) {
       final msg = _bindings.chatRecvNext();
       if (msg == null) break;
 
+      hadMessages = true;
       _processReceivedMessage(msg);
     }
+
+    _adjustPollingRate(hadMessages);
   }
 
   void _processReceivedMessage(Map<String, dynamic> msg) {

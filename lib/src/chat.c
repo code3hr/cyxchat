@@ -233,6 +233,7 @@ static void pending_track(
     slot->wire_data = (uint8_t *)malloc(wire_len);
     if (!slot->wire_data) {
         CYXWIZ_WARN("Failed to allocate pending message buffer");
+        slot->active = 0;  /* Ensure slot is not left in active state */
         return;
     }
 

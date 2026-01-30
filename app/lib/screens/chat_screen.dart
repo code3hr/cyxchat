@@ -260,13 +260,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       await connectionProvider.connect(peerId);
 
       // Wait for key exchange to complete (up to 5 seconds)
+      // Uses increasing delays to avoid blocking UI thread with tight polling
       int waited = 0;
       const maxWait = 5000;
-      const checkInterval = 100;
+      int checkInterval = 200;
 
       while (!connectionProvider.hasPeerKey(peerId) && waited < maxWait) {
-        await Future.delayed(const Duration(milliseconds: checkInterval));
+        await Future.delayed(Duration(milliseconds: checkInterval));
         waited += checkInterval;
+        if (checkInterval < 800) checkInterval = (checkInterval * 1.5).toInt();
       }
 
       if (!connectionProvider.hasPeerKey(peerId)) {

@@ -221,6 +221,7 @@ CYXWIZ_MAYBE_UNUSED static uint8_t* encrypt_file_data(
     cyxwiz_crypto_random(nonce_out, 24);
 
     /* Allocate buffer for encrypted data (plaintext + 16 bytes auth tag) */
+    if (plaintext_len > SIZE_MAX - 16) return NULL;
     size_t encrypted_len = plaintext_len + 16;
     uint8_t *encrypted = malloc(encrypted_len);
     if (!encrypted) return NULL;
@@ -712,6 +713,11 @@ cyxchat_error_t cyxchat_file_send(
 
     /* For direct mode with large files, we need more than uint16_t can hold
      * Use uint32_t for calculation, but cap at uint16_t max for protocol */
+    /* Safe: data_len already bounded by max_file_size check above */
+    if (data_len > (size_t)(UINT32_MAX - chunk_size)) {
+        CYXWIZ_ERROR("cyxchat_file_send: data_len too large for chunk calc");
+        return CYXCHAT_ERR_FILE_TOO_LARGE;
+    }
     uint32_t chunk_count_32 = (uint32_t)((data_len + chunk_size - 1) / chunk_size);
     if (chunk_count_32 > 65535) {
         CYXWIZ_ERROR("cyxchat_file_send: too many chunks (%u)", chunk_count_32);

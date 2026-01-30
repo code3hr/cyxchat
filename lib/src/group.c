@@ -308,6 +308,7 @@ static void pending_grp_track(
     slot->wire_data = (uint8_t *)malloc(wire_len);
     if (!slot->wire_data) {
         CYXWIZ_WARN("Failed to allocate pending group message buffer");
+        slot->active = 0;  /* Ensure slot is not left in active state */
         return;
     }
 
@@ -1995,6 +1996,7 @@ cyxchat_error_t cyxchat_group_accept_invite(
 
     if (err != CYXWIZ_OK || key_len != 32) {
         CYXWIZ_ERROR("Failed to decrypt group key: %d", err);
+        cyxwiz_secure_zero(decrypted_key, 32);
         return CYXCHAT_ERR_CRYPTO;
     }
 
@@ -2949,6 +2951,7 @@ static void handle_group_text(
             memcpy(payload + 99, msg.text, text_len);
             payload[99 + text_len] = 0;
             ctx->on_message(ctx, &group_id, &sender_id, payload, ctx->on_message_data);
+            free(payload);
         }
     }
 

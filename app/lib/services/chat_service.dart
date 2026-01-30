@@ -226,19 +226,19 @@ class ChatService {
       isOutgoing: true,
     );
 
-    // Save to database
+    // Save to database (transaction ensures atomicity of insert + update)
     try {
-      await db.insert('messages', message.toMap());
-
-      // Update conversation
-      await db.update(
-        'conversations',
-        {
-          'last_activity_at': message.timestamp.millisecondsSinceEpoch,
-        },
-        where: 'id = ?',
-        whereArgs: [conversationId],
-      );
+      await db.transaction((txn) async {
+        await txn.insert('messages', message.toMap());
+        await txn.update(
+          'conversations',
+          {
+            'last_activity_at': message.timestamp.millisecondsSinceEpoch,
+          },
+          where: 'id = ?',
+          whereArgs: [conversationId],
+        );
+      });
     } catch (e) {
       debugPrint('ChatService: Database error saving message: $e');
       return message.copyWith(status: MessageStatus.failed);
@@ -593,19 +593,19 @@ class ChatService {
         isOutgoing: false,
       );
 
-      // Save to database
-      await db.insert('messages', message.toMap());
-
-      // Update conversation
-      await db.update(
-        'conversations',
-        {
-          'last_activity_at': message.timestamp.millisecondsSinceEpoch,
-          'unread_count': conversation.unreadCount + 1,
-        },
-        where: 'id = ?',
-        whereArgs: [conversation.id],
-      );
+      // Save to database (transaction ensures atomicity)
+      await db.transaction((txn) async {
+        await txn.insert('messages', message.toMap());
+        await txn.update(
+          'conversations',
+          {
+            'last_activity_at': message.timestamp.millisecondsSinceEpoch,
+            'unread_count': conversation.unreadCount + 1,
+          },
+          where: 'id = ?',
+          whereArgs: [conversation.id],
+        );
+      });
 
       // Emit to stream
       _messageController.add(message);
