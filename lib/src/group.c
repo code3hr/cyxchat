@@ -2819,6 +2819,7 @@ static void handle_group_text(
     const uint8_t *data,
     size_t len
 ) {
+    (void)from;
     /* Parse wire format */
     uint8_t type;
     uint16_t flags;
@@ -2889,7 +2890,7 @@ static void handle_group_text(
     }
 
     uint16_t text_len = plaintext[0] | ((uint16_t)plaintext[1] << 8);
-    if (pt_len < 2 + text_len) {
+    if (pt_len < (size_t)(2 + text_len)) {
         CYXWIZ_WARN("Invalid text length in group message");
         return;
     }
@@ -2913,7 +2914,7 @@ static void handle_group_text(
     }
 
     /* Parse reply_to if present */
-    if ((flags & CYXCHAT_FLAG_REPLY) && pt_len >= 2 + text_len + CYXCHAT_MSG_ID_SIZE) {
+    if ((flags & CYXCHAT_FLAG_REPLY) && pt_len >= (size_t)(2 + text_len + CYXCHAT_MSG_ID_SIZE)) {
         memcpy(&msg.reply_to, plaintext + 2 + text_len, CYXCHAT_MSG_ID_SIZE);
     }
 
@@ -2984,6 +2985,7 @@ static void handle_group_invite(
     const uint8_t *data,
     size_t len
 ) {
+    (void)from;
     /* Parse invite wire format */
     cyxchat_msg_id_t msg_id;
     cyxwiz_node_id_t inviter_id;
@@ -3057,6 +3059,7 @@ static void handle_group_join(
     const uint8_t *data,
     size_t len
 ) {
+    (void)from;
     /* Parse join wire format */
     cyxchat_group_id_t group_id;
     cyxwiz_node_id_t member_id;
@@ -3130,6 +3133,7 @@ static void handle_group_leave(
     const uint8_t *data,
     size_t len
 ) {
+    (void)from;
     /* Parse leave wire format */
     cyxchat_group_id_t group_id;
     cyxwiz_node_id_t member_id;
@@ -3198,6 +3202,7 @@ static void handle_group_kick(
     const uint8_t *data,
     size_t len
 ) {
+    (void)from;
     /* Parse kick wire format */
     cyxchat_group_id_t group_id;
     cyxwiz_node_id_t kicked_member;
@@ -3283,6 +3288,7 @@ static void handle_group_key(
     const uint8_t *data,
     size_t len
 ) {
+    (void)from;
     /* Parse GROUP_KEY wire format */
     cyxchat_group_id_t group_id;
     uint32_t key_version;
@@ -3419,6 +3425,7 @@ static void handle_group_key_ack(
     const uint8_t *data,
     size_t len
 ) {
+    (void)from;
     /* Parse GROUP_KEY_ACK wire format */
     cyxchat_group_id_t group_id;
     uint32_t key_version;
@@ -5780,10 +5787,11 @@ cyxchat_error_t cyxchat_group_get_media(
         CYXWIZ_ERROR("Group not found"); return CYXCHAT_ERR_NOT_FOUND;
     }
 
-    // TODO: Implement media gallery query
-    // This requires a media storage system to be implemented
-    // For now, return empty
+    (void)media_type;
+    (void)max_media;
+    (void)offset;
 
+    // TODO: Implement media gallery query
     *count_out = 0;
     return CYXCHAT_OK;
 }
@@ -5793,6 +5801,7 @@ size_t cyxchat_group_get_media_count(
     const cyxchat_group_id_t *group_id,
     int media_type
 ) {
+    (void)media_type;
     if (!ctx || !group_id) {
         return 0;
     }

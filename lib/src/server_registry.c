@@ -239,6 +239,7 @@ static cyxchat_server_entry_t* find_server(cyxchat_server_registry_t *reg, const
 }
 
 /* Find server by IP:port (network byte order) */
+__attribute__((unused))
 static cyxchat_server_entry_t* find_server_by_endpoint(cyxchat_server_registry_t *reg,
                                                          uint32_t ip, uint16_t port)
 {

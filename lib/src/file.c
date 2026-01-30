@@ -60,6 +60,14 @@ typedef struct {
 /* Forward declare connection context for peer address exchange */
 typedef struct cyxchat_conn_ctx cyxchat_conn_ctx_t;
 
+/* Forward declare send_file_ack */
+static cyxchat_error_t send_file_ack(
+    cyxchat_file_ctx_t *ctx,
+    const cyxwiz_node_id_t *to,
+    const cyxchat_file_id_t *file_id,
+    file_transfer_slot_t *slot,
+    int complete);
+
 /* Peer address message (sent via onion, contains public IP:port) */
 typedef struct {
     uint8_t type;                           /* CYXCHAT_MSG_PEER_ADDR (0x60) */
