@@ -492,6 +492,12 @@ static void send_next_chunk(cyxchat_file_ctx_t *ctx, file_transfer_slot_t *slot)
 
     /* Calculate chunk data offset and length based on mode */
     size_t offset = (size_t)chunk_idx * chunk_size;
+    if (offset >= slot->transfer.meta.size) {
+        CYXWIZ_ERROR("send_next_chunk: offset out of bounds (%zu >= %u)",
+                     offset, slot->transfer.meta.size);
+        free(chunk_buf);
+        return;
+    }
     size_t remaining = slot->transfer.meta.size - offset;
     uint16_t chunk_len = (remaining > chunk_size) ? (uint16_t)chunk_size : (uint16_t)remaining;
 
@@ -1367,6 +1373,7 @@ static cyxchat_error_t handle_file_meta(
 
     /* Filename */
     uint8_t fname_len = data[offset++];
+    if (fname_len >= CYXCHAT_MAX_FILENAME) return CYXCHAT_ERR_INVALID;
     if (offset + fname_len > data_len) return CYXCHAT_ERR_INVALID;
     char filename[CYXCHAT_MAX_FILENAME] = {0};
     memcpy(filename, data + offset, fname_len);
@@ -1375,6 +1382,7 @@ static cyxchat_error_t handle_file_meta(
     /* MIME type */
     if (offset >= data_len) return CYXCHAT_ERR_INVALID;
     uint8_t mime_len = data[offset++];
+    if (mime_len >= 64) return CYXCHAT_ERR_INVALID;
     if (offset + mime_len > data_len) return CYXCHAT_ERR_INVALID;
     char mime_type[64] = {0};
     memcpy(mime_type, data + offset, mime_len);
@@ -1432,6 +1440,13 @@ static cyxchat_error_t handle_file_meta(
         slot->chunk_size = (size + chunk_count - 1) / chunk_count;
     } else {
         slot->chunk_size = CYXCHAT_CHUNK_SIZE;  /* Fallback */
+    }
+
+    /* Validate file size before allocation */
+    if (size == 0 || size > CYXCHAT_DIRECT_MAX_FILE) {
+        CYXWIZ_ERROR("handle_file_meta: invalid file size %u", size);
+        free_transfer(ctx, slot);
+        return CYXCHAT_ERR_FILE_TOO_LARGE;
     }
 
     /* Pre-allocate receive buffer for auto-accept */
@@ -1514,6 +1529,13 @@ static cyxchat_error_t handle_file_chunk(
             slot->data_capacity = slot->transfer.meta.size;
         }
         slot->transfer.state = CYXCHAT_FILE_RECEIVING;
+    }
+
+    /* Validate chunk index */
+    if (chunk_idx >= slot->transfer.meta.chunk_count) {
+        CYXWIZ_WARN("handle_file_chunk: chunk_idx %u >= chunk_count %u",
+                    chunk_idx, slot->transfer.meta.chunk_count);
+        return CYXCHAT_ERR_INVALID;
     }
 
     /* Copy chunk data to buffer using the calculated chunk_size */

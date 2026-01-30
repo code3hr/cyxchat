@@ -344,10 +344,12 @@ class CyxChatBindings {
 
     try {
       if (replyToHex != null) {
+        final replyHexPtr = replyToHex.toNativeUtf8();
         final parseResult = _native.cyxchat_msg_id_from_hex(
-          replyToHex.toNativeUtf8().cast(),
+          replyHexPtr.cast(),
           replyToPtr,
         );
+        calloc.free(replyHexPtr);
         if (parseResult != 0) return null;
       }
 
@@ -380,15 +382,17 @@ class CyxChatBindings {
     if (_chatCtx == null) return CyxChatError.errNull;
 
     final msgIdPtr = calloc<Uint8>(8);
+    final hexPtr = msgIdHex.toNativeUtf8();
     try {
       final parseResult = _native.cyxchat_msg_id_from_hex(
-        msgIdHex.toNativeUtf8().cast(),
+        hexPtr.cast(),
         msgIdPtr,
       );
       if (parseResult != 0) return parseResult;
 
       return _native.cyxchat_send_ack(_chatCtx!, to, msgIdPtr, status);
     } finally {
+      calloc.free(hexPtr);
       calloc.free(msgIdPtr);
     }
   }
@@ -410,9 +414,10 @@ class CyxChatBindings {
 
     final msgIdPtr = calloc<Uint8>(8);
     final reactionPtr = reaction.toNativeUtf8();
+    final hexPtr = msgIdHex.toNativeUtf8();
     try {
       final parseResult = _native.cyxchat_msg_id_from_hex(
-        msgIdHex.toNativeUtf8().cast(),
+        hexPtr.cast(),
         msgIdPtr,
       );
       if (parseResult != 0) return parseResult;
@@ -425,6 +430,7 @@ class CyxChatBindings {
         remove ? 1 : 0,
       );
     } finally {
+      calloc.free(hexPtr);
       calloc.free(msgIdPtr);
       calloc.free(reactionPtr);
     }
@@ -435,15 +441,17 @@ class CyxChatBindings {
     if (_chatCtx == null) return CyxChatError.errNull;
 
     final msgIdPtr = calloc<Uint8>(8);
+    final hexPtr = msgIdHex.toNativeUtf8();
     try {
       final parseResult = _native.cyxchat_msg_id_from_hex(
-        msgIdHex.toNativeUtf8().cast(),
+        hexPtr.cast(),
         msgIdPtr,
       );
       if (parseResult != 0) return parseResult;
 
       return _native.cyxchat_send_delete(_chatCtx!, to, msgIdPtr);
     } finally {
+      calloc.free(hexPtr);
       calloc.free(msgIdPtr);
     }
   }
@@ -454,9 +462,10 @@ class CyxChatBindings {
 
     final msgIdPtr = calloc<Uint8>(8);
     final textPtr = newText.toNativeUtf8();
+    final hexPtr = msgIdHex.toNativeUtf8();
     try {
       final parseResult = _native.cyxchat_msg_id_from_hex(
-        msgIdHex.toNativeUtf8().cast(),
+        hexPtr.cast(),
         msgIdPtr,
       );
       if (parseResult != 0) return parseResult;
@@ -469,6 +478,7 @@ class CyxChatBindings {
         newText.length,
       );
     } finally {
+      calloc.free(hexPtr);
       calloc.free(msgIdPtr);
       calloc.free(textPtr);
     }
@@ -1258,10 +1268,12 @@ class CyxChatBindings {
       if (parseResult != 0) return null;
 
       if (replyToHex != null) {
+        final replyHexPtr = replyToHex.toNativeUtf8();
         parseResult = _native.cyxchat_msg_id_from_hex(
-          replyToHex.toNativeUtf8().cast(),
+          replyHexPtr.cast(),
           replyToPtr,
         );
+        calloc.free(replyHexPtr);
         if (parseResult != 0) return null;
       }
 

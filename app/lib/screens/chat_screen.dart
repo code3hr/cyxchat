@@ -62,12 +62,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   void _setupMessageListener() {
     ref.listen<AsyncValue<Message>>(messageStreamProvider, (previous, next) {
       next.whenData((message) {
-        // Refresh if message is for this conversation
+        // Only refresh if message is for this conversation
         if (message.conversationId == widget.conversationId) {
           ref.invalidate(messagesProvider(widget.conversationId));
+          ref.invalidate(conversationsProvider);
         }
-        // Also refresh conversation list for unread count
-        ref.invalidate(conversationsProvider);
       });
     });
   }

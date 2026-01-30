@@ -227,17 +227,22 @@ class ChatService {
     );
 
     // Save to database
-    await db.insert('messages', message.toMap());
+    try {
+      await db.insert('messages', message.toMap());
 
-    // Update conversation
-    await db.update(
-      'conversations',
-      {
-        'last_activity_at': message.timestamp.millisecondsSinceEpoch,
-      },
-      where: 'id = ?',
-      whereArgs: [conversationId],
-    );
+      // Update conversation
+      await db.update(
+        'conversations',
+        {
+          'last_activity_at': message.timestamp.millisecondsSinceEpoch,
+        },
+        where: 'id = ?',
+        whereArgs: [conversationId],
+      );
+    } catch (e) {
+      debugPrint('ChatService: Database error saving message: $e');
+      return message.copyWith(status: MessageStatus.failed);
+    }
 
     // Try to send via native chat (only for text messages - files use FileProvider)
     Message resultMessage;
@@ -568,50 +573,52 @@ class ChatService {
       return;
     }
 
-    final db = await DatabaseService.instance.database;
+    try {
+      final db = await DatabaseService.instance.database;
 
-    // Get or create conversation with sender
-    final conversation = await getOrCreateDirectConversation(received.fromNodeId);
+      // Get or create conversation with sender
+      final conversation = await getOrCreateDirectConversation(received.fromNodeId);
 
-    // Create message
-    final message = Message(
-      id: _uuid.v4(),
-      conversationId: conversation.id,
-      senderId: received.fromNodeId,
-      content: parsed.text,
-      timestamp: received.receivedAt,
-      status: MessageStatus.delivered,
-      replyToId: parsed.replyToMsgId != null
-          ? _nativeMsgIdToLocalId[parsed.replyToMsgId]
-          : null,
-      isOutgoing: false,
-    );
+      // Create message
+      final message = Message(
+        id: _uuid.v4(),
+        conversationId: conversation.id,
+        senderId: received.fromNodeId,
+        content: parsed.text,
+        timestamp: received.receivedAt,
+        status: MessageStatus.delivered,
+        replyToId: parsed.replyToMsgId != null
+            ? _nativeMsgIdToLocalId[parsed.replyToMsgId]
+            : null,
+        isOutgoing: false,
+      );
 
-    // Save to database
-    await db.insert('messages', message.toMap());
+      // Save to database
+      await db.insert('messages', message.toMap());
 
-    // Update conversation
-    await db.update(
-      'conversations',
-      {
-        'last_activity_at': message.timestamp.millisecondsSinceEpoch,
-        'unread_count': conversation.unreadCount + 1,
-      },
-      where: 'id = ?',
-      whereArgs: [conversation.id],
-    );
+      // Update conversation
+      await db.update(
+        'conversations',
+        {
+          'last_activity_at': message.timestamp.millisecondsSinceEpoch,
+          'unread_count': conversation.unreadCount + 1,
+        },
+        where: 'id = ?',
+        whereArgs: [conversation.id],
+      );
 
-    // Emit to stream
-    _messageController.add(message);
+      // Emit to stream
+      _messageController.add(message);
 
-    // Update sender's presence to online (they're actively messaging)
-    await _updateSenderPresence(received.fromNodeId);
+      // Update sender's presence to online (they're actively messaging)
+      await _updateSenderPresence(received.fromNodeId);
 
-    // Send ACK back to sender
-    if (_chatProvider != null) {
-      // Need native msg ID to ACK - but we don't have it from the wire format
-      // The native layer should handle ACK automatically via callback
-      debugPrint('ChatService: Received message from ${received.fromNodeId}: ${parsed.text}');
+      // Send ACK back to sender
+      if (_chatProvider != null) {
+        debugPrint('ChatService: Received message from ${received.fromNodeId}: ${parsed.text}');
+      }
+    } catch (e) {
+      debugPrint('ChatService: Error handling incoming message: $e');
     }
   }
 

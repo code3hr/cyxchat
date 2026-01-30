@@ -533,14 +533,20 @@ static size_t serialize_lookup(const char *name, uint8_t query_id,
 static size_t serialize_response(uint8_t query_id, const cyxchat_dns_record_t *record,
                                   uint8_t *out, size_t out_len)
 {
-    (void)out_len; /* TODO: Add bounds checking */
     size_t offset = 0;
 
+    /* Minimum: type(1) + query_id(1) + found(1) = 3 bytes
+     * With record: + node_id(32) + pubkey(32) + signature(64) + ttl(4) + name_len(1) + name(N) */
+    if (out_len < 3) return 0;
     out[offset++] = CYXCHAT_MSG_DNS_RESPONSE;
     out[offset++] = query_id;
     out[offset++] = record ? 1 : 0;
 
     if (record) {
+        size_t name_len = strlen(record->name);
+        size_t needed = offset + 32 + 32 + 64 + 4 + 1 + name_len;
+        if (needed > out_len) return 0;
+
         memcpy(out + offset, record->node_id.bytes, 32);
         offset += 32;
 
@@ -558,7 +564,6 @@ static size_t serialize_response(uint8_t query_id, const cyxchat_dns_record_t *r
         out[offset++] = (uint8_t)(ttl);
 
         /* Name */
-        size_t name_len = strlen(record->name);
         out[offset++] = (uint8_t)name_len;
         memcpy(out + offset, record->name, name_len);
         offset += name_len;

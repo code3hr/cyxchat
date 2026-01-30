@@ -1004,12 +1004,10 @@ static void on_onion_delivery(
             /* Route to group module if registered */
             if (ctx->group_ctx) {
                 CYXWIZ_INFO("Routing group message (type=0x%02x) to group module", type);
-                { FILE *dbg = fopen("group_debug.log", "a"); if (dbg) { fprintf(dbg, "chat.c: routing type=0x%02x ctx=%p\n", type, (void*)ctx->group_ctx); fclose(dbg); } }
                 /* Pass full message data (group module handles wire format) */
                 cyxchat_group_handle_message(ctx->group_ctx, actual_sender, type, data, len);
             } else {
                 CYXWIZ_WARN("Received group message but no group context registered");
-                { FILE *dbg = fopen("group_debug.log", "a"); if (dbg) { fprintf(dbg, "chat.c: NO GROUP CTX\n"); fclose(dbg); } }
             }
             break;
 
