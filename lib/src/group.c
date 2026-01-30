@@ -3458,6 +3458,7 @@ static void handle_group_text_ack(
     const uint8_t *data,
     size_t len
 ) {
+    (void)from;
     /* Wire format: type(1) + flags(1) + msg_id(8) + sender_id(32) + group_id(8) = 50 */
     if (len < 50) {
         CYXWIZ_WARN("GROUP_TEXT_ACK too short: %zu", len);
