@@ -178,6 +178,12 @@ class ConnectionActions {
     }
     log.info('Connection initialized - STUN discovery starting', source: 'Network');
 
+    // Configure relay server (same as bootstrap) for NAT fallback
+    if (bootstrap.isNotEmpty) {
+      connectionProvider.addRelayServer(bootstrap);
+      log.info('Relay server configured: $bootstrap', source: 'Network');
+    }
+
     // Initialize DNS with the same identity
     // Note: DNS will use node ID for identification without signing for now
     // Full signing key support can be added when identity includes Ed25519 keys
