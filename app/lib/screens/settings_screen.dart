@@ -1661,8 +1661,6 @@ class _ServerRegistryStatus extends ConsumerWidget {
     final connProvider = ref.watch(connectionNotifierProvider);
     final servers = connProvider.getServersInfo();
 
-    if (servers.isEmpty) return const SizedBox.shrink();
-
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
       child: Container(
@@ -1679,54 +1677,188 @@ class _ServerRegistryStatus extends ConsumerWidget {
               children: [
                 const Icon(Icons.dns_rounded, size: 14, color: AppColors.textDarkSecondary),
                 const SizedBox(width: 6),
-                Text(
-                  'Servers (${connProvider.healthyServerCount}/${connProvider.serverCount} healthy)',
-                  style: const TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.textDarkSecondary,
+                Expanded(
+                  child: Text(
+                    servers.isEmpty
+                        ? 'Servers'
+                        : 'Servers (${connProvider.healthyServerCount}/${connProvider.serverCount} healthy)',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textDarkSecondary,
+                    ),
+                  ),
+                ),
+                InkWell(
+                  onTap: () => _showAddServerDialog(context, ref),
+                  borderRadius: BorderRadius.circular(12),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: AppColors.accent.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.add, size: 12, color: AppColors.accent),
+                        SizedBox(width: 2),
+                        Text(
+                          'Add',
+                          style: TextStyle(fontSize: 10, color: AppColors.accent, fontWeight: FontWeight.w600),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 8),
-            ...servers.map((s) {
-              final isHealthy = s['is_healthy'] as bool;
-              final state = s['state'] as String;
-              final latency = s['avg_latency_ms'] as int;
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 4),
-                child: Row(
-                  children: [
-                    Icon(
-                      isHealthy ? Icons.check_circle : Icons.radio_button_unchecked,
-                      size: 12,
-                      color: isHealthy ? AppColors.accentGreen : AppColors.textDarkSecondary,
-                    ),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        s['addr'] as String,
-                        style: const TextStyle(
-                          fontSize: 11,
-                          fontFamily: 'monospace',
-                          color: AppColors.textDark,
-                        ),
-                      ),
-                    ),
-                    Text(
-                      latency > 0 ? '${latency}ms' : state,
-                      style: TextStyle(
-                        fontSize: 10,
+            if (servers.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              ...servers.map((s) {
+                final isHealthy = s['is_healthy'] as bool;
+                final state = s['state'] as String;
+                final latency = s['avg_latency_ms'] as int;
+                final isSeed = s['is_seed'] as bool;
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 4),
+                  child: Row(
+                    children: [
+                      Icon(
+                        isHealthy ? Icons.check_circle : Icons.radio_button_unchecked,
+                        size: 12,
                         color: isHealthy ? AppColors.accentGreen : AppColors.textDarkSecondary,
                       ),
-                    ),
-                  ],
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          s['addr'] as String,
+                          style: const TextStyle(
+                            fontSize: 11,
+                            fontFamily: 'monospace',
+                            color: AppColors.textDark,
+                          ),
+                        ),
+                      ),
+                      if (isSeed)
+                        Container(
+                          margin: const EdgeInsets.only(right: 6),
+                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: AppColors.accent.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: const Text(
+                            'SEED',
+                            style: TextStyle(fontSize: 8, color: AppColors.accent, fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                      Text(
+                        latency > 0 ? '${latency}ms' : state,
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: isHealthy ? AppColors.accentGreen : AppColors.textDarkSecondary,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }),
+            ] else
+              const Padding(
+                padding: EdgeInsets.only(top: 6),
+                child: Text(
+                  'No servers registered',
+                  style: TextStyle(fontSize: 11, color: AppColors.textDarkSecondary),
                 ),
-              );
-            }),
+              ),
           ],
         ),
+      ),
+    );
+  }
+
+  void _showAddServerDialog(BuildContext context, WidgetRef ref) {
+    final controller = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppColors.bgDarkSecondary,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: AppColors.accent.withOpacity(0.15),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Icon(Icons.add_circle_outline, color: AppColors.accent, size: 20),
+            ),
+            const SizedBox(width: 12),
+            const Expanded(child: Text('Add Server')),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Enter the address of a CyxChat server (ip:port).',
+              style: TextStyle(fontSize: 13, color: AppColors.textDarkSecondary),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: controller,
+              autofocus: true,
+              decoration: InputDecoration(
+                hintText: '192.168.1.100:7777',
+                hintStyle: TextStyle(color: AppColors.textDarkSecondary.withOpacity(0.5)),
+                filled: true,
+                fillColor: AppColors.bgDarkTertiary,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
+                prefixIcon: const Icon(Icons.dns_rounded, size: 18),
+              ),
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 14),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final addr = controller.text.trim();
+              if (addr.isEmpty || !addr.contains(':')) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: const Text('Enter a valid address (ip:port)'),
+                    behavior: SnackBarBehavior.floating,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                );
+                return;
+              }
+              final result = ref.read(connectionNotifierProvider).addServer(addr);
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(result == 0 ? 'Server added: $addr' : 'Failed to add server'),
+                  behavior: SnackBarBehavior.floating,
+                  backgroundColor: result == 0 ? AppColors.accentGreen : AppColors.error,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+              );
+            },
+            child: const Text('Add'),
+          ),
+        ],
       ),
     );
   }
