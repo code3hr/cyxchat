@@ -175,7 +175,8 @@ static int alloc_chunk_bitmap(file_transfer_slot_t *slot, uint16_t chunk_count) 
 }
 
 static void set_chunk_received(file_transfer_slot_t *slot, uint16_t idx) {
-    if (slot->chunk_bitmap && idx < slot->transfer.meta.chunk_count) {
+    if (slot->chunk_bitmap && idx < slot->transfer.meta.chunk_count &&
+        (idx / 8) < slot->bitmap_size) {
         slot->chunk_bitmap[idx / 8] |= (1 << (idx % 8));
     }
 }
@@ -645,9 +646,11 @@ int cyxchat_file_poll(cyxchat_file_ctx_t *ctx, uint64_t now_ms) {
         /* Check for stalled transfers (timeout depends on mode) */
         if (slot->transfer.state == CYXCHAT_FILE_SENDING ||
             slot->transfer.state == CYXCHAT_FILE_RECEIVING) {
+            /* Read once to avoid TOCTOU race */
+            uint64_t updated_at = slot->transfer.updated_at;
             /* Guard against clock skew: if updated_at is in the future, skip timeout check */
-            if (now_ms > slot->transfer.updated_at) {
-                uint64_t elapsed = now_ms - slot->transfer.updated_at;
+            if (now_ms > updated_at) {
+                uint64_t elapsed = now_ms - updated_at;
                 /* Direct mode: 5 minute timeout (large files take time)
                  * Onion mode: 60 second timeout, but extend if ACK retry in progress */
                 uint64_t timeout_ms = (ctx->use_direct_mode && ctx->router) ? 300000 : 60000;

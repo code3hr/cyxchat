@@ -501,6 +501,7 @@ static size_t deserialize_group_text(
     size_t enc_len = in[offset] | ((size_t)in[offset + 1] << 8);
     offset += 2;
 
+    if (enc_len > CYXCHAT_MAX_TEXT_LEN + 40) return 0;  /* Sanity: text + crypto overhead */
     if (len < offset + enc_len) return 0;  /* Truncated */
 
     *encrypted_out = in + offset;
@@ -611,9 +612,9 @@ static size_t deserialize_group_invite(
     memcpy(group_id_out->bytes, in + offset, CYXCHAT_GROUP_ID_SIZE);
     offset += CYXCHAT_GROUP_ID_SIZE;
 
-    /* Group name */
-    memcpy(group_name_out, in + offset, CYXCHAT_MAX_DISPLAY_NAME);
-    group_name_out[CYXCHAT_MAX_DISPLAY_NAME - 1] = '\0';
+    /* Group name - zero first to ensure null termination */
+    memset(group_name_out, 0, CYXCHAT_MAX_DISPLAY_NAME);
+    memcpy(group_name_out, in + offset, CYXCHAT_MAX_DISPLAY_NAME - 1);
     offset += CYXCHAT_MAX_DISPLAY_NAME;
 
     /* Key version (big-endian) */
@@ -1167,7 +1168,11 @@ static cyxchat_error_t send_key_to_member(
 
     /* Get our X25519 keypair from onion context */
     uint8_t our_pubkey[32];
-    cyxwiz_onion_get_pubkey(onion, our_pubkey);
+    cyxwiz_error_t pk_err = cyxwiz_onion_get_pubkey(onion, our_pubkey);
+    if (pk_err != CYXWIZ_OK) {
+        CYXWIZ_WARN("Failed to get onion pubkey for key distribution");
+        return CYXCHAT_ERR_CRYPTO;
+    }
 
     /* Compute shared secret via X25519 ECDH */
     uint8_t shared_secret[32];
@@ -2932,6 +2937,10 @@ static void handle_group_text(
     if (ctx->on_message) {
         /* groupid(16) + : + senderid(64) + : + msgid(16) + : + text + NUL */
         size_t payload_len = 16 + 1 + 64 + 1 + 16 + 1 + text_len + 1;
+        if (payload_len > CYXCHAT_MAX_TEXT_LEN + 128) {
+            CYXWIZ_WARN("Group message payload too large: %zu", payload_len);
+            return;
+        }
         char *payload = (char *)malloc(payload_len);
         if (payload) {
             int pi;
