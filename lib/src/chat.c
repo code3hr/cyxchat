@@ -869,7 +869,16 @@ static void on_onion_delivery(
     /* Check for duplicate messages (can arrive via both direct and relay paths) */
     uint64_t now_ms = cyxchat_timestamp_ms();
     if (!is_file_msg && is_duplicate_msg(ctx, actual_sender, &msg_id, now_ms)) {
+        /* Still send ACK for duplicates so sender stops retransmitting */
+        if (type == CYXCHAT_MSG_TEXT) {
+            cyxchat_send_ack(ctx, actual_sender, &msg_id, CYXCHAT_STATUS_DELIVERED);
+        }
         return;  /* Duplicate - already processed */
+    }
+
+    /* Auto-ACK text messages on receipt */
+    if (type == CYXCHAT_MSG_TEXT) {
+        cyxchat_send_ack(ctx, actual_sender, &msg_id, CYXCHAT_STATUS_DELIVERED);
     }
 
     /* Non-fragmented message - convert to 2-byte length format for TEXT messages */
