@@ -30,15 +30,17 @@ extern "C" {
 #define CYXCHAT_HEALTH_TIMEOUT_MS        5000    /* 5s ping timeout */
 #define CYXCHAT_SERVER_UNHEALTHY_COUNT   3       /* Missed pongs before unhealthy */
 #define CYXCHAT_SERVER_VERIFY_TIMEOUT_MS 10000   /* 10s verification timeout */
+#define CYXCHAT_SERVER_VERIFY_MAX_RETRIES 3      /* Max challenge retries */
 
 /* ============================================================
- * Server Registry Message Types (0xF5-0xFA)
+ * Server Registry Message Types (0xA0-0xA3)
+ * NOTE: 0xF0-0xF8 are reserved by UDP transport layer
  * ============================================================ */
 
-#define CYXCHAT_MSG_SERVER_HEALTH_PING      0xF5    /* Health ping */
-#define CYXCHAT_MSG_SERVER_HEALTH_PONG      0xF6    /* Health pong (echo) */
-#define CYXCHAT_MSG_SERVER_CHALLENGE        0xF9    /* Verification challenge */
-#define CYXCHAT_MSG_SERVER_CHALLENGE_RESP   0xFA    /* Challenge response */
+#define CYXCHAT_MSG_SERVER_HEALTH_PING      0xA0    /* Health ping */
+#define CYXCHAT_MSG_SERVER_HEALTH_PONG      0xA1    /* Health pong (echo) */
+#define CYXCHAT_MSG_SERVER_CHALLENGE        0xA2    /* Verification challenge */
+#define CYXCHAT_MSG_SERVER_CHALLENGE_RESP   0xA3    /* Challenge response */
 
 /* ============================================================
  * Server State

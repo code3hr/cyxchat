@@ -56,6 +56,7 @@ typedef struct {
     uint8_t  challenge_nonce[CYXCHAT_SERVER_NONCE_SIZE]; /* Active challenge */
     uint64_t challenge_sent_at;                     /* When challenge was sent */
     int      challenge_active;                      /* 1 if waiting for response */
+    uint8_t  challenge_retries;                     /* Number of retries so far */
 
     /* Flags */
     int      is_seed;
@@ -465,10 +466,18 @@ int cyxchat_server_registry_poll(cyxchat_server_registry_t *reg, uint64_t now_ms
         /* Check verification timeout */
         if (srv->state == CYXCHAT_SERVER_VERIFYING && srv->challenge_active) {
             if (now_ms - srv->challenge_sent_at > CYXCHAT_SERVER_VERIFY_TIMEOUT_MS) {
-                CYXWIZ_WARN("Server %s: verification timed out", srv->addr);
                 srv->challenge_active = 0;
-                /* Retry verification */
-                send_challenge(reg, srv);
+                srv->challenge_retries++;
+                if (srv->challenge_retries >= CYXCHAT_SERVER_VERIFY_MAX_RETRIES) {
+                    CYXWIZ_WARN("Server %s: verification failed after %d retries",
+                                srv->addr, srv->challenge_retries);
+                    set_server_state(reg, srv, CYXCHAT_SERVER_REJECTED);
+                } else {
+                    CYXWIZ_WARN("Server %s: verification timed out, retry %d/%d",
+                                srv->addr, srv->challenge_retries,
+                                CYXCHAT_SERVER_VERIFY_MAX_RETRIES);
+                    send_challenge(reg, srv);
+                }
                 events++;
             }
             continue;  /* Don't health-ping while verifying */

@@ -1,5 +1,28 @@
 # Multi-Server Redundancy Plan
+ Purpose of Verification Challenges
 
+  The challenge protocol proves the server is who it claims to be — not an impersonator. Without it, anyone could spin up a fake server at the same IP (e.g., after a DNS hijack or IP takeover) and intercept all peer registrations.
+
+  Flow:
+  1. Client sends random 32-byte nonce to server
+  2. Server signs the nonce with its Ed25519 private key
+  3. Client verifies the signature against the hardcoded public key
+  4. If valid → this is the real server, not an impersonator
+
+  This prevents MITM attacks on the bootstrap infrastructure.
+
+  Why the Server Ignores It
+
+  There are two server binaries in tools/:
+
+  | File                   | Handles Challenges?                                      | Notes                                 |
+  |------------------------|----------------------------------------------------------|---------------------------------------|
+  | tools/bootstrap.c      | No — only handles 0xF0 (register) and 0xF3 (connect_req) | The original basic server             |
+  | tools/cyxchat-server.c | Yes — full support for 0xF5/0xF6/0xF9/0xFA               | Enhanced server with Ed25519 identity |
+
+  The question is which one is deployed on 129.151.146.219:7777. If it's the basic bootstrap.c, it receives the 0xF9 challenge packet, hits the default: case in its switch, and silently drops it. The client never gets a response, times out after 10s, and retries forever.
+
+  Do you know which server binary is running on the VPS? That determines whether this is a deployment issue (wrong binary) or a code issue.
 ## Summary
 Add verified multi-server support with health-based failover for bootstrap/relay servers. Anyone verified by the project can run a server. Clients discover servers via seed list + DHT, ping them for health, and auto-select the best.
 
