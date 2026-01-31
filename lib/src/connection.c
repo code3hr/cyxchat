@@ -50,7 +50,7 @@ typedef struct {
 } cyxchat_pending_conn_t;
 
 /* Throttle interval for sending ANNOUNCEs to same peer (60 seconds) */
-#define CYXCHAT_ANNOUNCE_THROTTLE_MS 60000
+#define CYXCHAT_ANNOUNCE_THROTTLE_MS 10000
 
 /* Per-peer connection info */
 typedef struct {
@@ -919,6 +919,12 @@ int cyxchat_conn_poll(cyxchat_conn_ctx_t *ctx, uint64_t now_ms)
                     set_peer_state(ctx, peer, CYXCHAT_CONN_RELAYING);
                     peer->is_relayed = 1;
 
+                    /* Send announce via relay to complete key exchange */
+                    if (ctx->onion) {
+                        send_announce_to_peer(ctx, &pending->peer_id);
+                        peer->last_announce_sent = get_time_ms();
+                    }
+
                     if (pending->callback) {
                         pending->callback(ctx, &pending->peer_id, CYXCHAT_CONN_RELAYING,
                                          CYXCHAT_OK, pending->user_data);
@@ -1009,8 +1015,11 @@ cyxchat_error_t cyxchat_conn_connect(cyxchat_conn_ctx_t *ctx,
     /* Set state to connecting */
     set_peer_state(ctx, peer, CYXCHAT_CONN_CONNECTING);
 
-    /* The transport layer's discovery and hole punching handles the rest */
-    /* When we receive data from this peer, we know hole punch succeeded */
+    /* Send announce immediately to initiate key exchange */
+    if (ctx->onion) {
+        send_announce_to_peer(ctx, peer_id);
+        peer->last_announce_sent = get_time_ms();
+    }
 
     return CYXCHAT_OK;
 }
