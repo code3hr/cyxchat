@@ -66,7 +66,7 @@ class ConnectionProvider extends ChangeNotifier {
 
   // Polling timer
   Timer? _pollTimer;
-  static const _pollInterval = Duration(milliseconds: 100);
+  static const _pollInterval = Duration(milliseconds: 500);
 
   // Getters
   bool get initialized => _initialized;

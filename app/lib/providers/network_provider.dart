@@ -184,6 +184,9 @@ class ConnectionActions {
       log.info('Relay server configured: $bootstrap', source: 'Network');
     }
 
+    // Yield to let UI render before continuing initialization
+    await Future.delayed(Duration.zero);
+
     // Initialize DNS with the same identity
     // Note: DNS will use node ID for identification without signing for now
     // Full signing key support can be added when identity includes Ed25519 keys
@@ -243,6 +246,9 @@ class ConnectionActions {
       log.info('Offline message queue ready', source: 'Network');
     }
 
+    // Yield before group init (heaviest part)
+    await Future.delayed(Duration.zero);
+
     // Initialize Group FFI provider for group chat (requires chat context)
     print('GroupFFI: Starting initialization...');
     final groupProvider = _ref.read(groupFFINotifierProvider);
@@ -270,6 +276,8 @@ class ConnectionActions {
     } else {
       log.info('DHT initialized (waiting for peers)', source: 'Network');
     }
+
+    await Future.delayed(Duration.zero);
 
     // Initialize File provider for file transfers
     final fileProvider = _ref.read(fileNotifierProvider);

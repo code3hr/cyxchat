@@ -102,7 +102,12 @@ class GroupService {
     ''', [identity.nodeId]);
 
     _log.info('Restoring ${rows.length} groups to C library', source: 'GroupService');
+    int groupCount = 0;
     for (final row in rows) {
+      // Yield to UI thread every 3 groups to prevent ANR
+      if (groupCount++ % 3 == 0 && groupCount > 1) {
+        await Future.delayed(Duration.zero);
+      }
       final groupId = row['id'] as String;
       final name = row['name'] as String;
       final creatorId = row['creator_id'] as String;
@@ -173,6 +178,10 @@ class GroupService {
         }
 
         _log.info('Restoring ${memberRows.length} members for group $groupId', source: 'GroupService');
+        // Yield before member restoration if many members
+        if (memberRows.length > 5) {
+          await Future.delayed(Duration.zero);
+        }
 
         for (final memberRow in memberRows) {
           final memberId = memberRow['node_id'] as String;

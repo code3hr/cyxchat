@@ -108,7 +108,7 @@ class GroupFFIProvider extends ChangeNotifier {
 
   // Polling timer
   Timer? _pollTimer;
-  static const _pollInterval = Duration(milliseconds: 50);
+  static const _pollInterval = Duration(milliseconds: 200);
 
   // Pending invites (groupId -> invite)
   final Map<String, GroupInvite> _pendingInvites = {};

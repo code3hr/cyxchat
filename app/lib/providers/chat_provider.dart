@@ -236,8 +236,8 @@ class ChatProvider extends ChangeNotifier {
 
   // Polling timer with adaptive interval
   Timer? _pollTimer;
-  static const _pollIntervalActive = Duration(milliseconds: 50);
-  static const _pollIntervalIdle = Duration(milliseconds: 500);
+  static const _pollIntervalActive = Duration(milliseconds: 200);
+  static const _pollIntervalIdle = Duration(milliseconds: 1000);
   int _idlePollCount = 0;
   static const _idleThreshold = 200; // Switch to idle after 200 empty polls (~10s)
 
@@ -579,9 +579,9 @@ class ChatProvider extends ChangeNotifier {
     final now = DateTime.now().millisecondsSinceEpoch;
     _bindings.chatPoll(now);
 
-    // Process all queued messages
+    // Process up to 10 messages per tick to avoid blocking UI
     bool hadMessages = false;
-    while (true) {
+    for (int i = 0; i < 10; i++) {
       final msg = _bindings.chatRecvNext();
       if (msg == null) break;
 
