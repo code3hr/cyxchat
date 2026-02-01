@@ -68,6 +68,7 @@ typedef struct {
     int active;
     uint8_t pubkey[32];             /* Peer's X25519 public key */
     int has_pubkey;                 /* 1 if pubkey is valid */
+    uint8_t announce_retries;       /* ANNOUNCE retry count for key exchange */
 } cyxchat_peer_conn_t;
 
 /* DHT find callback wrapper */
@@ -584,22 +585,29 @@ static void send_announce_to_peer(cyxchat_conn_ctx_t *ctx,
     announce.port = 0;  /* Will be filled by transport */
     memcpy(announce.pubkey, our_pubkey, 32);
 
-    /* Use transport's send function - it knows how to reach connected peers */
+    /* Try direct transport send first */
     cyxwiz_error_t err = ctx->transport->ops->send(ctx->transport, peer_id,
                                                     (uint8_t*)&announce, sizeof(announce));
 
+    char hex_id[17];
+    for (int i = 0; i < 8; i++) {
+        snprintf(hex_id + i*2, 3, "%02x", peer_id->bytes[i]);
+    }
+
     if (err == CYXWIZ_OK) {
-        char hex_id[17];
-        for (int i = 0; i < 8; i++) {
-            snprintf(hex_id + i*2, 3, "%02x", peer_id->bytes[i]);
+        CYXWIZ_INFO("Sent key exchange announce to peer %.16s... (direct)", hex_id);
+    } else if (ctx->relay) {
+        /* Direct send failed (peer address unknown) - try via relay */
+        cyxchat_error_t relay_err = cyxchat_relay_send(ctx->relay, peer_id,
+                                                        (uint8_t*)&announce, sizeof(announce));
+        if (relay_err == CYXCHAT_OK) {
+            CYXWIZ_INFO("Sent key exchange announce to peer %.16s... (via relay)", hex_id);
+        } else {
+            CYXWIZ_INFO("Failed to send announce to %.16s... (direct err=%d, relay err=%d)",
+                        hex_id, err, relay_err);
         }
-        CYXWIZ_INFO("Sent key exchange announce to peer %.16s...", hex_id);
     } else {
-        char hex_id[17];
-        for (int i = 0; i < 8; i++) {
-            snprintf(hex_id + i*2, 3, "%02x", peer_id->bytes[i]);
-        }
-        CYXWIZ_INFO("Failed to send announce to %.16s... (err=%d)", hex_id, err);
+        CYXWIZ_INFO("Failed to send announce to %.16s... (err=%d, no relay)", hex_id, err);
     }
 }
 
@@ -944,6 +952,31 @@ int cyxchat_conn_poll(cyxchat_conn_ctx_t *ctx, uint64_t now_ms)
         }
     }
 
+    /* Retry ANNOUNCE for peers that are connecting/relaying but haven't
+     * completed key exchange yet (no pubkey). This is critical for mobile
+     * networks where UDP packets are frequently dropped by carrier NAT. */
+    #define CYXCHAT_ANNOUNCE_RETRY_MS 3000  /* Retry every 3s until key exchange completes */
+    #define CYXCHAT_ANNOUNCE_MAX_RETRIES 10 /* Give up after 30s */
+    for (size_t i = 0; i < CYXCHAT_MAX_PEER_CONNECTIONS; i++) {
+        cyxchat_peer_conn_t *peer = &ctx->peers[i];
+        if (!peer->active) continue;
+        if (peer->has_pubkey) continue;  /* Key exchange already done */
+        if (peer->state != CYXCHAT_CONN_CONNECTING &&
+            peer->state != CYXCHAT_CONN_RELAYING &&
+            peer->state != CYXCHAT_CONN_CONNECTED) continue;
+
+        uint64_t since_announce = now_ms - peer->last_announce_sent;
+        if (since_announce >= CYXCHAT_ANNOUNCE_RETRY_MS) {
+            peer->announce_retries++;
+            if (peer->announce_retries <= CYXCHAT_ANNOUNCE_MAX_RETRIES) {
+                CYXWIZ_INFO("Retrying key exchange ANNOUNCE for peer (attempt %d/%d)",
+                           peer->announce_retries, CYXCHAT_ANNOUNCE_MAX_RETRIES);
+                send_announce_to_peer(ctx, &peer->peer_id);
+                peer->last_announce_sent = now_ms;
+            }
+        }
+    }
+
     /* Check for peer timeouts */
     for (size_t i = 0; i < CYXCHAT_MAX_PEER_CONNECTIONS; i++) {
         cyxchat_peer_conn_t *peer = &ctx->peers[i];
@@ -1014,6 +1047,12 @@ cyxchat_error_t cyxchat_conn_connect(cyxchat_conn_ctx_t *ctx,
 
     /* Set state to connecting */
     set_peer_state(ctx, peer, CYXCHAT_CONN_CONNECTING);
+
+    /* Start relay connection immediately (parallel with hole punch) so
+     * the announce can be delivered even if peer address is unknown */
+    if (ctx->relay) {
+        cyxchat_relay_connect(ctx->relay, peer_id);
+    }
 
     /* Send announce immediately to initiate key exchange */
     if (ctx->onion) {
