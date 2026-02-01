@@ -136,9 +136,10 @@ struct cyxchat_conn_ctx {
  * Helper Functions
  * ============================================================ */
 
-/* Forward declaration for send_announce_to_peer (defined later) */
+/* Forward declarations */
 static void send_announce_to_peer(cyxchat_conn_ctx_t *ctx,
                                    const cyxwiz_node_id_t *peer_id);
+static int is_discovery_message(uint8_t type);
 
 static uint64_t get_time_ms(void)
 {
@@ -239,6 +240,32 @@ static void on_relay_data(cyxchat_relay_ctx_t *relay_ctx,
     if (peer) {
         peer->last_activity = get_time_ms();
         peer->bytes_received += (uint32_t)len;
+
+        /* Mark as relayed — data arrived via relay path */
+        if (!peer->is_relayed) {
+            peer->is_relayed = 1;
+            set_peer_state(ctx, peer, CYXCHAT_CONN_RELAYING);
+        }
+
+        /* Complete pending connection if still waiting */
+        if (peer->state == CYXCHAT_CONN_CONNECTING) {
+            set_peer_state(ctx, peer, CYXCHAT_CONN_RELAYING);
+            peer->is_relayed = 1;
+
+            cyxchat_pending_conn_t *pending = find_pending(ctx, from);
+            if (pending && pending->callback) {
+                pending->callback(ctx, from, CYXCHAT_CONN_RELAYING, CYXCHAT_OK,
+                                 pending->user_data);
+            }
+            if (pending) {
+                free_pending(ctx, pending);
+            }
+        }
+    }
+
+    /* Route discovery messages through discovery handler for key exchange */
+    if (len > 0 && ctx->discovery && is_discovery_message(data[0])) {
+        cyxwiz_discovery_handle_message(ctx->discovery, from, data, len);
     }
 
     /* Forward to application callback */
@@ -517,7 +544,16 @@ static void on_peer_key_received(const cyxwiz_node_id_t *peer_id,
         CYXWIZ_INFO("Key exchange complete with peer %.16s...", hex_id);
 /* Store pubkey in peer connection for later retrieval */        if (conn) {            memcpy(conn->pubkey, peer_pubkey, 32);            conn->has_pubkey = 1;        }
 
-        /* WORKAROUND: Explicitly set peer to CONNECTED state after successful key exchange. */
+        /* Set peer to connected/relaying state after successful key exchange.
+         * Preserve relay state if already set. */
+        if (conn && conn->state == CYXCHAT_CONN_CONNECTING) {
+            /* If relay is active for this peer, mark as relaying */
+            if (conn->is_relayed) {
+                set_peer_state(ctx, conn, CYXCHAT_CONN_RELAYING);
+            } else {
+                set_peer_state(ctx, conn, CYXCHAT_CONN_CONNECTED);
+            }
+        }
         if (ctx->peer_table) {
             cyxwiz_peer_table_set_state(ctx->peer_table, peer_id, CYXWIZ_PEER_STATE_CONNECTED);
             cyxwiz_peer_table_record_success(ctx->peer_table, peer_id);
