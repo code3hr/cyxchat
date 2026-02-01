@@ -234,12 +234,10 @@ class ChatProvider extends ChangeNotifier {
   bool _initialized = false;
   String? _localNodeId;
 
-  // Polling timer with adaptive interval
+  // Polling timer — must stay fast since chatPoll() drives the transport layer
+  // (hole punching, key exchange, peer discovery), not just chat messages.
   Timer? _pollTimer;
-  static const _pollIntervalActive = Duration(milliseconds: 200);
-  static const _pollIntervalIdle = Duration(milliseconds: 1000);
-  int _idlePollCount = 0;
-  static const _idleThreshold = 200; // Switch to idle after 200 empty polls (~10s)
+  static const _pollInterval = Duration(milliseconds: 50);
 
   // Stream controllers
   final _messageController = StreamController<ReceivedMessage>.broadcast();
@@ -545,32 +543,12 @@ class ChatProvider extends ChangeNotifier {
 
   void _startPolling() {
     _pollTimer?.cancel();
-    _idlePollCount = 0;
-    _pollTimer = Timer.periodic(_pollIntervalActive, (_) => _poll());
+    _pollTimer = Timer.periodic(_pollInterval, (_) => _poll());
   }
 
   void _stopPolling() {
     _pollTimer?.cancel();
     _pollTimer = null;
-  }
-
-  /// Switch polling rate based on activity
-  void _adjustPollingRate(bool hadActivity) {
-    if (hadActivity) {
-      if (_idlePollCount >= _idleThreshold) {
-        // Was idle, switch back to active polling
-        _pollTimer?.cancel();
-        _pollTimer = Timer.periodic(_pollIntervalActive, (_) => _poll());
-      }
-      _idlePollCount = 0;
-    } else {
-      _idlePollCount++;
-      if (_idlePollCount == _idleThreshold) {
-        // Switch to idle polling
-        _pollTimer?.cancel();
-        _pollTimer = Timer.periodic(_pollIntervalIdle, (_) => _poll());
-      }
-    }
   }
 
   void _poll() {
@@ -579,17 +557,13 @@ class ChatProvider extends ChangeNotifier {
     final now = DateTime.now().millisecondsSinceEpoch;
     _bindings.chatPoll(now);
 
-    // Process up to 10 messages per tick to avoid blocking UI
-    bool hadMessages = false;
-    for (int i = 0; i < 10; i++) {
+    // Process all queued messages
+    while (true) {
       final msg = _bindings.chatRecvNext();
       if (msg == null) break;
 
-      hadMessages = true;
       _processReceivedMessage(msg);
     }
-
-    _adjustPollingRate(hadMessages);
   }
 
   void _processReceivedMessage(Map<String, dynamic> msg) {
