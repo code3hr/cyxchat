@@ -26,7 +26,7 @@ class SettingsDefaults {
   static const bool directFileTransfer = false;
   static const bool videoCallsEnabled = false; // Off by default for privacy
   static const bool hasSeenCallPrivacyWarning = false;
-  static const int onionHopCount = 2; // Default 2 hops (good balance)
+  static const int onionHopCount = 1; // Default 1 hop (direct, best reliability)
 }
 
 /// Settings state
@@ -44,7 +44,7 @@ class AppSettings {
     this.directFileTransfer = false,
     this.videoCallsEnabled = false,
     this.hasSeenCallPrivacyWarning = false,
-    this.onionHopCount = 2,
+    this.onionHopCount = 1,
   });
 
   AppSettings copyWith({

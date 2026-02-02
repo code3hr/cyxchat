@@ -2206,6 +2206,7 @@ class _OnionHopSelector extends ConsumerWidget {
   const _OnionHopSelector();
 
   static const _hopOptions = [
+    (hops: 1, label: 'Direct', payload: '1.6 KB', desc: 'Best reliability'),
     (hops: 2, label: 'Standard', payload: '1.2 KB', desc: 'Good balance'),
     (hops: 5, label: 'High', payload: '873 B', desc: 'Better anonymity'),
     (hops: 8, label: 'Maximum', payload: '561 B', desc: 'Best anonymity'),
