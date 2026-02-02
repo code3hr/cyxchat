@@ -266,6 +266,13 @@ static void on_relay_data(cyxchat_relay_ctx_t *relay_ctx,
     /* Route discovery messages through discovery handler for key exchange */
     if (len > 0 && ctx->discovery && is_discovery_message(data[0])) {
         cyxwiz_discovery_handle_message(ctx->discovery, from, data, len);
+
+        /* Discovery sends ANNOUNCE_ACK via transport which fails for
+         * relay-only peers (no direct address). Send our own ANNOUNCE
+         * back via relay so the peer gets our pubkey too. */
+        if (data[0] == 0x01 /* ANNOUNCE */ && ctx->onion) {
+            send_announce_to_peer(ctx, from);
+        }
     }
 
     /* Forward to application callback */

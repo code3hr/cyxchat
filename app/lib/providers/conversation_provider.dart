@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/models.dart';
 import '../services/chat_service.dart';
+import 'network_provider.dart';
 
 /// Provider for all conversations
 final conversationsProvider = FutureProvider<List<Conversation>>((ref) async {
@@ -51,6 +52,13 @@ class ChatActions {
     final conversation =
         await ChatService.instance.getOrCreateDirectConversation(peerId);
     _ref.invalidate(conversationsProvider);
+
+    // Trigger connection + key exchange with the peer immediately
+    final connProvider = _ref.read(connectionNotifierProvider);
+    if (connProvider.initialized && !connProvider.hasPeerKey(peerId)) {
+      await connProvider.connect(peerId);
+    }
+
     return conversation;
   }
 
