@@ -21,10 +21,13 @@ CyxChat is a decentralized, privacy-first messaging application built on the Cyx
 |-----------|--------|-------|
 | C Library (libcyxchat) | Complete | Chat, connection, relay, group all working |
 | FFI Bindings | Complete | Full Dart-to-C bridge |
-| Bootstrap Server | Complete | Docker-ready, handles registration + relay |
+| Bootstrap Server | Complete | Docker-ready, handles registration + relay + offline queue (Windows + Linux) |
 | Flutter UI | Complete | Auto-connect, real-time message updates |
 | File Transfer | Complete | Chunked transfer via onion routing, max 64KB |
 | Group Chat | In Progress | Groups persist in SQLite, invites require key exchange |
+| Message Retry | Complete | Retry uses same msg_id to prevent duplicates |
+| Presence System | **Designed** | Online status, privacy settings → [PRESENCE-SYSTEM.md](docs/PRESENCE-SYSTEM.md) |
+| Voice/Video Calls | **Planned** | WebRTC integration → [COMPARISON.md](docs/COMPARISON.md) |
 
 ### Known Issues
 
@@ -288,8 +291,27 @@ cyxchat_ctx_t
 1. **STUN Discovery** - Discover public IP:port
 2. **Bootstrap Register** - Register with bootstrap server
 3. **Peer Discovery** - Learn about other peers
-4. **Hole Punch** - Direct P2P connection attempt
-5. **Relay Fallback** - If hole punch fails, use relay
+4. **Hole Punch** - Direct P2P connection attempt (5 rapid punches)
+5. **Relay Fallback** - If hole punch fails, use relay (transparent, always active)
+6. **Punch Retry** - Background retry with exponential backoff (60s, 5min, 15min) — max 3 retries per peer, relay stays active throughout
+
+### Offline Messaging
+
+Messages sent to offline peers are queued on the bootstrap server and delivered when the peer comes online.
+
+| Setting | Linux/Docker | Windows |
+|---------|--------------|---------|
+| Storage | `/var/lib/cyxchat/queue/<node_id>.queue` | `cyxchat_queue/<node_id>.queue` (relative) |
+| TTL | 72 hours | 72 hours |
+| Max queue per user | 1 MB (~500 messages) | 1 MB (~500 messages) |
+| Cleanup | Hourly for expired files | Hourly for expired files |
+
+**Flow:**
+1. A sends message to B (offline) → Server queues to file
+2. B comes online (registers) → Server delivers queued messages
+3. Queue file deleted after delivery
+
+**Privacy:** Server stores encrypted blobs — cannot read message content. Same metadata exposure as real-time relay.
 
 ## Error Codes
 
@@ -446,7 +468,28 @@ ctest --test-dir build --output-on-failure
 # Flutter tests
 cd cyxchat/app
 flutter test
+
+# P2P flow tests (PowerShell)
+cd cyxchat/tests
+./test_p2p_flow.ps1 -ServerIP 127.0.0.1 -ServerPort 7777
 ```
+
+### P2P Test Coverage
+
+The `test_p2p_flow.ps1` script tests the complete P2P flow:
+
+| Test | Description |
+|------|-------------|
+| Registration | Node registers with bootstrap server |
+| Peer Discovery | Server returns list of registered peers |
+| Direct Relay | Message relayed between online peers |
+| Offline Queue | Message queued when recipient offline |
+| Queue Delivery | Queued messages delivered on reconnect |
+| Multi-peer | Multiple peers in network |
+
+**Test Results** (as of 2026-02-06):
+- Local server: 12/12 tests passed (100%)
+- Oracle server (129.151.146.219:7777): 12/12 tests passed (100%)
 
 ## Bootstrap Server (Docker)
 
@@ -535,8 +578,14 @@ To test P2P messaging locally:
 
 - [../CLAUDE.md](../CLAUDE.md) - Main CyxWiz protocol documentation
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - CyxChat architecture
-- [docs/NAT-TRAVERSAL.md](docs/NAT-TRAVERSAL.md) - NAT traversal details
+- [docs/NAT-TRAVERSAL.md](docs/NAT-TRAVERSAL.md) - NAT traversal details + relay + onion interaction
 - [docs/COMMUNICATION-FLOW.md](docs/COMMUNICATION-FLOW.md) - Full message flow diagram
 - [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) - Platform issues and solutions
 - [docs/PRODUCTION-MACOS.md](docs/PRODUCTION-MACOS.md) - macOS production release guide
+- [docs/COMPARISON.md](docs/COMPARISON.md) - CyxChat vs other apps + Protocol comparison (WebRTC)
 - [DOCKER.md](DOCKER.md) - Server deployment guide
+
+### Design Documents (Not Yet Implemented)
+
+- [docs/UX-ROADMAP.md](docs/UX-ROADMAP.md) - UX gaps and improvement roadmap
+- [docs/PRESENCE-SYSTEM.md](docs/PRESENCE-SYSTEM.md) - Online status, privacy settings, optimized routing
