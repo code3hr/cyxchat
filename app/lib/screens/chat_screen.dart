@@ -39,8 +39,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   @override
   void initState() {
     super.initState();
-    // Mark as read when opening
+    // Mark as read when opening and refresh messages
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      // Force refresh messages from database in case new ones arrived
+      // while the chat screen was not active
+      ref.invalidate(messagesProvider(widget.conversationId));
       ref.read(chatActionsProvider).markAsRead(widget.conversationId);
       // Pre-connect to peer for faster first message
       _preConnectToPeer();
