@@ -15,6 +15,7 @@
 #include <cyxwiz/onion.h>
 #include <cyxwiz/dht.h>
 #include <cyxwiz/peer.h>
+#include <cyxwiz/upnp.h>
 
 #include <string.h>
 #include <stdlib.h>
@@ -31,6 +32,12 @@
 #include <sys/time.h>
 #include <time.h>
 #include <errno.h>
+#endif
+
+/* External UDP transport UPnP functions (from udp.c) */
+#ifdef CYXWIZ_HAS_UPNP
+extern cyxwiz_error_t cyxwiz_udp_get_upnp_status(void *driver_data, cyxwiz_upnp_status_t *status);
+extern bool cyxwiz_udp_is_upnp_active(void *driver_data);
 #endif
 
 /* ============================================================
@@ -351,6 +358,13 @@ static void on_transport_recv(cyxwiz_transport_t *transport,
             (void)has_pk;  /* Used for debugging */
         }
         cyxwiz_discovery_handle_message(ctx->discovery, from, data, len);
+
+        /* Send ANNOUNCE back to complete bidirectional key exchange.
+         * This is critical when ANNOUNCE arrives via transport-level relay
+         * (0xF8) which bypasses the application relay callback. */
+        if (data[0] == CYXCHAT_DISC_ANNOUNCE && ctx->onion) {
+            send_announce_to_peer(ctx, from);
+        }
         /* Don't return - also process below for connection state updates */
     }
 
@@ -1258,6 +1272,37 @@ void cyxchat_conn_get_status(cyxchat_conn_ctx_t *ctx, cyxchat_network_status_t *
         status_out->dht_nodes = stats.total_nodes;
         status_out->dht_active_buckets = stats.active_buckets;
     }
+
+    /* UPnP/NAT-PMP status */
+    status_out->upnp_available = 0;
+    status_out->upnp_mapping_active = 0;
+    status_out->upnp_external_port = 0;
+    status_out->upnp_lease_remaining_sec = 0;
+
+#ifdef CYXWIZ_HAS_UPNP
+    if (ctx->transport && ctx->transport->driver_data) {
+        cyxwiz_upnp_status_t upnp_status;
+        if (cyxwiz_udp_get_upnp_status(ctx->transport->driver_data, &upnp_status) == CYXWIZ_OK) {
+            status_out->upnp_available = upnp_status.discovered ? 1 : 0;
+            status_out->upnp_mapping_active = upnp_status.mapping_active ? 1 : 0;
+            status_out->upnp_external_port = upnp_status.external_port;
+            if (upnp_status.mapping_active && upnp_status.lease_expiry_ms > 0) {
+                uint64_t now_ms = 0;
+#ifdef _WIN32
+                now_ms = GetTickCount64();
+#else
+                struct timeval tv;
+                gettimeofday(&tv, NULL);
+                now_ms = (uint64_t)tv.tv_sec * 1000 + tv.tv_usec / 1000;
+#endif
+                if (upnp_status.lease_expiry_ms > now_ms) {
+                    status_out->upnp_lease_remaining_sec =
+                        (uint32_t)((upnp_status.lease_expiry_ms - now_ms) / 1000);
+                }
+            }
+        }
+    }
+#endif
 }
 
 cyxchat_error_t cyxchat_conn_get_public_addr(cyxchat_conn_ctx_t *ctx,
@@ -1285,6 +1330,71 @@ int cyxchat_conn_is_bootstrap_connected(cyxchat_conn_ctx_t *ctx)
 {
     if (!ctx) return 0;
     return ctx->bootstrap_connected;
+}
+
+int cyxchat_conn_is_upnp_available(cyxchat_conn_ctx_t *ctx)
+{
+    if (!ctx) return 0;
+#ifdef CYXWIZ_HAS_UPNP
+    if (ctx->transport && ctx->transport->driver_data) {
+        cyxwiz_upnp_status_t status;
+        if (cyxwiz_udp_get_upnp_status(ctx->transport->driver_data, &status) == CYXWIZ_OK) {
+            return status.discovered ? 1 : 0;
+        }
+    }
+#endif
+    return 0;
+}
+
+int cyxchat_conn_is_upnp_mapping_active(cyxchat_conn_ctx_t *ctx)
+{
+    if (!ctx) return 0;
+#ifdef CYXWIZ_HAS_UPNP
+    if (ctx->transport && ctx->transport->driver_data) {
+        return cyxwiz_udp_is_upnp_active(ctx->transport->driver_data) ? 1 : 0;
+    }
+#endif
+    return 0;
+}
+
+uint16_t cyxchat_conn_get_upnp_external_port(cyxchat_conn_ctx_t *ctx)
+{
+    if (!ctx) return 0;
+#ifdef CYXWIZ_HAS_UPNP
+    if (ctx->transport && ctx->transport->driver_data) {
+        cyxwiz_upnp_status_t status;
+        if (cyxwiz_udp_get_upnp_status(ctx->transport->driver_data, &status) == CYXWIZ_OK) {
+            return status.external_port;
+        }
+    }
+#endif
+    return 0;
+}
+
+uint32_t cyxchat_conn_get_upnp_lease_remaining_sec(cyxchat_conn_ctx_t *ctx)
+{
+    if (!ctx) return 0;
+#ifdef CYXWIZ_HAS_UPNP
+    if (ctx->transport && ctx->transport->driver_data) {
+        cyxwiz_upnp_status_t status;
+        if (cyxwiz_udp_get_upnp_status(ctx->transport->driver_data, &status) == CYXWIZ_OK) {
+            if (status.mapping_active && status.lease_expiry_ms > 0) {
+                uint64_t now_ms = 0;
+#ifdef _WIN32
+                now_ms = GetTickCount64();
+#else
+                struct timeval tv;
+                gettimeofday(&tv, NULL);
+                now_ms = (uint64_t)tv.tv_sec * 1000 + tv.tv_usec / 1000;
+#endif
+                if (status.lease_expiry_ms > now_ms) {
+                    return (uint32_t)((status.lease_expiry_ms - now_ms) / 1000);
+                }
+            }
+        }
+    }
+#endif
+    return 0;
 }
 
 int cyxchat_conn_has_peer_key(cyxchat_conn_ctx_t *ctx, const cyxwiz_node_id_t *peer_id)

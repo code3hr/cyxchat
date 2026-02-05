@@ -72,6 +72,11 @@ typedef struct {
     int dht_enabled;                    /* DHT is active */
     size_t dht_nodes;                   /* Nodes in DHT routing table */
     size_t dht_active_buckets;          /* Non-empty DHT buckets */
+    /* UPnP/NAT-PMP status */
+    int upnp_available;                 /* UPnP IGD or NAT-PMP found */
+    int upnp_mapping_active;            /* Port mapping is active */
+    uint16_t upnp_external_port;        /* Mapped external port */
+    uint32_t upnp_lease_remaining_sec;  /* Seconds until lease expires */
 } cyxchat_network_status_t;
 
 /* ============================================================
@@ -265,6 +270,38 @@ CYXCHAT_API cyxchat_error_t cyxchat_conn_get_public_addr(
  * @return              1 if connected, 0 if not
  */
 CYXCHAT_API int cyxchat_conn_is_bootstrap_connected(cyxchat_conn_ctx_t *ctx);
+
+/**
+ * Check if UPnP/NAT-PMP gateway was discovered
+ *
+ * @param ctx           Connection context
+ * @return              1 if available, 0 if not
+ */
+CYXCHAT_API int cyxchat_conn_is_upnp_available(cyxchat_conn_ctx_t *ctx);
+
+/**
+ * Check if UPnP/NAT-PMP port mapping is active
+ *
+ * @param ctx           Connection context
+ * @return              1 if mapping active, 0 if not
+ */
+CYXCHAT_API int cyxchat_conn_is_upnp_mapping_active(cyxchat_conn_ctx_t *ctx);
+
+/**
+ * Get UPnP/NAT-PMP external port
+ *
+ * @param ctx           Connection context
+ * @return              Mapped external port, or 0 if no mapping
+ */
+CYXCHAT_API uint16_t cyxchat_conn_get_upnp_external_port(cyxchat_conn_ctx_t *ctx);
+
+/**
+ * Get UPnP/NAT-PMP lease remaining time
+ *
+ * @param ctx           Connection context
+ * @return              Seconds until lease expires, or 0 if no active mapping
+ */
+CYXCHAT_API uint32_t cyxchat_conn_get_upnp_lease_remaining_sec(cyxchat_conn_ctx_t *ctx);
 
 /**
  * Check if we have established a secure key with a peer

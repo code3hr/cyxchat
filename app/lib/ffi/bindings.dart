@@ -637,6 +637,30 @@ class CyxChatBindings {
     return _native.cyxchat_conn_is_bootstrap_connected(_connCtx!) != 0;
   }
 
+  /// Check if UPnP/NAT-PMP gateway was discovered
+  bool connIsUpnpAvailable() {
+    if (_connCtx == null) return false;
+    return _native.cyxchat_conn_is_upnp_available(_connCtx!) != 0;
+  }
+
+  /// Check if UPnP/NAT-PMP port mapping is active
+  bool connIsUpnpMappingActive() {
+    if (_connCtx == null) return false;
+    return _native.cyxchat_conn_is_upnp_mapping_active(_connCtx!) != 0;
+  }
+
+  /// Get UPnP/NAT-PMP external port (0 if no mapping)
+  int connGetUpnpExternalPort() {
+    if (_connCtx == null) return 0;
+    return _native.cyxchat_conn_get_upnp_external_port(_connCtx!);
+  }
+
+  /// Get UPnP/NAT-PMP lease remaining time in seconds (0 if no active mapping)
+  int connGetUpnpLeaseRemainingSec() {
+    if (_connCtx == null) return 0;
+    return _native.cyxchat_conn_get_upnp_lease_remaining_sec(_connCtx!);
+  }
+
   /// Check if we have established a secure key with a peer
   /// Key exchange must complete before messages can be sent
   bool connHasPeerKey(Pointer<Uint8> peerId) {
@@ -3589,6 +3613,22 @@ class CyxChatNative {
   late final cyxchat_conn_is_bootstrap_connected = _lib.lookupFunction<
       Int32 Function(Pointer<Void>),
       int Function(Pointer<Void>)>('cyxchat_conn_is_bootstrap_connected');
+
+  late final cyxchat_conn_is_upnp_available = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>),
+      int Function(Pointer<Void>)>('cyxchat_conn_is_upnp_available');
+
+  late final cyxchat_conn_is_upnp_mapping_active = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>),
+      int Function(Pointer<Void>)>('cyxchat_conn_is_upnp_mapping_active');
+
+  late final cyxchat_conn_get_upnp_external_port = _lib.lookupFunction<
+      Uint16 Function(Pointer<Void>),
+      int Function(Pointer<Void>)>('cyxchat_conn_get_upnp_external_port');
+
+  late final cyxchat_conn_get_upnp_lease_remaining_sec = _lib.lookupFunction<
+      Uint32 Function(Pointer<Void>),
+      int Function(Pointer<Void>)>('cyxchat_conn_get_upnp_lease_remaining_sec');
 
   late final cyxchat_conn_has_peer_key = _lib.lookupFunction<
       Int32 Function(Pointer<Void>, Pointer<Uint8>),

@@ -37,6 +37,11 @@ class NetworkStatus {
   final bool bootstrapConnected;
   final int activeConnections;
   final int relayConnections;
+  // UPnP/NAT-PMP status
+  final bool upnpAvailable;
+  final bool upnpMappingActive;
+  final int upnpExternalPort;
+  final int upnpLeaseRemainingSec;
 
   NetworkStatus({
     this.publicAddress,
@@ -45,14 +50,28 @@ class NetworkStatus {
     this.bootstrapConnected = false,
     this.activeConnections = 0,
     this.relayConnections = 0,
+    this.upnpAvailable = false,
+    this.upnpMappingActive = false,
+    this.upnpExternalPort = 0,
+    this.upnpLeaseRemainingSec = 0,
   });
 
   String get natTypeName => CyxChatNatType.name(natType);
   int get directConnections => activeConnections - relayConnections;
 
+  String get upnpStatusText {
+    if (upnpMappingActive) {
+      final mins = upnpLeaseRemainingSec ~/ 60;
+      return 'Port $upnpExternalPort mapped (${mins}min remaining)';
+    } else if (upnpAvailable) {
+      return 'Available but not mapped';
+    }
+    return 'Not available';
+  }
+
   @override
   String toString() => 'NetworkStatus(addr: $publicAddress, nat: $natTypeName, '
-      'active: $activeConnections, relay: $relayConnections)';
+      'active: $activeConnections, relay: $relayConnections, upnp: $upnpStatusText)';
 }
 
 /// Connection provider for managing P2P connections
@@ -260,6 +279,12 @@ class ConnectionProvider extends ChangeNotifier {
     final publicAddr = _bindings.connGetPublicAddr();
     final bootstrapConnected = _bindings.connIsBootstrapConnected();
 
+    // Get UPnP/NAT-PMP status
+    final upnpAvailable = _bindings.connIsUpnpAvailable();
+    final upnpMappingActive = _bindings.connIsUpnpMappingActive();
+    final upnpExternalPort = _bindings.connGetUpnpExternalPort();
+    final upnpLeaseRemainingSec = _bindings.connGetUpnpLeaseRemainingSec();
+
     final newStatus = NetworkStatus(
       publicAddress: publicAddr,
       stunComplete: publicAddr != null,
@@ -270,6 +295,10 @@ class ConnectionProvider extends ChangeNotifier {
       relayConnections: _peerStates.values
           .where((p) => p.isConnected && p.isRelayed)
           .length,
+      upnpAvailable: upnpAvailable,
+      upnpMappingActive: upnpMappingActive,
+      upnpExternalPort: upnpExternalPort,
+      upnpLeaseRemainingSec: upnpLeaseRemainingSec,
     );
 
     // Log significant changes

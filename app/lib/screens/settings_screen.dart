@@ -1329,6 +1329,11 @@ class _NetworkStatusTile extends ConsumerWidget {
                   label: 'Relay Connections',
                   value: '$relayCount',
                 ),
+                const Divider(height: 16),
+                _NetworkInfoRow(
+                  label: 'UPnP/NAT-PMP',
+                  value: networkStatus.upnpStatusText,
+                ),
               ],
             ),
             actions: [
