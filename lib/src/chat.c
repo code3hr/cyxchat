@@ -129,6 +129,10 @@ struct cyxchat_ctx {
     cyxwiz_onion_ctx_t *onion;
     cyxwiz_node_id_t local_id;
 
+    /* Message ID override for retries (set via cyxchat_set_next_msg_id) */
+    cyxchat_msg_id_t next_msg_id;
+    int next_msg_id_set;  /* 1 if override is active */
+
     /* Receive queue (ring buffer) */
     cyxchat_recv_msg_t recv_queue[RECV_QUEUE_SIZE];
     size_t recv_head;   /* Next write position */
@@ -1137,9 +1141,15 @@ cyxchat_error_t cyxchat_send_text(
         return CYXCHAT_ERR_NULL;
     }
 
-    /* Generate message ID */
+    /* Use override msg_id if set (for retries), otherwise generate new one */
     cyxchat_msg_id_t msg_id;
-    cyxchat_generate_msg_id(&msg_id);
+    if (ctx->next_msg_id_set) {
+        memcpy(&msg_id, &ctx->next_msg_id, sizeof(cyxchat_msg_id_t));
+        ctx->next_msg_id_set = 0;  /* Clear override after use */
+        CYXWIZ_DEBUG("Using pre-set message ID for retry");
+    } else {
+        cyxchat_generate_msg_id(&msg_id);
+    }
 
     char hex_id[17];
     for (int i = 0; i < 8; i++) {
@@ -1639,6 +1649,25 @@ uint8_t cyxchat_get_hop_count(cyxchat_ctx_t *ctx) {
     return 0;
 }
 
+cyxchat_error_t cyxchat_get_onion_secret(cyxchat_ctx_t *ctx, uint8_t *secret_out) {
+    if (!ctx || !ctx->onion || !secret_out) {
+        return CYXCHAT_ERR_NULL;
+    }
+    cyxwiz_error_t err = cyxwiz_onion_get_secret(ctx->onion, secret_out);
+    return (err == CYXWIZ_OK) ? CYXCHAT_OK : CYXCHAT_ERR_CRYPTO;
+}
+
+cyxchat_error_t cyxchat_set_onion_keypair(cyxchat_ctx_t *ctx, const uint8_t *secret_key) {
+    if (!ctx || !ctx->onion || !secret_key) {
+        return CYXCHAT_ERR_NULL;
+    }
+    cyxwiz_error_t err = cyxwiz_onion_set_keypair(ctx->onion, secret_key);
+    if (err == CYXWIZ_OK) {
+        CYXWIZ_INFO("Restored onion keypair from persistent storage");
+    }
+    return (err == CYXWIZ_OK) ? CYXCHAT_OK : CYXCHAT_ERR_CRYPTO;
+}
+
 void cyxchat_set_file_ctx(cyxchat_ctx_t *ctx, cyxchat_file_ctx_t *file_ctx) {
     if (ctx) {
         ctx->file_ctx = file_ctx;
@@ -1648,5 +1677,18 @@ void cyxchat_set_file_ctx(cyxchat_ctx_t *ctx, cyxchat_file_ctx_t *file_ctx) {
 void cyxchat_set_group_ctx(cyxchat_ctx_t *ctx, cyxchat_group_ctx_t *group_ctx) {
     if (ctx) {
         ctx->group_ctx = group_ctx;
+    }
+}
+
+void cyxchat_set_next_msg_id(cyxchat_ctx_t *ctx, const cyxchat_msg_id_t *msg_id) {
+    if (!ctx) return;
+
+    if (msg_id && !cyxchat_msg_id_is_zero(msg_id)) {
+        memcpy(&ctx->next_msg_id, msg_id, sizeof(cyxchat_msg_id_t));
+        ctx->next_msg_id_set = 1;
+        CYXWIZ_DEBUG("Message ID override set for next send");
+    } else {
+        ctx->next_msg_id_set = 0;
+        CYXWIZ_DEBUG("Message ID override cleared");
     }
 }

@@ -806,11 +806,18 @@ class ChatService {
 
     // Only retry text messages via chat provider
     if (message.type == MessageType.text) {
+      // Look up previous native msg_id to reuse on retry (prevents duplicates)
+      final previousNativeMsgId = _localIdToNativeMsgId[messageId];
+      if (previousNativeMsgId != null) {
+        debugPrint('ChatService: Retry with same msg_id: $previousNativeMsgId');
+      }
+
       final result = await _chatProvider!.sendText(
         toPeerId: conversation.peerId!,
         text: message.content,
         replyToMsgId: null, // Don't preserve reply on retry
         localMsgId: messageId, // Track for ACK timeout
+        nativeMsgIdHex: previousNativeMsgId, // Reuse original msg_id for dedup
       );
 
       if (result.success && result.nativeMsgId != null) {
@@ -890,11 +897,18 @@ class ChatService {
       whereArgs: [messageId],
     );
 
+    // Look up previous native msg_id to reuse on retry (prevents duplicates)
+    final previousNativeMsgId = _localIdToNativeMsgId[messageId];
+    if (previousNativeMsgId != null) {
+      debugPrint('ChatService: Queue retry with same msg_id: $previousNativeMsgId');
+    }
+
     // Try to send via native chat
     final result = await _chatProvider!.sendText(
       toPeerId: recipientId,
       text: content,
       replyToMsgId: null, // Don't preserve reply on retry
+      nativeMsgIdHex: previousNativeMsgId, // Reuse original msg_id for dedup
       // Don't track queue retries for ACK - already retrying
     );
 

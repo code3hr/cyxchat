@@ -204,9 +204,42 @@ class IdentityService {
     return Uint8List.fromList(keyStr.codeUnits);
   }
 
+  /// Save onion secret key for offline message decryption
+  ///
+  /// The onion secret key must be persisted so that queued messages
+  /// (sent while we were offline) can be decrypted after restart.
+  Future<void> saveOnionSecret(List<int> secretKey) async {
+    if (secretKey.length != 32) {
+      print('[IdentityService] ERROR: Invalid onion secret key length');
+      return;
+    }
+    final keyStr = String.fromCharCodes(secretKey);
+    await _writeSecure('onion_secret', keyStr);
+    print('[IdentityService] Saved onion secret key');
+  }
+
+  /// Load onion secret key for restoring keypair after restart
+  ///
+  /// Returns null if no saved key exists (first run).
+  Future<List<int>?> loadOnionSecret() async {
+    final keyStr = await _readSecure('onion_secret');
+    if (keyStr == null) {
+      print('[IdentityService] No saved onion secret key');
+      return null;
+    }
+    final key = keyStr.codeUnits;
+    if (key.length != 32) {
+      print('[IdentityService] ERROR: Saved onion secret key has wrong length');
+      return null;
+    }
+    print('[IdentityService] Loaded onion secret key');
+    return key;
+  }
+
   /// Delete identity (logout/reset)
   Future<void> deleteIdentity() async {
     await _deleteSecure('private_key');
+    await _deleteSecure('onion_secret');
     await DatabaseService.instance.clearAllData();
     _currentIdentity = null;
   }

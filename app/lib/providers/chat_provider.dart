@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:ffi/ffi.dart';
 import '../ffi/bindings.dart';
 import '../services/log_service.dart';
+import '../services/identity_service.dart';
 import '../utils/node_id_utils.dart';
 
 /// Received message from native layer
@@ -312,6 +313,10 @@ class ChatProvider extends ChangeNotifier {
         return false;
       }
 
+      // Restore onion keypair from storage if available
+      // This enables decryption of queued offline messages
+      await _restoreOnionKeypair();
+
       _initialized = true;
       _startPolling();
       _startAckTimeoutCheck();
@@ -319,6 +324,41 @@ class ChatProvider extends ChangeNotifier {
       return true;
     } finally {
       calloc.free(localIdPtr);
+    }
+  }
+
+  /// Restore onion keypair from storage (for offline message decryption)
+  Future<void> _restoreOnionKeypair() async {
+    try {
+      final savedSecret = await IdentityService.instance.loadOnionSecret();
+      if (savedSecret != null) {
+        final success = _bindings.setOnionKeypair(savedSecret);
+        if (success) {
+          debugPrint('[ChatProvider] Restored onion keypair from storage');
+        } else {
+          debugPrint('[ChatProvider] WARNING: Failed to restore onion keypair');
+        }
+      } else {
+        // First run - save the onion secret for future restarts
+        await _saveOnionSecret();
+      }
+    } catch (e) {
+      debugPrint('[ChatProvider] Error restoring onion keypair: $e');
+    }
+  }
+
+  /// Save onion secret key to storage (call after first connection)
+  Future<void> _saveOnionSecret() async {
+    try {
+      final secret = _bindings.getOnionSecret();
+      if (secret != null) {
+        await IdentityService.instance.saveOnionSecret(secret);
+        debugPrint('[ChatProvider] Saved onion secret for future sessions');
+      } else {
+        debugPrint('[ChatProvider] WARNING: Could not get onion secret to save');
+      }
+    } catch (e) {
+      debugPrint('[ChatProvider] Error saving onion secret: $e');
     }
   }
 
@@ -340,11 +380,13 @@ class ChatProvider extends ChangeNotifier {
   /// Send text message to peer
   /// Returns SendResult with native message ID on success
   /// If localMsgId is provided, the message will be tracked for ACK timeout
+  /// If nativeMsgIdHex is provided (for retries), it will be reused instead of generating a new one
   Future<SendResult> sendText({
     required String toPeerId,
     required String text,
     String? replyToMsgId,
     String? localMsgId,
+    String? nativeMsgIdHex,  // For retries - reuse original msg_id
   }) async {
     final log = LogService.instance;
     if (!_initialized) {
@@ -359,6 +401,12 @@ class ChatProvider extends ChangeNotifier {
     try {
       for (int i = 0; i < 32 && i < peerIdBytes.length; i++) {
         peerIdPtr[i] = peerIdBytes[i];
+      }
+
+      // Set msg_id override for retries (must be called immediately before send)
+      if (nativeMsgIdHex != null) {
+        log.debug('Retry: setting msg_id override to $nativeMsgIdHex', source: 'Chat');
+        _bindings.chatSetNextMsgId(nativeMsgIdHex);
       }
 
       final msgIdHex = _bindings.chatSendText(

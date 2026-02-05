@@ -313,6 +313,21 @@ CYXCHAT_API void cyxchat_set_on_delivery_failed(
 CYXCHAT_API void cyxchat_generate_msg_id(cyxchat_msg_id_t *msg_id);
 
 /**
+ * Set message ID to use for next send (for retries)
+ *
+ * When set, the next call to cyxchat_send_text() will use this msg_id
+ * instead of generating a new one. The override is automatically cleared
+ * after use. This enables retry with the same msg_id for deduplication.
+ *
+ * @param ctx       Chat context
+ * @param msg_id    Message ID to use (NULL to clear override)
+ */
+CYXCHAT_API void cyxchat_set_next_msg_id(
+    cyxchat_ctx_t *ctx,
+    const cyxchat_msg_id_t *msg_id
+);
+
+/**
  * Get current timestamp in milliseconds
  */
 CYXCHAT_API uint64_t cyxchat_timestamp_ms(void);
@@ -429,6 +444,37 @@ CYXCHAT_API void cyxchat_set_hop_count(cyxchat_ctx_t *ctx, uint8_t hop_count);
  * Get current onion routing hop count (0 = auto)
  */
 CYXCHAT_API uint8_t cyxchat_get_hop_count(cyxchat_ctx_t *ctx);
+
+/**
+ * Get the onion secret key for persistence
+ *
+ * The secret key should be stored securely and restored on app restart
+ * to enable decryption of queued offline messages.
+ *
+ * @param ctx         Chat context
+ * @param secret_out  Output buffer for 32-byte secret key
+ * @return CYXCHAT_OK on success
+ */
+CYXCHAT_API cyxchat_error_t cyxchat_get_onion_secret(
+    cyxchat_ctx_t *ctx,
+    uint8_t *secret_out
+);
+
+/**
+ * Set the onion keypair from a saved secret key
+ *
+ * Call this after cyxchat_create() but before connecting to restore
+ * the keypair from the previous session. This enables decryption of
+ * messages that were queued while offline.
+ *
+ * @param ctx        Chat context
+ * @param secret_key The 32-byte secret key from previous session
+ * @return CYXCHAT_OK on success
+ */
+CYXCHAT_API cyxchat_error_t cyxchat_set_onion_keypair(
+    cyxchat_ctx_t *ctx,
+    const uint8_t *secret_key
+);
 
 #ifdef __cplusplus
 }

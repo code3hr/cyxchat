@@ -287,6 +287,40 @@ class CyxChatBindings {
     return _native.cyxchat_get_hop_count(_chatCtx!);
   }
 
+  /// Get the onion secret key for persistence
+  /// Returns 32-byte key or null on error
+  List<int>? getOnionSecret() {
+    if (_chatCtx == null) return null;
+
+    final secretPtr = calloc<Uint8>(32);
+    try {
+      final result = _native.cyxchat_get_onion_secret(_chatCtx!, secretPtr);
+      if (result == CyxChatError.ok) {
+        return List<int>.generate(32, (i) => secretPtr[i]);
+      }
+      return null;
+    } finally {
+      calloc.free(secretPtr);
+    }
+  }
+
+  /// Set the onion keypair from a saved secret key
+  /// Call after create() but before connecting to restore the keypair
+  bool setOnionKeypair(List<int> secretKey) {
+    if (_chatCtx == null || secretKey.length != 32) return false;
+
+    final secretPtr = calloc<Uint8>(32);
+    try {
+      for (int i = 0; i < 32; i++) {
+        secretPtr[i] = secretKey[i];
+      }
+      final result = _native.cyxchat_set_onion_keypair(_chatCtx!, secretPtr);
+      return result == CyxChatError.ok;
+    } finally {
+      calloc.free(secretPtr);
+    }
+  }
+
   /// Get next received message
   /// Returns map with 'from', 'type', 'data' keys, or null if queue empty
   Map<String, dynamic>? chatRecvNext() {
@@ -374,6 +408,35 @@ class CyxChatBindings {
       calloc.free(textPtr);
       calloc.free(replyToPtr);
       calloc.free(msgIdOutPtr);
+    }
+  }
+
+  /// Set message ID to use for next send (for retries with same msg_id)
+  /// Call this immediately before chatSendText() when retrying
+  void chatSetNextMsgId(String? msgIdHex) {
+    if (_chatCtx == null) return;
+
+    if (msgIdHex == null || msgIdHex.isEmpty) {
+      // Clear override
+      _native.cyxchat_set_next_msg_id(_chatCtx!, nullptr);
+      return;
+    }
+
+    final msgIdPtr = calloc<Uint8>(8);
+    final hexPtr = msgIdHex.toNativeUtf8();
+    try {
+      final parseResult = _native.cyxchat_msg_id_from_hex(
+        hexPtr.cast(),
+        msgIdPtr,
+      );
+      if (parseResult != 0) {
+        print('[FFI] Failed to parse msg_id hex for retry: $msgIdHex');
+        return;
+      }
+      _native.cyxchat_set_next_msg_id(_chatCtx!, msgIdPtr);
+    } finally {
+      calloc.free(hexPtr);
+      calloc.free(msgIdPtr);
     }
   }
 
@@ -3747,6 +3810,10 @@ late final cyxchat_conn_get_peer_pubkey = _lib.lookupFunction<      Int32 Functi
       int Function(Pointer<Void>, Pointer<Uint8>, Pointer<Int8>, int,
           Pointer<Uint8>, Pointer<Uint8>)>('cyxchat_send_text');
 
+  late final cyxchat_set_next_msg_id = _lib.lookupFunction<
+      Void Function(Pointer<Void>, Pointer<Uint8>),
+      void Function(Pointer<Void>, Pointer<Uint8>)>('cyxchat_set_next_msg_id');
+
   late final cyxchat_send_ack = _lib.lookupFunction<
       Int32 Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>, Int32),
       int Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>, int)>(
@@ -4283,6 +4350,15 @@ late final cyxchat_conn_get_peer_pubkey = _lib.lookupFunction<      Int32 Functi
   late final cyxchat_get_hop_count = _lib.lookupFunction<
       Uint8 Function(Pointer<Void>),
       int Function(Pointer<Void>)>('cyxchat_get_hop_count');
+
+  // Onion keypair persistence functions
+  late final cyxchat_get_onion_secret = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>),
+      int Function(Pointer<Void>, Pointer<Uint8>)>('cyxchat_get_onion_secret');
+
+  late final cyxchat_set_onion_keypair = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>),
+      int Function(Pointer<Void>, Pointer<Uint8>)>('cyxchat_set_onion_keypair');
 }
 
 // Error codes
