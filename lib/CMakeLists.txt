@@ -135,6 +135,9 @@ if(CYXCHAT_ENABLE_UPNP)
 
     if(NOT UPNP_FOUND)
         message(STATUS "miniupnpc not found - UPnP linking disabled")
+    else()
+        add_compile_definitions(CYXWIZ_HAS_UPNP=1)
+        message(STATUS "UPnP support enabled (CYXWIZ_HAS_UPNP=1)")
     endif()
 endif()
 
