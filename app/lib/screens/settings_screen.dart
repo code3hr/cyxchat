@@ -17,6 +17,7 @@ import '../utils/node_id_utils.dart';
 import 'onboarding_screen.dart';
 import 'log_viewer_screen.dart';
 import 'user_guide_screen.dart';
+import 'appearance_settings_screen.dart';
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -24,6 +25,8 @@ class SettingsScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final identityAsync = ref.watch(identityProvider);
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
 
     return Scaffold(
       body: CustomScrollView(
@@ -32,7 +35,7 @@ class SettingsScreen extends ConsumerWidget {
           SliverAppBar(
             floating: true,
             pinned: true,
-            backgroundColor: AppColors.bgDark,
+            backgroundColor: theme.scaffoldBackgroundColor,
             toolbarHeight: 60,
             title: Row(
               children: [
@@ -40,8 +43,8 @@ class SettingsScreen extends ConsumerWidget {
                   width: 28,
                   height: 28,
                   decoration: BoxDecoration(
-                    gradient: const LinearGradient(
-                      colors: [AppColors.accentPink, AppColors.accentOrange],
+                    gradient: LinearGradient(
+                      colors: [colorScheme.secondary, colorScheme.primary],
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
                     ),
@@ -82,9 +85,33 @@ class SettingsScreen extends ConsumerWidget {
                 _SettingsSection(
                   title: 'Username',
                   icon: Icons.alternate_email_rounded,
-                  iconGradient: const [AppColors.accent, AppColors.accentGreen],
+                  iconGradient: [colorScheme.secondary, colorScheme.primary],
                   children: const [
                     _UsernameSection(),
+                  ],
+                ),
+
+                const SizedBox(height: 16),
+
+                // Appearance section
+                _SettingsSection(
+                  title: 'Appearance',
+                  icon: Icons.palette_rounded,
+                  iconGradient: [colorScheme.error, colorScheme.primary],
+                  children: [
+                    _SettingsTile(
+                      icon: Icons.color_lens_rounded,
+                      title: 'Theme & Display',
+                      subtitle: 'Colors, fonts, and chat appearance',
+                      trailing: Icon(
+                        Icons.chevron_right_rounded,
+                        color: Theme.of(context).colorScheme.onSurface.withAlpha(153),
+                      ),
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const AppearanceSettingsScreen()),
+                      ),
+                    ),
                   ],
                 ),
 
@@ -94,7 +121,7 @@ class SettingsScreen extends ConsumerWidget {
                 _SettingsSection(
                   title: 'Privacy',
                   icon: Icons.shield_rounded,
-                  iconGradient: const [AppColors.primary, AppColors.primaryLight],
+                  iconGradient: [colorScheme.primary, colorScheme.primary.withAlpha(180)],
                   children: [
                     // Onion routing hop count selector
                     const _OnionHopSelector(),
@@ -132,7 +159,7 @@ class SettingsScreen extends ConsumerWidget {
                 _SettingsSection(
                   title: 'Network',
                   icon: Icons.hub_rounded,
-                  iconGradient: const [AppColors.accentGreen, AppColors.accent],
+                  iconGradient: [colorScheme.secondary, colorScheme.primary],
                   children: [
                     const _NetworkStatusTile(),
                     const _ServerConfigTile(),
@@ -145,15 +172,15 @@ class SettingsScreen extends ConsumerWidget {
                 _SettingsSection(
                   title: 'Storage',
                   icon: Icons.storage_rounded,
-                  iconGradient: const [AppColors.accentOrange, AppColors.accentPink],
+                  iconGradient: [colorScheme.tertiary ?? colorScheme.secondary, colorScheme.error],
                   children: [
                     _SettingsTile(
                       icon: Icons.folder_rounded,
                       title: 'Storage Usage',
                       subtitle: '12.5 MB used',
-                      trailing: const Icon(
+                      trailing: Icon(
                         Icons.chevron_right_rounded,
-                        color: AppColors.textDarkSecondary,
+                        color: colorScheme.onSurface.withAlpha(128),
                       ),
                       onTap: () {},
                     ),
@@ -172,15 +199,15 @@ class SettingsScreen extends ConsumerWidget {
                 _SettingsSection(
                   title: 'Debug',
                   icon: Icons.bug_report_rounded,
-                  iconGradient: const [AppColors.accent, AppColors.accentGreen],
+                  iconGradient: [colorScheme.secondary, colorScheme.primary],
                   children: [
                     _SettingsTile(
                       icon: Icons.article_outlined,
                       title: 'View Logs',
                       subtitle: 'See app activity and errors',
-                      trailing: const Icon(
+                      trailing: Icon(
                         Icons.chevron_right_rounded,
-                        color: AppColors.textDarkSecondary,
+                        color: colorScheme.onSurface.withAlpha(128),
                       ),
                       onTap: () => Navigator.push(
                         context,
@@ -197,15 +224,15 @@ class SettingsScreen extends ConsumerWidget {
                 _SettingsSection(
                   title: 'About',
                   icon: Icons.info_outline_rounded,
-                  iconGradient: const [AppColors.textDarkSecondary, AppColors.bgDarkTertiary],
+                  iconGradient: [colorScheme.onSurface.withAlpha(128), colorScheme.surfaceContainerHighest],
                   children: [
                     _SettingsTile(
                       icon: Icons.menu_book_rounded,
                       title: 'User Guide',
                       subtitle: 'Learn how to use CyxChat',
-                      trailing: const Icon(
+                      trailing: Icon(
                         Icons.chevron_right_rounded,
-                        color: AppColors.textDarkSecondary,
+                        color: colorScheme.onSurface.withAlpha(128),
                       ),
                       onTap: () => Navigator.push(
                         context,
@@ -221,9 +248,9 @@ class SettingsScreen extends ConsumerWidget {
                     _SettingsTile(
                       icon: Icons.code_rounded,
                       title: 'Open Source Licenses',
-                      trailing: const Icon(
+                      trailing: Icon(
                         Icons.chevron_right_rounded,
-                        color: AppColors.textDarkSecondary,
+                        color: colorScheme.onSurface.withAlpha(128),
                       ),
                       onTap: () => showLicensePage(context: context),
                     ),
@@ -236,7 +263,7 @@ class SettingsScreen extends ConsumerWidget {
                 _SettingsSection(
                   title: 'Danger Zone',
                   icon: Icons.warning_rounded,
-                  iconGradient: const [AppColors.error, AppColors.accentOrange],
+                  iconGradient: [colorScheme.error, colorScheme.error.withAlpha(180)],
                   isDestructive: true,
                   children: [
                     _SettingsTile(
@@ -268,13 +295,13 @@ class SettingsScreen extends ConsumerWidget {
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: AppColors.error.withOpacity(0.15),
+                  color: Theme.of(context).colorScheme.error.withOpacity(0.15),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: const Icon(
+                child: Icon(
                   Icons.warning_rounded,
                   size: 24,
-                  color: AppColors.error,
+                  color: Theme.of(context).colorScheme.error,
                 ),
               ),
               const SizedBox(width: 14),
@@ -287,9 +314,9 @@ class SettingsScreen extends ConsumerWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
+              Text(
                 'This will permanently delete:',
-                style: TextStyle(color: AppColors.textDarkSecondary),
+                style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withAlpha(153)),
               ),
               const SizedBox(height: 12),
               _ResetWarningItem(text: 'All your messages'),
@@ -299,23 +326,23 @@ class SettingsScreen extends ConsumerWidget {
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: AppColors.error.withOpacity(0.1),
+                  color: Theme.of(context).colorScheme.error.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: const Row(
+                child: Row(
                   children: [
                     Icon(
                       Icons.error_outline_rounded,
                       size: 18,
-                      color: AppColors.error,
+                      color: Theme.of(context).colorScheme.error,
                     ),
-                    SizedBox(width: 10),
+                    const SizedBox(width: 10),
                     Expanded(
                       child: Text(
                         'This action cannot be undone.',
                         style: TextStyle(
                           fontSize: 13,
-                          color: AppColors.error,
+                          color: Theme.of(context).colorScheme.error,
                           fontWeight: FontWeight.w500,
                         ),
                       ),
@@ -344,7 +371,7 @@ class SettingsScreen extends ConsumerWidget {
                 }
               },
               style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.error,
+                backgroundColor: Theme.of(context).colorScheme.error,
                 foregroundColor: Colors.white,
               ),
               child: const Text('Reset Everything'),
@@ -370,16 +397,16 @@ class _ResetWarningItem extends StatelessWidget {
           Container(
             width: 6,
             height: 6,
-            decoration: const BoxDecoration(
-              color: AppColors.error,
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.error,
               shape: BoxShape.circle,
             ),
           ),
           const SizedBox(width: 12),
           Text(
             text,
-            style: const TextStyle(
-              color: AppColors.textDark,
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurface,
               fontSize: 14,
             ),
           ),
@@ -402,15 +429,15 @@ class _ProfileCard extends ConsumerWidget {
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [
-            AppColors.primary.withOpacity(0.15),
-            AppColors.accent.withOpacity(0.1),
+            Theme.of(context).colorScheme.primary.withOpacity(0.15),
+            Theme.of(context).colorScheme.secondary.withOpacity(0.1),
           ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(18),
         border: Border.all(
-          color: AppColors.primary.withOpacity(0.2),
+          color: Theme.of(context).colorScheme.primary.withOpacity(0.2),
           width: 1,
         ),
       ),
@@ -421,15 +448,15 @@ class _ProfileCard extends ConsumerWidget {
             width: 52,
             height: 52,
             decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                colors: [AppColors.primary, AppColors.accent],
+              gradient: LinearGradient(
+                colors: [Theme.of(context).colorScheme.primary, Theme.of(context).colorScheme.secondary],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
               borderRadius: BorderRadius.circular(14),
               boxShadow: [
                 BoxShadow(
-                  color: AppColors.primary.withOpacity(0.3),
+                  color: Theme.of(context).colorScheme.primary.withOpacity(0.3),
                   blurRadius: 8,
                   offset: const Offset(0, 3),
                 ),
@@ -454,10 +481,10 @@ class _ProfileCard extends ConsumerWidget {
               children: [
                 Text(
                   identity?.displayText ?? 'Anonymous',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w600,
-                    color: AppColors.textDark,
+                    color: Theme.of(context).colorScheme.onSurface,
                   ),
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -467,7 +494,7 @@ class _ProfileCard extends ConsumerWidget {
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                     decoration: BoxDecoration(
-                      color: AppColors.bgDarkTertiary,
+                      color: Theme.of(context).colorScheme.surfaceContainerHighest,
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: Row(
@@ -475,14 +502,14 @@ class _ProfileCard extends ConsumerWidget {
                       children: [
                         Text(
                           identity?.shortId ?? 'Loading...',
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontFamily: 'monospace',
                             fontSize: 10,
-                            color: AppColors.textDarkSecondary,
+                            color: Theme.of(context).colorScheme.onSurface.withAlpha(153),
                           ),
                         ),
                         const SizedBox(width: 4),
-                        const Icon(Icons.copy_rounded, size: 10, color: AppColors.textDarkSecondary),
+                        Icon(Icons.copy_rounded, size: 10, color: Theme.of(context).colorScheme.onSurface.withAlpha(153)),
                       ],
                     ),
                   ),
@@ -496,7 +523,7 @@ class _ProfileCard extends ConsumerWidget {
             icon: Container(
               padding: const EdgeInsets.all(6),
               decoration: BoxDecoration(
-                color: AppColors.bgDarkSecondary,
+                color: Theme.of(context).colorScheme.surface,
                 borderRadius: BorderRadius.circular(8),
               ),
               child: const Icon(Icons.qr_code_rounded, size: 18),
@@ -507,7 +534,7 @@ class _ProfileCard extends ConsumerWidget {
             icon: Container(
               padding: const EdgeInsets.all(6),
               decoration: BoxDecoration(
-                color: AppColors.bgDarkSecondary,
+                color: Theme.of(context).colorScheme.surface,
                 borderRadius: BorderRadius.circular(8),
               ),
               child: const Icon(Icons.edit_rounded, size: 18),
@@ -523,7 +550,7 @@ class _ProfileCard extends ConsumerWidget {
 
     showModalBottomSheet(
       context: context,
-      backgroundColor: AppColors.bgDarkSecondary,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -533,12 +560,12 @@ class _ProfileCard extends ConsumerWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               'Your Node ID',
               style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
-                color: AppColors.textDark,
+                color: Theme.of(context).colorScheme.onSurface,
               ),
             ),
             const SizedBox(height: 8),
@@ -546,7 +573,7 @@ class _ProfileCard extends ConsumerWidget {
               'Share this ID with others to let them message you',
               style: TextStyle(
                 fontSize: 13,
-                color: AppColors.textDarkSecondary,
+                color: Theme.of(context).colorScheme.onSurface.withAlpha(153),
               ),
             ),
             const SizedBox(height: 16),
@@ -554,15 +581,15 @@ class _ProfileCard extends ConsumerWidget {
               width: double.infinity,
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: AppColors.bgDarkTertiary,
+                color: Theme.of(context).colorScheme.surfaceContainerHighest,
                 borderRadius: BorderRadius.circular(12),
               ),
               child: SelectableText(
                 NodeIdUtils.toDisplayFormat(identity.nodeId),
-                style: const TextStyle(
+                style: TextStyle(
                   fontFamily: 'monospace',
                   fontSize: 12,
-                  color: AppColors.textDark,
+                  color: Theme.of(context).colorScheme.onSurface,
                 ),
               ),
             ),
@@ -583,7 +610,7 @@ class _ProfileCard extends ConsumerWidget {
                 icon: const Icon(Icons.copy_rounded),
                 label: const Text('Copy Node ID'),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primary,
+                  backgroundColor: Theme.of(context).colorScheme.primary,
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(vertical: 12),
                   shape: RoundedRectangleBorder(
@@ -607,7 +634,7 @@ class _ProfileCard extends ConsumerWidget {
 
     showModalBottomSheet(
       context: context,
-      backgroundColor: AppColors.bgDarkSecondary,
+      backgroundColor: Theme.of(context).colorScheme.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -616,12 +643,12 @@ class _ProfileCard extends ConsumerWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text(
+            Text(
               'Your QR Code',
               style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
-                color: AppColors.textDark,
+                color: Theme.of(context).colorScheme.onSurface,
               ),
             ),
             const SizedBox(height: 8),
@@ -629,7 +656,7 @@ class _ProfileCard extends ConsumerWidget {
               'Others can scan this to add you as a contact',
               style: TextStyle(
                 fontSize: 13,
-                color: AppColors.textDarkSecondary,
+                color: Theme.of(context).colorScheme.onSurface.withAlpha(153),
               ),
             ),
             const SizedBox(height: 24),
@@ -648,10 +675,10 @@ class _ProfileCard extends ConsumerWidget {
             const SizedBox(height: 16),
             Text(
               identityVal?.shortId ?? '',
-              style: const TextStyle(
+              style: TextStyle(
                 fontFamily: 'monospace',
                 fontSize: 12,
-                color: AppColors.textDarkSecondary,
+                color: Theme.of(context).colorScheme.onSurface.withAlpha(153),
               ),
             ),
             const SizedBox(height: 16),
@@ -669,7 +696,7 @@ class _ProfileCardLoading extends StatelessWidget {
       margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: AppColors.bgDarkSecondary,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(20),
       ),
       child: Row(
@@ -678,7 +705,7 @@ class _ProfileCardLoading extends StatelessWidget {
             width: 64,
             height: 64,
             decoration: BoxDecoration(
-              color: AppColors.bgDarkTertiary,
+              color: Theme.of(context).colorScheme.surfaceContainerHighest,
               borderRadius: BorderRadius.circular(18),
             ),
           ),
@@ -691,7 +718,7 @@ class _ProfileCardLoading extends StatelessWidget {
                   width: 120,
                   height: 20,
                   decoration: BoxDecoration(
-                    color: AppColors.bgDarkTertiary,
+                    color: Theme.of(context).colorScheme.surfaceContainerHighest,
                     borderRadius: BorderRadius.circular(6),
                   ),
                 ),
@@ -700,7 +727,7 @@ class _ProfileCardLoading extends StatelessWidget {
                   width: 80,
                   height: 16,
                   decoration: BoxDecoration(
-                    color: AppColors.bgDarkTertiary,
+                    color: Theme.of(context).colorScheme.surfaceContainerHighest,
                     borderRadius: BorderRadius.circular(6),
                   ),
                 ),
@@ -730,10 +757,12 @@ class _SettingsSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16),
       decoration: BoxDecoration(
-        color: AppColors.bgDarkSecondary,
+        color: colorScheme.surface,
         borderRadius: BorderRadius.circular(20),
       ),
       child: Column(
@@ -760,8 +789,8 @@ class _SettingsSection extends StatelessWidget {
                     fontWeight: FontWeight.bold,
                     letterSpacing: 1,
                     color: isDestructive
-                        ? AppColors.error.withOpacity(0.8)
-                        : AppColors.textDarkSecondary,
+                        ? colorScheme.error.withAlpha(200)
+                        : colorScheme.onSurface.withAlpha(153),
                   ),
                 ),
               ],
@@ -794,7 +823,8 @@ class _SettingsTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = isDestructive ? AppColors.error : AppColors.textDark;
+    final colorScheme = Theme.of(context).colorScheme;
+    final color = isDestructive ? colorScheme.error : colorScheme.onSurface;
 
     return Material(
       color: Colors.transparent,
@@ -810,8 +840,8 @@ class _SettingsTile extends StatelessWidget {
                 height: 40,
                 decoration: BoxDecoration(
                   color: isDestructive
-                      ? AppColors.error.withOpacity(0.15)
-                      : AppColors.bgDarkTertiary,
+                      ? colorScheme.error.withAlpha(38)
+                      : colorScheme.surfaceContainerHighest,
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Icon(icon, size: 20, color: color),
@@ -836,8 +866,8 @@ class _SettingsTile extends StatelessWidget {
                         style: TextStyle(
                           fontSize: 13,
                           color: isDestructive
-                              ? AppColors.error.withOpacity(0.6)
-                              : AppColors.textDarkSecondary.withOpacity(0.7),
+                              ? colorScheme.error.withAlpha(153)
+                              : colorScheme.onSurface.withAlpha(128),
                         ),
                       ),
                     ],
@@ -870,6 +900,8 @@ class _SettingsSwitch extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colorScheme = Theme.of(context).colorScheme;
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Row(
@@ -878,10 +910,10 @@ class _SettingsSwitch extends StatelessWidget {
             width: 40,
             height: 40,
             decoration: BoxDecoration(
-              color: AppColors.bgDarkTertiary,
+              color: colorScheme.surfaceContainerHighest,
               borderRadius: BorderRadius.circular(12),
             ),
-            child: Icon(icon, size: 20, color: AppColors.textDark),
+            child: Icon(icon, size: 20, color: colorScheme.onSurface),
           ),
           const SizedBox(width: 14),
           Expanded(
@@ -890,10 +922,10 @@ class _SettingsSwitch extends StatelessWidget {
               children: [
                 Text(
                   title,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 15,
                     fontWeight: FontWeight.w500,
-                    color: AppColors.textDark,
+                    color: colorScheme.onSurface,
                   ),
                 ),
                 const SizedBox(height: 2),
@@ -901,7 +933,7 @@ class _SettingsSwitch extends StatelessWidget {
                   subtitle,
                   style: TextStyle(
                     fontSize: 13,
-                    color: AppColors.textDarkSecondary.withOpacity(0.7),
+                    color: colorScheme.onSurface.withAlpha(128),
                   ),
                 ),
               ],
@@ -910,10 +942,6 @@ class _SettingsSwitch extends StatelessWidget {
           Switch(
             value: value,
             onChanged: onChanged,
-            activeColor: AppColors.primary,
-            activeTrackColor: AppColors.primary.withOpacity(0.3),
-            inactiveThumbColor: AppColors.textDarkSecondary,
-            inactiveTrackColor: AppColors.bgDarkTertiary,
           ),
         ],
       ),
@@ -936,8 +964,8 @@ class _StatusChip extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
         color: isActive
-            ? AppColors.accentGreen.withOpacity(0.15)
-            : AppColors.bgDarkTertiary,
+            ? Theme.of(context).colorScheme.secondary.withOpacity(0.15)
+            : Theme.of(context).colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
@@ -947,7 +975,7 @@ class _StatusChip extends StatelessWidget {
             width: 6,
             height: 6,
             decoration: BoxDecoration(
-              color: isActive ? AppColors.accentGreen : AppColors.textDarkSecondary,
+              color: isActive ? Theme.of(context).colorScheme.secondary : Theme.of(context).colorScheme.onSurface.withAlpha(153),
               shape: BoxShape.circle,
             ),
           ),
@@ -957,7 +985,7 @@ class _StatusChip extends StatelessWidget {
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w500,
-              color: isActive ? AppColors.accentGreen : AppColors.textDarkSecondary,
+              color: isActive ? Theme.of(context).colorScheme.secondary : Theme.of(context).colorScheme.onSurface.withAlpha(153),
             ),
           ),
         ],
@@ -1005,15 +1033,15 @@ class _UsernameSectionState extends ConsumerState<_UsernameSection> {
           trailing: Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
             decoration: BoxDecoration(
-              color: AppColors.accentGreen.withOpacity(0.15),
+              color: Theme.of(context).colorScheme.secondary.withOpacity(0.15),
               borderRadius: BorderRadius.circular(12),
             ),
-            child: const Text(
+            child: Text(
               'Active',
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w500,
-                color: AppColors.accentGreen,
+                color: Theme.of(context).colorScheme.secondary,
               ),
             ),
           ),
@@ -1054,16 +1082,16 @@ class _UsernameSectionState extends ConsumerState<_UsernameSection> {
             'Register a username so others can find you easily',
             style: TextStyle(
               fontSize: 13,
-              color: AppColors.textDarkSecondary.withOpacity(0.7),
+              color: Theme.of(context).colorScheme.onSurface.withAlpha(153).withOpacity(0.7),
             ),
           ),
           const SizedBox(height: 16),
           Container(
             decoration: BoxDecoration(
-              color: AppColors.bgDarkTertiary,
+              color: Theme.of(context).colorScheme.surfaceContainerHighest,
               borderRadius: BorderRadius.circular(14),
               border: _error != null
-                  ? Border.all(color: AppColors.error, width: 1)
+                  ? Border.all(color: Theme.of(context).colorScheme.error, width: 1)
                   : null,
             ),
             child: Row(
@@ -1072,7 +1100,7 @@ class _UsernameSectionState extends ConsumerState<_UsernameSection> {
                 Icon(
                   Icons.alternate_email_rounded,
                   size: 20,
-                  color: AppColors.textDarkSecondary.withOpacity(0.6),
+                  color: Theme.of(context).colorScheme.onSurface.withAlpha(153).withOpacity(0.6),
                 ),
                 Expanded(
                   child: TextField(
@@ -1080,7 +1108,7 @@ class _UsernameSectionState extends ConsumerState<_UsernameSection> {
                     decoration: InputDecoration(
                       hintText: 'username',
                       hintStyle: TextStyle(
-                        color: AppColors.textDarkSecondary.withOpacity(0.4),
+                        color: Theme.of(context).colorScheme.onSurface.withAlpha(153).withOpacity(0.4),
                       ),
                       border: InputBorder.none,
                       contentPadding: const EdgeInsets.symmetric(
@@ -1088,8 +1116,8 @@ class _UsernameSectionState extends ConsumerState<_UsernameSection> {
                         vertical: 14,
                       ),
                     ),
-                    style: const TextStyle(
-                      color: AppColors.textDark,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurface,
                       fontSize: 15,
                     ),
                     textInputAction: TextInputAction.done,
@@ -1104,13 +1132,13 @@ class _UsernameSectionState extends ConsumerState<_UsernameSection> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   decoration: BoxDecoration(
-                    color: AppColors.accent.withOpacity(0.1),
+                    color: Theme.of(context).colorScheme.secondary.withOpacity(0.1),
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: const Text(
+                  child: Text(
                     '.cyx',
                     style: TextStyle(
-                      color: AppColors.accent,
+                      color: Theme.of(context).colorScheme.secondary,
                       fontWeight: FontWeight.w600,
                       fontSize: 14,
                     ),
@@ -1124,21 +1152,21 @@ class _UsernameSectionState extends ConsumerState<_UsernameSection> {
             const SizedBox(height: 8),
             Text(
               _error!,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 12,
-                color: AppColors.error,
+                color: Theme.of(context).colorScheme.error,
               ),
             ),
           ],
           const SizedBox(height: 16),
           if (_isRegistering)
-            const Center(
+            Center(
               child: SizedBox(
                 width: 24,
                 height: 24,
                 child: CircularProgressIndicator(
                   strokeWidth: 2.5,
-                  valueColor: AlwaysStoppedAnimation(AppColors.accent),
+                  valueColor: AlwaysStoppedAnimation(Theme.of(context).colorScheme.secondary),
                 ),
               ),
             )
@@ -1146,7 +1174,7 @@ class _UsernameSectionState extends ConsumerState<_UsernameSection> {
             ElevatedButton(
               onPressed: _registerUsername,
               style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.accent,
+                backgroundColor: Theme.of(context).colorScheme.secondary,
                 foregroundColor: Colors.black,
                 padding: const EdgeInsets.symmetric(vertical: 14),
               ),
@@ -1167,7 +1195,7 @@ class _UsernameSectionState extends ConsumerState<_UsernameSection> {
             'Usernames are 3-63 characters, must start with a letter, and can contain letters, numbers, and underscores.',
             style: TextStyle(
               fontSize: 12,
-              color: AppColors.textDarkSecondary.withOpacity(0.5),
+              color: Theme.of(context).colorScheme.onSurface.withAlpha(153).withOpacity(0.5),
             ),
           ),
         ],
@@ -1303,7 +1331,7 @@ class _NetworkStatusTile extends ConsumerWidget {
         showDialog(
           context: context,
           builder: (ctx) => AlertDialog(
-            backgroundColor: AppColors.bgDarkSecondary,
+            backgroundColor: Theme.of(context).colorScheme.surface,
             title: const Text('Network Status'),
             content: Column(
               mainAxisSize: MainAxisSize.min,
@@ -1364,12 +1392,12 @@ class _NetworkInfoRow extends StatelessWidget {
         children: [
           Text(
             label,
-            style: const TextStyle(color: AppColors.textDarkSecondary),
+            style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withAlpha(153)),
           ),
           Text(
             value,
-            style: const TextStyle(
-              color: AppColors.textDark,
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurface,
               fontWeight: FontWeight.w500,
             ),
           ),
@@ -1416,15 +1444,15 @@ class _ServerConfigTileState extends ConsumerState<_ServerConfigTile> {
             child: SizedBox(
               width: double.infinity,
               child: _isConnecting
-                  ? const Center(
+                  ? Center(
                       child: Padding(
-                        padding: EdgeInsets.all(12),
+                        padding: const EdgeInsets.all(12),
                         child: SizedBox(
                           width: 24,
                           height: 24,
                           child: CircularProgressIndicator(
                             strokeWidth: 2.5,
-                            valueColor: AlwaysStoppedAnimation(AppColors.accent),
+                            valueColor: AlwaysStoppedAnimation(Theme.of(context).colorScheme.secondary),
                           ),
                         ),
                       ),
@@ -1438,10 +1466,10 @@ class _ServerConfigTileState extends ConsumerState<_ServerConfigTile> {
                       label: Text(isConnected ? 'Disconnect' : 'Connect'),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: isConnected
-                            ? AppColors.bgDarkTertiary
-                            : AppColors.accentGreen,
+                            ? Theme.of(context).colorScheme.surfaceContainerHighest
+                            : Theme.of(context).colorScheme.secondary,
                         foregroundColor: isConnected
-                            ? AppColors.textDark
+                            ? Theme.of(context).colorScheme.onSurface
                             : Colors.black,
                         padding: const EdgeInsets.symmetric(vertical: 12),
                       ),
@@ -1456,7 +1484,7 @@ class _ServerConfigTileState extends ConsumerState<_ServerConfigTile> {
               width: double.infinity,
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: AppColors.bgDarkTertiary,
+                color: Theme.of(context).colorScheme.surfaceContainerHighest,
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Row(
@@ -1464,15 +1492,15 @@ class _ServerConfigTileState extends ConsumerState<_ServerConfigTile> {
                   Icon(
                     Icons.public_rounded,
                     size: 16,
-                    color: AppColors.accentGreen.withOpacity(0.8),
+                    color: Theme.of(context).colorScheme.secondary.withOpacity(0.8),
                   ),
                   const SizedBox(width: 8),
                   Text(
                     'Public: ${connection.networkStatus.publicAddress}',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 12,
                       fontFamily: 'monospace',
-                      color: AppColors.textDarkSecondary,
+                      color: Theme.of(context).colorScheme.onSurface.withAlpha(153),
                     ),
                   ),
                 ],
@@ -1499,7 +1527,7 @@ class _ServerConfigTileState extends ConsumerState<_ServerConfigTile> {
                 ? 'Connected to server'
                 : 'Failed to connect'),
             behavior: SnackBarBehavior.floating,
-            backgroundColor: success ? AppColors.accentGreen : AppColors.error,
+            backgroundColor: success ? Theme.of(context).colorScheme.secondary : Theme.of(context).colorScheme.error,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),
             ),
@@ -1539,13 +1567,13 @@ class _ServerConfigTileState extends ConsumerState<_ServerConfigTile> {
             Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: AppColors.accent.withOpacity(0.15),
+                color: Theme.of(context).colorScheme.secondary.withOpacity(0.15),
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: const Icon(
+              child: Icon(
                 Icons.dns_rounded,
                 size: 24,
-                color: AppColors.accent,
+                color: Theme.of(context).colorScheme.secondary,
               ),
             ),
             const SizedBox(width: 14),
@@ -1560,7 +1588,7 @@ class _ServerConfigTileState extends ConsumerState<_ServerConfigTile> {
               'Enter the address of your CyxChat server for P2P discovery and relay.',
               style: TextStyle(
                 fontSize: 13,
-                color: AppColors.textDarkSecondary.withOpacity(0.7),
+                color: Theme.of(context).colorScheme.onSurface.withAlpha(153).withOpacity(0.7),
               ),
             ),
             const SizedBox(height: 16),
@@ -1579,7 +1607,7 @@ class _ServerConfigTileState extends ConsumerState<_ServerConfigTile> {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: AppColors.bgDarkTertiary,
+                color: Theme.of(context).colorScheme.surfaceContainerHighest,
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Row(
@@ -1587,7 +1615,7 @@ class _ServerConfigTileState extends ConsumerState<_ServerConfigTile> {
                   Icon(
                     Icons.info_outline_rounded,
                     size: 18,
-                    color: AppColors.textDarkSecondary.withOpacity(0.7),
+                    color: Theme.of(context).colorScheme.onSurface.withAlpha(153).withOpacity(0.7),
                   ),
                   const SizedBox(width: 10),
                   Expanded(
@@ -1595,7 +1623,7 @@ class _ServerConfigTileState extends ConsumerState<_ServerConfigTile> {
                       'Format: IP:PORT (e.g., 192.168.1.100:7777)',
                       style: TextStyle(
                         fontSize: 12,
-                        color: AppColors.textDarkSecondary.withOpacity(0.7),
+                        color: Theme.of(context).colorScheme.onSurface.withAlpha(153).withOpacity(0.7),
                       ),
                     ),
                   ),
@@ -1672,7 +1700,7 @@ class _ServerRegistryStatus extends ConsumerWidget {
         width: double.infinity,
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: AppColors.bgDarkTertiary,
+          color: Theme.of(context).colorScheme.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(12),
         ),
         child: Column(
@@ -1680,17 +1708,17 @@ class _ServerRegistryStatus extends ConsumerWidget {
           children: [
             Row(
               children: [
-                const Icon(Icons.dns_rounded, size: 14, color: AppColors.textDarkSecondary),
+                Icon(Icons.dns_rounded, size: 14, color: Theme.of(context).colorScheme.onSurface.withAlpha(153)),
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
                     servers.isEmpty
                         ? 'Servers'
                         : 'Servers (${connProvider.healthyServerCount}/${connProvider.serverCount} healthy)',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.w600,
-                      color: AppColors.textDarkSecondary,
+                      color: Theme.of(context).colorScheme.onSurface.withAlpha(153),
                     ),
                   ),
                 ),
@@ -1700,17 +1728,17 @@ class _ServerRegistryStatus extends ConsumerWidget {
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                     decoration: BoxDecoration(
-                      color: AppColors.accent.withOpacity(0.15),
+                      color: Theme.of(context).colorScheme.secondary.withOpacity(0.15),
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child: const Row(
+                    child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.add, size: 12, color: AppColors.accent),
-                        SizedBox(width: 2),
+                        Icon(Icons.add, size: 12, color: Theme.of(context).colorScheme.secondary),
+                        const SizedBox(width: 2),
                         Text(
                           'Add',
-                          style: TextStyle(fontSize: 10, color: AppColors.accent, fontWeight: FontWeight.w600),
+                          style: TextStyle(fontSize: 10, color: Theme.of(context).colorScheme.secondary, fontWeight: FontWeight.w600),
                         ),
                       ],
                     ),
@@ -1732,16 +1760,16 @@ class _ServerRegistryStatus extends ConsumerWidget {
                       Icon(
                         isHealthy ? Icons.check_circle : Icons.radio_button_unchecked,
                         size: 12,
-                        color: isHealthy ? AppColors.accentGreen : AppColors.textDarkSecondary,
+                        color: isHealthy ? Theme.of(context).colorScheme.secondary : Theme.of(context).colorScheme.onSurface.withAlpha(153),
                       ),
                       const SizedBox(width: 6),
                       Expanded(
                         child: Text(
                           s['addr'] as String,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 11,
                             fontFamily: 'monospace',
-                            color: AppColors.textDark,
+                            color: Theme.of(context).colorScheme.onSurface,
                           ),
                         ),
                       ),
@@ -1750,19 +1778,19 @@ class _ServerRegistryStatus extends ConsumerWidget {
                           margin: const EdgeInsets.only(right: 6),
                           padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
                           decoration: BoxDecoration(
-                            color: AppColors.accent.withOpacity(0.1),
+                            color: Theme.of(context).colorScheme.secondary.withOpacity(0.1),
                             borderRadius: BorderRadius.circular(4),
                           ),
-                          child: const Text(
+                          child: Text(
                             'SEED',
-                            style: TextStyle(fontSize: 8, color: AppColors.accent, fontWeight: FontWeight.w600),
+                            style: TextStyle(fontSize: 8, color: Theme.of(context).colorScheme.secondary, fontWeight: FontWeight.w600),
                           ),
                         ),
                       Text(
                         latency > 0 ? '${latency}ms' : state,
                         style: TextStyle(
                           fontSize: 10,
-                          color: isHealthy ? AppColors.accentGreen : AppColors.textDarkSecondary,
+                          color: isHealthy ? Theme.of(context).colorScheme.secondary : Theme.of(context).colorScheme.onSurface.withAlpha(153),
                         ),
                       ),
                     ],
@@ -1770,11 +1798,11 @@ class _ServerRegistryStatus extends ConsumerWidget {
                 );
               }),
             ] else
-              const Padding(
-                padding: EdgeInsets.only(top: 6),
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
                 child: Text(
                   'No servers registered',
-                  style: TextStyle(fontSize: 11, color: AppColors.textDarkSecondary),
+                  style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurface.withAlpha(153)),
                 ),
               ),
           ],
@@ -1789,17 +1817,17 @@ class _ServerRegistryStatus extends ConsumerWidget {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: AppColors.bgDarkSecondary,
+        backgroundColor: Theme.of(context).colorScheme.surface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Row(
           children: [
             Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: AppColors.accent.withOpacity(0.15),
+                color: Theme.of(context).colorScheme.secondary.withOpacity(0.15),
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: const Icon(Icons.add_circle_outline, color: AppColors.accent, size: 20),
+              child: Icon(Icons.add_circle_outline, color: Theme.of(context).colorScheme.secondary, size: 20),
             ),
             const SizedBox(width: 12),
             const Expanded(child: Text('Add Server')),
@@ -1809,9 +1837,9 @@ class _ServerRegistryStatus extends ConsumerWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               'Enter the address of a CyxChat server (ip:port).',
-              style: TextStyle(fontSize: 13, color: AppColors.textDarkSecondary),
+              style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface.withAlpha(153)),
             ),
             const SizedBox(height: 16),
             TextField(
@@ -1819,9 +1847,9 @@ class _ServerRegistryStatus extends ConsumerWidget {
               autofocus: true,
               decoration: InputDecoration(
                 hintText: '192.168.1.100:7777',
-                hintStyle: TextStyle(color: AppColors.textDarkSecondary.withOpacity(0.5)),
+                hintStyle: TextStyle(color: Theme.of(context).colorScheme.onSurface.withAlpha(153).withOpacity(0.5)),
                 filled: true,
-                fillColor: AppColors.bgDarkTertiary,
+                fillColor: Theme.of(context).colorScheme.surfaceContainerHighest,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                   borderSide: BorderSide.none,
@@ -1856,7 +1884,7 @@ class _ServerRegistryStatus extends ConsumerWidget {
                 SnackBar(
                   content: Text(result == 0 ? 'Server added: $addr' : 'Failed to add server'),
                   behavior: SnackBarBehavior.floating,
-                  backgroundColor: result == 0 ? AppColors.accentGreen : AppColors.error,
+                  backgroundColor: result == 0 ? Theme.of(context).colorScheme.secondary : Theme.of(context).colorScheme.error,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 ),
               );
@@ -1889,14 +1917,14 @@ class _FastFileTransferTile extends ConsumerWidget {
                 height: 40,
                 decoration: BoxDecoration(
                   color: isEnabled
-                      ? AppColors.accentOrange.withOpacity(0.15)
-                      : AppColors.bgDarkTertiary,
+                      ? Colors.orange.withOpacity(0.15)
+                      : Theme.of(context).colorScheme.surfaceContainerHighest,
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Icon(
                   Icons.bolt_rounded,
                   size: 20,
-                  color: isEnabled ? AppColors.accentOrange : AppColors.textDark,
+                  color: isEnabled ? Colors.orange : Theme.of(context).colorScheme.onSurface,
                 ),
               ),
               const SizedBox(width: 14),
@@ -1904,12 +1932,12 @@ class _FastFileTransferTile extends ConsumerWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
+                    Text(
                       'Fast File Transfer',
                       style: TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w500,
-                        color: AppColors.textDark,
+                        color: Theme.of(context).colorScheme.onSurface,
                       ),
                     ),
                     const SizedBox(height: 2),
@@ -1917,7 +1945,7 @@ class _FastFileTransferTile extends ConsumerWidget {
                       'Bypass onion for file transfers',
                       style: TextStyle(
                         fontSize: 13,
-                        color: AppColors.textDarkSecondary.withOpacity(0.7),
+                        color: Theme.of(context).colorScheme.onSurface.withAlpha(110),
                       ),
                     ),
                   ],
@@ -1930,10 +1958,10 @@ class _FastFileTransferTile extends ConsumerWidget {
                   // Apply to file provider immediately
                   ref.read(fileActionsProvider).setDirectMode(value);
                 },
-                activeColor: AppColors.accentOrange,
-                activeTrackColor: AppColors.accentOrange.withOpacity(0.3),
-                inactiveThumbColor: AppColors.textDarkSecondary,
-                inactiveTrackColor: AppColors.bgDarkTertiary,
+                activeColor: Colors.orange,
+                activeTrackColor: Colors.orange.withOpacity(0.3),
+                inactiveThumbColor: Theme.of(context).colorScheme.onSurface.withAlpha(153),
+                inactiveTrackColor: Theme.of(context).colorScheme.surfaceContainerHighest,
               ),
             ],
           ),
@@ -1945,10 +1973,10 @@ class _FastFileTransferTile extends ConsumerWidget {
             child: Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: AppColors.accentOrange.withOpacity(0.1),
+                color: Colors.orange.withOpacity(0.1),
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
-                  color: AppColors.accentOrange.withOpacity(0.3),
+                  color: Colors.orange.withOpacity(0.3),
                 ),
               ),
               child: Row(
@@ -1956,7 +1984,7 @@ class _FastFileTransferTile extends ConsumerWidget {
                   Icon(
                     Icons.warning_amber_rounded,
                     size: 16,
-                    color: AppColors.accentOrange.withOpacity(0.9),
+                    color: Colors.orange.withOpacity(0.9),
                   ),
                   const SizedBox(width: 10),
                   Expanded(
@@ -1964,7 +1992,7 @@ class _FastFileTransferTile extends ConsumerWidget {
                       'Direct P2P - peer can see your IP during file transfers',
                       style: TextStyle(
                         fontSize: 12,
-                        color: AppColors.textDarkSecondary.withOpacity(0.8),
+                        color: Theme.of(context).colorScheme.onSurface.withAlpha(153).withOpacity(0.8),
                       ),
                     ),
                   ),
@@ -1997,14 +2025,14 @@ class _VideoCallsTile extends ConsumerWidget {
                 height: 40,
                 decoration: BoxDecoration(
                   color: isEnabled
-                      ? AppColors.accentOrange.withOpacity(0.15)
-                      : AppColors.bgDarkTertiary,
+                      ? Colors.orange.withOpacity(0.15)
+                      : Theme.of(context).colorScheme.surfaceContainerHighest,
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Icon(
                   Icons.videocam_rounded,
                   size: 20,
-                  color: isEnabled ? AppColors.accentOrange : AppColors.textDark,
+                  color: isEnabled ? Colors.orange : Theme.of(context).colorScheme.onSurface,
                 ),
               ),
               const SizedBox(width: 14),
@@ -2012,12 +2040,12 @@ class _VideoCallsTile extends ConsumerWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
+                    Text(
                       'Video Calls',
                       style: TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w500,
-                        color: AppColors.textDark,
+                        color: Theme.of(context).colorScheme.onSurface,
                       ),
                     ),
                     const SizedBox(height: 2),
@@ -2025,7 +2053,7 @@ class _VideoCallsTile extends ConsumerWidget {
                       'Enable video call functionality',
                       style: TextStyle(
                         fontSize: 13,
-                        color: AppColors.textDarkSecondary.withOpacity(0.7),
+                        color: Theme.of(context).colorScheme.onSurface.withAlpha(110),
                       ),
                     ),
                   ],
@@ -2036,10 +2064,10 @@ class _VideoCallsTile extends ConsumerWidget {
                 onChanged: (value) {
                   ref.read(settingsProvider.notifier).setVideoCallsEnabled(value);
                 },
-                activeColor: AppColors.accentOrange,
-                activeTrackColor: AppColors.accentOrange.withOpacity(0.3),
-                inactiveThumbColor: AppColors.textDarkSecondary,
-                inactiveTrackColor: AppColors.bgDarkTertiary,
+                activeColor: Colors.orange,
+                activeTrackColor: Colors.orange.withOpacity(0.3),
+                inactiveThumbColor: Theme.of(context).colorScheme.onSurface.withAlpha(153),
+                inactiveTrackColor: Theme.of(context).colorScheme.surfaceContainerHighest,
               ),
             ],
           ),
@@ -2051,10 +2079,10 @@ class _VideoCallsTile extends ConsumerWidget {
             child: Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: AppColors.accentOrange.withOpacity(0.1),
+                color: Colors.orange.withOpacity(0.1),
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
-                  color: AppColors.accentOrange.withOpacity(0.3),
+                  color: Colors.orange.withOpacity(0.3),
                 ),
               ),
               child: Column(
@@ -2065,7 +2093,7 @@ class _VideoCallsTile extends ConsumerWidget {
                       Icon(
                         Icons.warning_amber_rounded,
                         size: 16,
-                        color: AppColors.accentOrange.withOpacity(0.9),
+                        color: Colors.orange.withOpacity(0.9),
                       ),
                       const SizedBox(width: 10),
                       Expanded(
@@ -2074,7 +2102,7 @@ class _VideoCallsTile extends ConsumerWidget {
                           style: TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.w600,
-                            color: AppColors.accentOrange.withOpacity(0.9),
+                            color: Colors.orange.withOpacity(0.9),
                           ),
                         ),
                       ),
@@ -2085,7 +2113,7 @@ class _VideoCallsTile extends ConsumerWidget {
                     'Video calls are end-to-end encrypted but the peer can see your IP address. This is necessary for real-time communication.',
                     style: TextStyle(
                       fontSize: 12,
-                      color: AppColors.textDarkSecondary.withOpacity(0.8),
+                      color: Theme.of(context).colorScheme.onSurface.withAlpha(153).withOpacity(0.8),
                     ),
                   ),
                 ],
@@ -2119,7 +2147,7 @@ class _LogCountTile extends StatelessWidget {
           child: Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: AppColors.bgDarkTertiary,
+              color: Theme.of(context).colorScheme.surfaceContainerHighest,
               borderRadius: BorderRadius.circular(12),
             ),
             child: Row(
@@ -2127,19 +2155,19 @@ class _LogCountTile extends StatelessWidget {
                 _LogStat(
                   label: 'Total',
                   count: logCount,
-                  color: AppColors.accent,
+                  color: Theme.of(context).colorScheme.secondary,
                 ),
                 const SizedBox(width: 16),
                 _LogStat(
                   label: 'Errors',
                   count: errorCount,
-                  color: errorCount > 0 ? AppColors.error : AppColors.textDarkSecondary,
+                  color: errorCount > 0 ? Theme.of(context).colorScheme.error : Theme.of(context).colorScheme.onSurface.withAlpha(153),
                 ),
                 const SizedBox(width: 16),
                 _LogStat(
                   label: 'Warnings',
                   count: warnCount,
-                  color: warnCount > 0 ? AppColors.accentOrange : AppColors.textDarkSecondary,
+                  color: warnCount > 0 ? Colors.orange : Theme.of(context).colorScheme.onSurface.withAlpha(153),
                 ),
                 const Spacer(),
                 TextButton(
@@ -2156,7 +2184,7 @@ class _LogCountTile extends StatelessWidget {
                     );
                   },
                   style: TextButton.styleFrom(
-                    foregroundColor: AppColors.textDarkSecondary,
+                    foregroundColor: Theme.of(context).colorScheme.onSurface.withAlpha(153),
                     padding: const EdgeInsets.symmetric(horizontal: 8),
                   ),
                   child: const Text('Clear'),
@@ -2198,7 +2226,7 @@ class _LogStat extends StatelessWidget {
           label,
           style: TextStyle(
             fontSize: 10,
-            color: AppColors.textDarkSecondary.withOpacity(0.7),
+            color: Theme.of(context).colorScheme.onSurface.withAlpha(153).withOpacity(0.7),
           ),
         ),
       ],
@@ -2233,13 +2261,13 @@ class _OnionHopSelector extends ConsumerWidget {
                 width: 40,
                 height: 40,
                 decoration: BoxDecoration(
-                  color: AppColors.primary.withOpacity(0.15),
+                  color: Theme.of(context).colorScheme.primary.withOpacity(0.15),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: const Icon(
+                child: Icon(
                   Icons.security_rounded,
                   size: 20,
-                  color: AppColors.primary,
+                  color: Theme.of(context).colorScheme.primary,
                 ),
               ),
               const SizedBox(width: 14),
@@ -2247,12 +2275,12 @@ class _OnionHopSelector extends ConsumerWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
+                    Text(
                       'Onion Routing',
                       style: TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w500,
-                        color: AppColors.textDark,
+                        color: Theme.of(context).colorScheme.onSurface,
                       ),
                     ),
                     const SizedBox(height: 2),
@@ -2260,7 +2288,7 @@ class _OnionHopSelector extends ConsumerWidget {
                       '$currentHops hops · ${settings.hopPayloadCapacity} max payload',
                       style: TextStyle(
                         fontSize: 13,
-                        color: AppColors.textDarkSecondary.withOpacity(0.7),
+                        color: Theme.of(context).colorScheme.onSurface.withAlpha(110),
                       ),
                     ),
                   ],
@@ -2269,7 +2297,7 @@ class _OnionHopSelector extends ConsumerWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
-                  color: AppColors.accentGreen.withOpacity(0.15),
+                  color: Theme.of(context).colorScheme.secondary.withAlpha(38),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Row(
@@ -2278,18 +2306,18 @@ class _OnionHopSelector extends ConsumerWidget {
                     Container(
                       width: 6,
                       height: 6,
-                      decoration: const BoxDecoration(
-                        color: AppColors.accentGreen,
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.secondary,
                         shape: BoxShape.circle,
                       ),
                     ),
                     const SizedBox(width: 6),
-                    const Text(
+                    Text(
                       'Always On',
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w500,
-                        color: AppColors.accentGreen,
+                        color: Theme.of(context).colorScheme.secondary,
                       ),
                     ),
                   ],
@@ -2304,7 +2332,7 @@ class _OnionHopSelector extends ConsumerWidget {
           child: Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: AppColors.bgDarkTertiary,
+              color: Theme.of(context).colorScheme.surfaceContainerHighest,
               borderRadius: BorderRadius.circular(12),
             ),
             child: Row(
@@ -2322,11 +2350,11 @@ class _OnionHopSelector extends ConsumerWidget {
                       padding: const EdgeInsets.symmetric(vertical: 12),
                       decoration: BoxDecoration(
                         color: isSelected
-                            ? AppColors.primary.withOpacity(0.2)
+                            ? Theme.of(context).colorScheme.primary.withOpacity(0.2)
                             : Colors.transparent,
                         borderRadius: BorderRadius.circular(8),
                         border: isSelected
-                            ? Border.all(color: AppColors.primary.withOpacity(0.5))
+                            ? Border.all(color: Theme.of(context).colorScheme.primary.withOpacity(0.5))
                             : null,
                       ),
                       child: Column(
@@ -2337,8 +2365,8 @@ class _OnionHopSelector extends ConsumerWidget {
                               fontSize: 12,
                               fontWeight: FontWeight.w600,
                               color: isSelected
-                                  ? AppColors.primary
-                                  : AppColors.textDarkSecondary,
+                                  ? Theme.of(context).colorScheme.primary
+                                  : Theme.of(context).colorScheme.onSurface.withAlpha(153),
                             ),
                           ),
                           const SizedBox(height: 2),
@@ -2347,8 +2375,8 @@ class _OnionHopSelector extends ConsumerWidget {
                             style: TextStyle(
                               fontSize: 10,
                               color: isSelected
-                                  ? AppColors.primary.withOpacity(0.8)
-                                  : AppColors.textDarkSecondary.withOpacity(0.6),
+                                  ? Theme.of(context).colorScheme.primary.withOpacity(0.8)
+                                  : Theme.of(context).colorScheme.onSurface.withAlpha(153).withOpacity(0.6),
                             ),
                           ),
                           const SizedBox(height: 2),
@@ -2358,8 +2386,8 @@ class _OnionHopSelector extends ConsumerWidget {
                               fontSize: 10,
                               fontWeight: FontWeight.w500,
                               color: isSelected
-                                  ? AppColors.primary.withOpacity(0.7)
-                                  : AppColors.textDarkSecondary.withOpacity(0.5),
+                                  ? Theme.of(context).colorScheme.primary.withOpacity(0.7)
+                                  : Theme.of(context).colorScheme.onSurface.withAlpha(153).withOpacity(0.5),
                             ),
                           ),
                         ],
@@ -2377,10 +2405,10 @@ class _OnionHopSelector extends ConsumerWidget {
           child: Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: AppColors.primary.withOpacity(0.1),
+              color: Theme.of(context).colorScheme.primary.withOpacity(0.1),
               borderRadius: BorderRadius.circular(12),
               border: Border.all(
-                color: AppColors.primary.withOpacity(0.2),
+                color: Theme.of(context).colorScheme.primary.withOpacity(0.2),
               ),
             ),
             child: Row(
@@ -2388,7 +2416,7 @@ class _OnionHopSelector extends ConsumerWidget {
                 Icon(
                   Icons.info_outline_rounded,
                   size: 16,
-                  color: AppColors.primary.withOpacity(0.8),
+                  color: Theme.of(context).colorScheme.primary.withOpacity(0.8),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
@@ -2396,7 +2424,7 @@ class _OnionHopSelector extends ConsumerWidget {
                     'More hops = better anonymity but smaller message size',
                     style: TextStyle(
                       fontSize: 12,
-                      color: AppColors.textDarkSecondary.withOpacity(0.8),
+                      color: Theme.of(context).colorScheme.onSurface.withAlpha(153).withOpacity(0.8),
                     ),
                   ),
                 ),

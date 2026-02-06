@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:cyxchat/theme/app_themes.dart';
 
 /// Settings keys
 class SettingsKeys {
@@ -9,6 +10,13 @@ class SettingsKeys {
   static const String videoCallsEnabled = 'video_calls_enabled';
   static const String hasSeenCallPrivacyWarning = 'has_seen_call_privacy_warning';
   static const String onionHopCount = 'onion_hop_count';
+  // Appearance settings
+  static const String theme = 'app_theme';
+  static const String fontFamily = 'font_family';
+  static const String fontScale = 'font_scale';
+  static const String chatWallpaper = 'chat_wallpaper';
+  static const String bubbleRadius = 'bubble_radius';
+  static const String showMessagePreview = 'show_message_preview';
 }
 
 /// Check for dart-define override
@@ -27,6 +35,13 @@ class SettingsDefaults {
   static const bool videoCallsEnabled = false; // Off by default for privacy
   static const bool hasSeenCallPrivacyWarning = false;
   static const int onionHopCount = 1; // Default 1 hop (direct, best reliability)
+  // Appearance defaults
+  static const AppTheme theme = AppTheme.cyxchat; // Original CyxChat theme
+  static const AppFont fontFamily = AppFont.system;
+  static const FontScale fontScale = FontScale.medium;
+  static const String? chatWallpaper = null; // No wallpaper by default
+  static const double bubbleRadius = 12.0;
+  static const bool showMessagePreview = true;
 }
 
 /// Settings state
@@ -37,6 +52,13 @@ class AppSettings {
   final bool videoCallsEnabled;
   final bool hasSeenCallPrivacyWarning;
   final int onionHopCount;
+  // Appearance settings
+  final AppTheme theme;
+  final AppFont fontFamily;
+  final FontScale fontScale;
+  final String? chatWallpaper;
+  final double bubbleRadius;
+  final bool showMessagePreview;
 
   const AppSettings({
     this.bootstrapServer = '',
@@ -45,6 +67,12 @@ class AppSettings {
     this.videoCallsEnabled = false,
     this.hasSeenCallPrivacyWarning = false,
     this.onionHopCount = 1,
+    this.theme = AppTheme.cyxchat,
+    this.fontFamily = AppFont.system,
+    this.fontScale = FontScale.medium,
+    this.chatWallpaper,
+    this.bubbleRadius = 12.0,
+    this.showMessagePreview = true,
   });
 
   AppSettings copyWith({
@@ -54,6 +82,13 @@ class AppSettings {
     bool? videoCallsEnabled,
     bool? hasSeenCallPrivacyWarning,
     int? onionHopCount,
+    AppTheme? theme,
+    AppFont? fontFamily,
+    FontScale? fontScale,
+    String? chatWallpaper,
+    bool clearWallpaper = false,
+    double? bubbleRadius,
+    bool? showMessagePreview,
   }) {
     return AppSettings(
       bootstrapServer: bootstrapServer ?? this.bootstrapServer,
@@ -62,6 +97,12 @@ class AppSettings {
       videoCallsEnabled: videoCallsEnabled ?? this.videoCallsEnabled,
       hasSeenCallPrivacyWarning: hasSeenCallPrivacyWarning ?? this.hasSeenCallPrivacyWarning,
       onionHopCount: onionHopCount ?? this.onionHopCount,
+      theme: theme ?? this.theme,
+      fontFamily: fontFamily ?? this.fontFamily,
+      fontScale: fontScale ?? this.fontScale,
+      chatWallpaper: clearWallpaper ? null : (chatWallpaper ?? this.chatWallpaper),
+      bubbleRadius: bubbleRadius ?? this.bubbleRadius,
+      showMessagePreview: showMessagePreview ?? this.showMessagePreview,
     );
   }
 
@@ -98,6 +139,25 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
     final bootstrap = _bootstrapServerOverride.isNotEmpty
         ? _bootstrapServerOverride
         : (storedBootstrap ?? SettingsDefaults.bootstrapServer);
+
+    // Load theme
+    final themeIndex = prefs.getInt(SettingsKeys.theme);
+    final theme = themeIndex != null && themeIndex < AppTheme.values.length
+        ? AppTheme.values[themeIndex]
+        : SettingsDefaults.theme;
+
+    // Load font family
+    final fontIndex = prefs.getInt(SettingsKeys.fontFamily);
+    final fontFamily = fontIndex != null && fontIndex < AppFont.values.length
+        ? AppFont.values[fontIndex]
+        : SettingsDefaults.fontFamily;
+
+    // Load font scale
+    final scaleIndex = prefs.getInt(SettingsKeys.fontScale);
+    final fontScale = scaleIndex != null && scaleIndex < FontScale.values.length
+        ? FontScale.values[scaleIndex]
+        : SettingsDefaults.fontScale;
+
     state = AppSettings(
       bootstrapServer: bootstrap,
       relayServer: prefs.getString(SettingsKeys.relayServer) ??
@@ -110,6 +170,14 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
           SettingsDefaults.hasSeenCallPrivacyWarning,
       onionHopCount: prefs.getInt(SettingsKeys.onionHopCount) ??
           SettingsDefaults.onionHopCount,
+      theme: theme,
+      fontFamily: fontFamily,
+      fontScale: fontScale,
+      chatWallpaper: prefs.getString(SettingsKeys.chatWallpaper),
+      bubbleRadius: prefs.getDouble(SettingsKeys.bubbleRadius) ??
+          SettingsDefaults.bubbleRadius,
+      showMessagePreview: prefs.getBool(SettingsKeys.showMessagePreview) ??
+          SettingsDefaults.showMessagePreview,
     );
   }
 
@@ -159,6 +227,54 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(SettingsKeys.onionHopCount, clampedValue);
     state = state.copyWith(onionHopCount: clampedValue);
+  }
+
+  /// Set app theme
+  Future<void> setTheme(AppTheme theme) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(SettingsKeys.theme, theme.index);
+    state = state.copyWith(theme: theme);
+  }
+
+  /// Set font family
+  Future<void> setFontFamily(AppFont fontFamily) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(SettingsKeys.fontFamily, fontFamily.index);
+    state = state.copyWith(fontFamily: fontFamily);
+  }
+
+  /// Set font scale
+  Future<void> setFontScale(FontScale fontScale) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(SettingsKeys.fontScale, fontScale.index);
+    state = state.copyWith(fontScale: fontScale);
+  }
+
+  /// Set chat wallpaper
+  /// Format: null (none), 'solid:#RRGGBB', 'pattern:name', 'file:path'
+  Future<void> setChatWallpaper(String? wallpaper) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (wallpaper == null) {
+      await prefs.remove(SettingsKeys.chatWallpaper);
+      state = state.copyWith(clearWallpaper: true);
+    } else {
+      await prefs.setString(SettingsKeys.chatWallpaper, wallpaper);
+      state = state.copyWith(chatWallpaper: wallpaper);
+    }
+  }
+
+  /// Set message bubble corner radius
+  Future<void> setBubbleRadius(double radius) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(SettingsKeys.bubbleRadius, radius);
+    state = state.copyWith(bubbleRadius: radius);
+  }
+
+  /// Set whether to show message preview in chat list
+  Future<void> setShowMessagePreview(bool show) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(SettingsKeys.showMessagePreview, show);
+    state = state.copyWith(showMessagePreview: show);
   }
 }
 

@@ -70,10 +70,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       ),
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
-          color: AppColors.bgDarkSecondary,
+          color: Theme.of(context).colorScheme.surfaceContainer,
           border: Border(
             top: BorderSide(
-              color: AppColors.bgDarkTertiary,
+              color: Theme.of(context).colorScheme.outlineVariant,
               width: 1,
             ),
           ),
@@ -129,7 +129,7 @@ class _ChatsTab extends ConsumerWidget {
           SliverAppBar(
             floating: true,
             pinned: true,
-            backgroundColor: AppColors.bgDark,
+            backgroundColor: Theme.of(context).scaffoldBackgroundColor,
             toolbarHeight: 60,
             title: Row(
               children: [
@@ -159,7 +159,7 @@ class _ChatsTab extends ConsumerWidget {
                 icon: Container(
                   padding: const EdgeInsets.all(6),
                   decoration: BoxDecoration(
-                    color: AppColors.bgDarkSecondary,
+                    color: Theme.of(context).colorScheme.surfaceContainer,
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: const Icon(Icons.search_rounded, size: 18),
@@ -207,7 +207,7 @@ class _ChatsTab extends ConsumerWidget {
                       child: CircularProgressIndicator(
                         strokeWidth: 3,
                         valueColor: AlwaysStoppedAnimation(
-                          AppColors.primary.withOpacity(0.8),
+                          Theme.of(context).colorScheme.primary.withOpacity(0.8),
                         ),
                       ),
                     ),
@@ -215,7 +215,7 @@ class _ChatsTab extends ConsumerWidget {
                     Text(
                       'Loading conversations...',
                       style: TextStyle(
-                        color: AppColors.textDarkSecondary.withOpacity(0.6),
+                        color: Theme.of(context).colorScheme.onSurface.withAlpha(153).withOpacity(0.6),
                       ),
                     ),
                   ],
@@ -244,7 +244,7 @@ class _ChatsTab extends ConsumerWidget {
         return Container(
           margin: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: AppColors.bgDarkSecondary,
+            color: Theme.of(context).colorScheme.surfaceContainer,
             borderRadius: BorderRadius.circular(20),
           ),
           child: Column(
@@ -255,7 +255,7 @@ class _ChatsTab extends ConsumerWidget {
                 height: 4,
                 margin: const EdgeInsets.only(top: 12),
                 decoration: BoxDecoration(
-                  color: AppColors.bgDarkTertiary,
+                  color: Theme.of(context).colorScheme.outlineVariant,
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
@@ -264,12 +264,12 @@ class _ChatsTab extends ConsumerWidget {
                 leading: Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: AppColors.primary.withOpacity(0.2),
+                    color: Theme.of(context).colorScheme.primary.withOpacity(0.2),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Icon(
                     Icons.person_add_rounded,
-                    color: AppColors.primary,
+                    color: Theme.of(context).colorScheme.primary,
                     size: 22,
                   ),
                 ),
@@ -281,7 +281,7 @@ class _ChatsTab extends ConsumerWidget {
                   'Start a direct conversation',
                   style: TextStyle(
                     fontSize: 12,
-                    color: AppColors.textDarkSecondary,
+                    color: Theme.of(context).colorScheme.onSurface.withAlpha(153),
                   ),
                 ),
                 onTap: () {
@@ -294,20 +294,20 @@ class _ChatsTab extends ConsumerWidget {
                   );
                 },
               ),
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 16),
-                child: Divider(color: AppColors.bgDarkTertiary),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Divider(color: Theme.of(context).colorScheme.outlineVariant),
               ),
               ListTile(
                 leading: Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: AppColors.accent.withOpacity(0.2),
+                    color: Theme.of(context).colorScheme.secondary.withOpacity(0.2),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Icon(
                     Icons.group_add_rounded,
-                    color: AppColors.accent,
+                    color: Theme.of(context).colorScheme.secondary,
                     size: 22,
                   ),
                 ),
@@ -319,7 +319,7 @@ class _ChatsTab extends ConsumerWidget {
                   'Create a group chat',
                   style: TextStyle(
                     fontSize: 12,
-                    color: AppColors.textDarkSecondary,
+                    color: Theme.of(context).colorScheme.onSurface.withAlpha(153),
                   ),
                 ),
                 onTap: () {
@@ -332,20 +332,20 @@ class _ChatsTab extends ConsumerWidget {
                   );
                 },
               ),
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 16),
-                child: Divider(color: AppColors.bgDarkTertiary),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Divider(color: Theme.of(context).colorScheme.outlineVariant),
               ),
               ListTile(
                 leading: Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: AppColors.accentGreen.withOpacity(0.2),
+                    color: Theme.of(context).colorScheme.secondary.withOpacity(0.2),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Icon(
                     Icons.login_rounded,
-                    color: AppColors.accentGreen,
+                    color: Theme.of(context).colorScheme.secondary,
                     size: 22,
                   ),
                 ),
@@ -357,7 +357,7 @@ class _ChatsTab extends ConsumerWidget {
                   'Join with group ID',
                   style: TextStyle(
                     fontSize: 12,
-                    color: AppColors.textDarkSecondary,
+                    color: Theme.of(context).colorScheme.onSurface.withAlpha(153),
                   ),
                 ),
                 onTap: () {
@@ -391,7 +391,7 @@ class _ChatsTab extends ConsumerWidget {
             Text(
               'Paste an invite link or group ID:',
               style: TextStyle(
-                color: AppColors.textDarkSecondary,
+                color: Theme.of(context).colorScheme.onSurface.withAlpha(153),
                 fontSize: 14,
               ),
             ),
@@ -543,8 +543,8 @@ class _EmptyChats extends StatelessWidget {
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   colors: [
-                    AppColors.primary.withOpacity(0.15),
-                    AppColors.accent.withOpacity(0.15),
+                    Theme.of(context).colorScheme.primary.withOpacity(0.15),
+                    Theme.of(context).colorScheme.secondary.withOpacity(0.15),
                   ],
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
@@ -554,16 +554,16 @@ class _EmptyChats extends StatelessWidget {
               child: Icon(
                 Icons.chat_bubble_outline_rounded,
                 size: 40,
-                color: AppColors.primary.withOpacity(0.7),
+                color: Theme.of(context).colorScheme.primary.withOpacity(0.7),
               ),
             ),
             const SizedBox(height: 20),
-            const Text(
+            Text(
               'No conversations yet',
               style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.w600,
-                color: AppColors.textDark,
+                color: Theme.of(context).colorScheme.onSurface,
               ),
             ),
             const SizedBox(height: 8),
@@ -573,17 +573,17 @@ class _EmptyChats extends StatelessWidget {
               style: TextStyle(
                 fontSize: 13,
                 height: 1.4,
-                color: AppColors.textDarkSecondary.withOpacity(0.7),
+                color: Theme.of(context).colorScheme.onSurface.withAlpha(153).withOpacity(0.7),
               ),
             ),
             const SizedBox(height: 20),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               decoration: BoxDecoration(
-                color: AppColors.bgDarkSecondary,
+                color: Theme.of(context).colorScheme.surfaceContainer,
                 borderRadius: BorderRadius.circular(10),
                 border: Border.all(
-                  color: AppColors.bgDarkTertiary,
+                  color: Theme.of(context).colorScheme.outlineVariant,
                   width: 1,
                 ),
               ),
@@ -593,14 +593,14 @@ class _EmptyChats extends StatelessWidget {
                   Icon(
                     Icons.lock_outline_rounded,
                     size: 14,
-                    color: AppColors.accentGreen.withOpacity(0.8),
+                    color: Theme.of(context).colorScheme.secondary.withOpacity(0.8),
                   ),
                   const SizedBox(width: 6),
                   Text(
                     'End-to-end encrypted',
                     style: TextStyle(
                       fontSize: 11,
-                      color: AppColors.textDarkSecondary.withOpacity(0.8),
+                      color: Theme.of(context).colorScheme.onSurface.withAlpha(153).withOpacity(0.8),
                     ),
                   ),
                 ],
@@ -630,22 +630,22 @@ class _ErrorState extends StatelessWidget {
               width: 60,
               height: 60,
               decoration: BoxDecoration(
-                color: AppColors.error.withOpacity(0.15),
+                color: Theme.of(context).colorScheme.error.withOpacity(0.15),
                 borderRadius: BorderRadius.circular(16),
               ),
-              child: const Icon(
+              child: Icon(
                 Icons.error_outline_rounded,
                 size: 32,
-                color: AppColors.error,
+                color: Theme.of(context).colorScheme.error,
               ),
             ),
             const SizedBox(height: 16),
-            const Text(
+            Text(
               'Failed to load chats',
               style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.w600,
-                color: AppColors.textDark,
+                color: Theme.of(context).colorScheme.onSurface,
               ),
             ),
             const SizedBox(height: 8),
@@ -654,9 +654,9 @@ class _ErrorState extends StatelessWidget {
               textAlign: TextAlign.center,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 13,
-                color: AppColors.textDarkSecondary,
+                color: Theme.of(context).colorScheme.onSurface.withAlpha(153),
               ),
             ),
           ],
@@ -675,9 +675,10 @@ class _ConversationCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final hasUnread = conversation.unreadCount > 0;
     final isGroup = conversation.isGroup;
+    final showMessagePreview = ref.watch(settingsProvider).showMessagePreview;
 
     return Material(
-      color: AppColors.bgDarkSecondary,
+      color: Theme.of(context).colorScheme.surfaceContainer,
       borderRadius: BorderRadius.circular(16),
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
@@ -725,7 +726,7 @@ class _ConversationCard extends ConsumerWidget {
                                 Icon(
                                   Icons.group_rounded,
                                   size: 14,
-                                  color: AppColors.accent.withOpacity(0.8),
+                                  color: Theme.of(context).colorScheme.secondary.withOpacity(0.8),
                                 ),
                                 const SizedBox(width: 6),
                               ],
@@ -736,7 +737,7 @@ class _ConversationCard extends ConsumerWidget {
                                   style: TextStyle(
                                     fontSize: 15,
                                     fontWeight: hasUnread ? FontWeight.w600 : FontWeight.w500,
-                                    color: AppColors.textDark,
+                                    color: Theme.of(context).colorScheme.onSurface,
                                   ),
                                 ),
                               ),
@@ -745,7 +746,7 @@ class _ConversationCard extends ConsumerWidget {
                                 Icon(
                                   Icons.push_pin_rounded,
                                   size: 14,
-                                  color: AppColors.primary.withOpacity(0.7),
+                                  color: Theme.of(context).colorScheme.primary.withOpacity(0.7),
                                 ),
                               ],
                               if (conversation.isMuted) ...[
@@ -753,7 +754,7 @@ class _ConversationCard extends ConsumerWidget {
                                 Icon(
                                   Icons.volume_off_rounded,
                                   size: 14,
-                                  color: AppColors.textDarkSecondary.withOpacity(0.5),
+                                  color: Theme.of(context).colorScheme.onSurface.withAlpha(153).withOpacity(0.5),
                                 ),
                               ],
                             ],
@@ -765,53 +766,58 @@ class _ConversationCard extends ConsumerWidget {
                           style: TextStyle(
                             fontSize: 12,
                             color: hasUnread
-                                ? AppColors.accent
-                                : AppColors.textDarkSecondary.withOpacity(0.6),
+                                ? Theme.of(context).colorScheme.secondary
+                                : Theme.of(context).colorScheme.onSurface.withAlpha(153).withOpacity(0.6),
                           ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 6),
-                    // Subtitle row
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            conversation.subtitle,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: hasUnread
-                                  ? AppColors.textDarkSecondary
-                                  : AppColors.textDarkSecondary.withOpacity(0.6),
-                            ),
-                          ),
-                        ),
-                        if (hasUnread) ...[
-                          const SizedBox(width: 8),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                            decoration: BoxDecoration(
-                              gradient: const LinearGradient(
-                                colors: [AppColors.primary, AppColors.primaryLight],
+                    if (showMessagePreview || hasUnread) ...[
+                      const SizedBox(height: 6),
+                      // Subtitle row
+                      Row(
+                        children: [
+                          if (showMessagePreview)
+                            Expanded(
+                              child: Text(
+                                conversation.subtitle,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: hasUnread
+                                      ? Theme.of(context).colorScheme.onSurface.withAlpha(153)
+                                      : Theme.of(context).colorScheme.onSurface.withAlpha(153).withOpacity(0.6),
+                                ),
                               ),
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: Text(
-                              conversation.unreadCount > 99
-                                  ? '99+'
-                                  : conversation.unreadCount.toString(),
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold,
+                            )
+                          else
+                            const Spacer(),
+                          if (hasUnread) ...[
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  colors: [Theme.of(context).colorScheme.primary, Theme.of(context).colorScheme.primaryContainer],
+                                ),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Text(
+                                conversation.unreadCount > 99
+                                    ? '99+'
+                                    : conversation.unreadCount.toString(),
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                ),
                               ),
                             ),
-                          ),
+                          ],
                         ],
-                      ],
-                    ),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -830,7 +836,7 @@ class _ConversationCard extends ConsumerWidget {
         return Container(
           margin: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: AppColors.bgDarkSecondary,
+            color: Theme.of(context).colorScheme.surfaceContainer,
             borderRadius: BorderRadius.circular(20),
           ),
           child: Column(
@@ -841,7 +847,7 @@ class _ConversationCard extends ConsumerWidget {
                 height: 4,
                 margin: const EdgeInsets.only(top: 12),
                 decoration: BoxDecoration(
-                  color: AppColors.bgDarkTertiary,
+                  color: Theme.of(context).colorScheme.outlineVariant,
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
@@ -873,9 +879,9 @@ class _ConversationCard extends ConsumerWidget {
                   Navigator.pop(context);
                 },
               ),
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 16),
-                child: Divider(color: AppColors.bgDarkTertiary),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Divider(color: Theme.of(context).colorScheme.outlineVariant),
               ),
               _BottomSheetOption(
                 icon: Icons.delete_outline_rounded,
@@ -917,9 +923,9 @@ class _ConversationAvatar extends StatelessWidget {
             gradient: LinearGradient(
               colors: hasUnread
                   ? (isGroup
-                      ? [AppColors.accent, AppColors.accent.withOpacity(0.7)]
-                      : [AppColors.primary, AppColors.primaryLight])
-                  : [AppColors.bgDarkTertiary, AppColors.bgDarkTertiary],
+                      ? [Theme.of(context).colorScheme.secondary, Theme.of(context).colorScheme.secondary.withOpacity(0.7)]
+                      : [Theme.of(context).colorScheme.primary, Theme.of(context).colorScheme.primaryContainer])
+                  : [Theme.of(context).colorScheme.outlineVariant, Theme.of(context).colorScheme.outlineVariant],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
             ),
@@ -930,14 +936,14 @@ class _ConversationAvatar extends StatelessWidget {
                 ? Icon(
                     Icons.group_rounded,
                     size: 24,
-                    color: hasUnread ? Colors.white : AppColors.textDarkSecondary,
+                    color: hasUnread ? Colors.white : Theme.of(context).colorScheme.onSurface.withAlpha(153),
                   )
                 : Text(
                     title.isNotEmpty ? title[0].toUpperCase() : '?',
                     style: TextStyle(
                       fontSize: 20,
                       fontWeight: FontWeight.bold,
-                      color: hasUnread ? Colors.white : AppColors.textDarkSecondary,
+                      color: hasUnread ? Colors.white : Theme.of(context).colorScheme.onSurface.withAlpha(153),
                     ),
                   ),
           ),
@@ -951,10 +957,10 @@ class _ConversationAvatar extends StatelessWidget {
               width: 14,
               height: 14,
               decoration: BoxDecoration(
-                color: AppColors.accentGreen,
+                color: Theme.of(context).colorScheme.secondary,
                 shape: BoxShape.circle,
                 border: Border.all(
-                  color: AppColors.bgDarkSecondary,
+                  color: Theme.of(context).colorScheme.surfaceContainer,
                   width: 2,
                 ),
               ),
@@ -980,7 +986,7 @@ class _BottomSheetOption extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = isDestructive ? AppColors.error : AppColors.textDark;
+    final color = isDestructive ? Theme.of(context).colorScheme.error : Theme.of(context).colorScheme.onSurface;
 
     return ListTile(
       leading: Icon(icon, color: color),
@@ -1010,13 +1016,13 @@ class _NetworkStatusChip extends ConsumerWidget {
     final Color statusColor;
     final String statusText;
     if (!isInitialized) {
-      statusColor = AppColors.textDarkSecondary;
+      statusColor = Theme.of(context).colorScheme.onSurface.withAlpha(153);
       statusText = 'Offline';
     } else if (!isBootstrapConnected) {
-      statusColor = AppColors.warning;
+      statusColor = Colors.orange;
       statusText = 'Connecting';
     } else {
-      statusColor = AppColors.accentGreen;
+      statusColor = Theme.of(context).colorScheme.secondary;
       statusText = 'Online';
     }
 
@@ -1027,10 +1033,10 @@ class _NetworkStatusChip extends ConsumerWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
-          color: AppColors.bgDarkSecondary,
+          color: Theme.of(context).colorScheme.surfaceContainer,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
-            color: AppColors.bgDarkTertiary,
+            color: Theme.of(context).colorScheme.outlineVariant,
             width: 1,
           ),
         ),
@@ -1041,12 +1047,12 @@ class _NetworkStatusChip extends ConsumerWidget {
               width: 8,
               height: 8,
               decoration: BoxDecoration(
-                color: isConnected ? AppColors.accentGreen : statusColor,
+                color: isConnected ? Theme.of(context).colorScheme.secondary : statusColor,
                 shape: BoxShape.circle,
                 boxShadow: isConnected
                     ? [
                         BoxShadow(
-                          color: AppColors.accentGreen.withOpacity(0.5),
+                          color: Theme.of(context).colorScheme.secondary.withOpacity(0.5),
                           blurRadius: 6,
                           spreadRadius: 1,
                         ),
@@ -1081,15 +1087,15 @@ class _NetworkStatusChip extends ConsumerWidget {
     final IconData statusIcon;
     if (!isInitialized) {
       statusText = 'Disconnected';
-      statusColor = AppColors.textDarkSecondary;
+      statusColor = Theme.of(context).colorScheme.onSurface.withAlpha(153);
       statusIcon = Icons.wifi_off_rounded;
     } else if (!isBootstrapConnected) {
       statusText = 'Connecting...';
-      statusColor = AppColors.warning;
+      statusColor = Colors.orange;
       statusIcon = Icons.wifi_rounded;
     } else {
       statusText = 'Connected';
-      statusColor = AppColors.accentGreen;
+      statusColor = Theme.of(context).colorScheme.secondary;
       statusIcon = Icons.wifi_rounded;
     }
 
@@ -1142,7 +1148,7 @@ class _NetworkStatusChip extends ConsumerWidget {
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: AppColors.bgDarkTertiary.withOpacity(0.5),
+                  color: Theme.of(context).colorScheme.outlineVariant.withOpacity(0.5),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Row(
@@ -1150,15 +1156,15 @@ class _NetworkStatusChip extends ConsumerWidget {
                     Icon(
                       Icons.info_outline_rounded,
                       size: 18,
-                      color: AppColors.accent.withOpacity(0.8),
+                      color: Theme.of(context).colorScheme.secondary.withOpacity(0.8),
                     ),
                     const SizedBox(width: 10),
-                    const Expanded(
+                    Expanded(
                       child: Text(
                         'Connect to the mesh network to start chatting securely.',
                         style: TextStyle(
                           fontSize: 13,
-                          color: AppColors.textDarkSecondary,
+                          color: Theme.of(context).colorScheme.onSurface.withAlpha(153),
                         ),
                       ),
                     ),
@@ -1213,9 +1219,9 @@ class _NetworkInfoRow extends StatelessWidget {
       children: [
         Text(
           label,
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 14,
-            color: AppColors.textDarkSecondary,
+            color: Theme.of(context).colorScheme.onSurface.withAlpha(153),
           ),
         ),
         Text(
@@ -1223,7 +1229,7 @@ class _NetworkInfoRow extends StatelessWidget {
           style: TextStyle(
             fontSize: 14,
             fontWeight: FontWeight.w500,
-            color: valueColor ?? AppColors.textDark,
+            color: valueColor ?? Theme.of(context).colorScheme.onSurface,
           ),
         ),
       ],
