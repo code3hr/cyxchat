@@ -11,6 +11,7 @@ import 'package:cyxchat/services/log_service.dart';
 import 'package:cyxchat/providers/identity_provider.dart';
 import 'package:cyxchat/providers/settings_provider.dart';
 import 'package:cyxchat/theme/app_themes.dart';
+import 'package:cyxchat/widgets/app_lock_wrapper.dart';
 
 // App colors
 class AppColors {
@@ -120,7 +121,7 @@ class CyxChatApp extends ConsumerWidget {
 
           return identityAsync.when(
             data: (identity) => identity != null
-                ? const HomeScreen()
+                ? const AppLockWrapper(child: HomeScreen())
                 : const OnboardingScreen(),
             loading: () => _SplashScreen(themeData: themeData),
             error: (error, stack) => _ErrorScreen(error: error.toString(), themeData: themeData),

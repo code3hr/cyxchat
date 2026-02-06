@@ -18,6 +18,7 @@ import 'onboarding_screen.dart';
 import 'log_viewer_screen.dart';
 import 'user_guide_screen.dart';
 import 'appearance_settings_screen.dart';
+import 'security_settings_screen.dart';
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -117,39 +118,32 @@ class SettingsScreen extends ConsumerWidget {
 
                 const SizedBox(height: 16),
 
-                // Privacy section
+                // Privacy & Security section
                 _SettingsSection(
-                  title: 'Privacy',
+                  title: 'Privacy & Security',
                   icon: Icons.shield_rounded,
                   iconGradient: [colorScheme.primary, colorScheme.primary.withAlpha(180)],
                   children: [
+                    // Security settings link
+                    _SettingsTile(
+                      icon: Icons.security_rounded,
+                      title: 'Security Settings',
+                      subtitle: 'App lock, screen security, privacy controls',
+                      trailing: Icon(
+                        Icons.chevron_right_rounded,
+                        color: colorScheme.onSurface.withAlpha(153),
+                      ),
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const SecuritySettingsScreen()),
+                      ),
+                    ),
                     // Onion routing hop count selector
                     const _OnionHopSelector(),
                     // Fast file transfer toggle
                     const _FastFileTransferTile(),
                     // Video calls toggle
                     const _VideoCallsTile(),
-                    _SettingsSwitch(
-                      icon: Icons.lock_outline_rounded,
-                      title: 'Screen Lock',
-                      subtitle: 'Require authentication to open',
-                      value: false,
-                      onChanged: (value) {},
-                    ),
-                    _SettingsSwitch(
-                      icon: Icons.visibility_off_rounded,
-                      title: 'Read Receipts',
-                      subtitle: 'Let others know when you\'ve read',
-                      value: true,
-                      onChanged: (value) {},
-                    ),
-                    _SettingsSwitch(
-                      icon: Icons.keyboard_rounded,
-                      title: 'Typing Indicators',
-                      subtitle: 'Show when you\'re typing',
-                      value: true,
-                      onChanged: (value) {},
-                    ),
                   ],
                 ),
 

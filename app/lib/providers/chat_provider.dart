@@ -8,6 +8,7 @@ import '../ffi/bindings.dart';
 import '../services/log_service.dart';
 import '../services/identity_service.dart';
 import '../utils/node_id_utils.dart';
+import 'settings_provider.dart';
 
 /// Received message from native layer
 class ReceivedMessage {
@@ -801,22 +802,32 @@ class ChatActions {
     );
   }
 
-  /// Send read receipt
+  /// Send read receipt (respects privacy settings)
   Future<bool> sendReadReceipt({
     required String toPeerId,
     required String msgId,
   }) {
+    // Check if read receipts are enabled in settings
+    final settings = _ref.read(settingsProvider);
+    if (!settings.sendReadReceipts) {
+      return Future.value(true); // Silently succeed without sending
+    }
     return _ref.read(chatNotifierProvider).sendReadReceipt(
       toPeerId: toPeerId,
       msgId: msgId,
     );
   }
 
-  /// Send typing indicator
+  /// Send typing indicator (respects privacy settings)
   Future<bool> sendTyping({
     required String toPeerId,
     required bool isTyping,
   }) {
+    // Check if typing indicators are enabled in settings
+    final settings = _ref.read(settingsProvider);
+    if (!settings.sendTypingIndicators) {
+      return Future.value(true); // Silently succeed without sending
+    }
     return _ref.read(chatNotifierProvider).sendTyping(
       toPeerId: toPeerId,
       isTyping: isTyping,

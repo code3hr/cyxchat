@@ -17,11 +17,28 @@ class SettingsKeys {
   static const String chatWallpaper = 'chat_wallpaper';
   static const String bubbleRadius = 'bubble_radius';
   static const String showMessagePreview = 'show_message_preview';
+  // Security settings
+  static const String appLockEnabled = 'app_lock_enabled';
+  static const String appLockTimeout = 'app_lock_timeout';
+  static const String screenSecurityEnabled = 'screen_security_enabled';
+  static const String hideInAppSwitcher = 'hide_in_app_switcher';
+  static const String disappearingMessagesDefault = 'disappearing_messages_default';
+  static const String sendReadReceipts = 'send_read_receipts';
+  static const String sendTypingIndicators = 'send_typing_indicators';
+  static const String notificationPreview = 'notification_preview';
+  static const String incognitoKeyboard = 'incognito_keyboard';
 }
 
 /// Check for dart-define override
 /// Set via --dart-define=BOOTSTRAP_SERVER=127.0.0.1:7777
 const String _bootstrapServerOverride = String.fromEnvironment('BOOTSTRAP_SERVER', defaultValue: '');
+
+/// Notification preview options
+enum NotificationPreview {
+  full,        // Show sender and message
+  senderOnly,  // Show sender name only
+  none,        // Show "New Message" only
+}
 
 /// Default values
 class SettingsDefaults {
@@ -42,6 +59,16 @@ class SettingsDefaults {
   static const String? chatWallpaper = null; // No wallpaper by default
   static const double bubbleRadius = 12.0;
   static const bool showMessagePreview = true;
+  // Security defaults
+  static const bool appLockEnabled = false;
+  static const int appLockTimeout = 60; // 1 minute
+  static const bool screenSecurityEnabled = false;
+  static const bool hideInAppSwitcher = false;
+  static const int? disappearingMessagesDefault = null; // Off by default
+  static const bool sendReadReceipts = true;
+  static const bool sendTypingIndicators = true;
+  static const NotificationPreview notificationPreview = NotificationPreview.full;
+  static const bool incognitoKeyboard = false;
 }
 
 /// Settings state
@@ -59,6 +86,16 @@ class AppSettings {
   final String? chatWallpaper;
   final double bubbleRadius;
   final bool showMessagePreview;
+  // Security settings
+  final bool appLockEnabled;
+  final int appLockTimeout; // seconds
+  final bool screenSecurityEnabled;
+  final bool hideInAppSwitcher;
+  final int? disappearingMessagesDefault; // seconds, null = off
+  final bool sendReadReceipts;
+  final bool sendTypingIndicators;
+  final NotificationPreview notificationPreview;
+  final bool incognitoKeyboard;
 
   const AppSettings({
     this.bootstrapServer = '',
@@ -73,6 +110,16 @@ class AppSettings {
     this.chatWallpaper,
     this.bubbleRadius = 12.0,
     this.showMessagePreview = true,
+    // Security defaults
+    this.appLockEnabled = false,
+    this.appLockTimeout = 60,
+    this.screenSecurityEnabled = false,
+    this.hideInAppSwitcher = false,
+    this.disappearingMessagesDefault,
+    this.sendReadReceipts = true,
+    this.sendTypingIndicators = true,
+    this.notificationPreview = NotificationPreview.full,
+    this.incognitoKeyboard = false,
   });
 
   AppSettings copyWith({
@@ -89,6 +136,17 @@ class AppSettings {
     bool clearWallpaper = false,
     double? bubbleRadius,
     bool? showMessagePreview,
+    // Security settings
+    bool? appLockEnabled,
+    int? appLockTimeout,
+    bool? screenSecurityEnabled,
+    bool? hideInAppSwitcher,
+    int? disappearingMessagesDefault,
+    bool clearDisappearingMessages = false,
+    bool? sendReadReceipts,
+    bool? sendTypingIndicators,
+    NotificationPreview? notificationPreview,
+    bool? incognitoKeyboard,
   }) {
     return AppSettings(
       bootstrapServer: bootstrapServer ?? this.bootstrapServer,
@@ -103,6 +161,16 @@ class AppSettings {
       chatWallpaper: clearWallpaper ? null : (chatWallpaper ?? this.chatWallpaper),
       bubbleRadius: bubbleRadius ?? this.bubbleRadius,
       showMessagePreview: showMessagePreview ?? this.showMessagePreview,
+      // Security settings
+      appLockEnabled: appLockEnabled ?? this.appLockEnabled,
+      appLockTimeout: appLockTimeout ?? this.appLockTimeout,
+      screenSecurityEnabled: screenSecurityEnabled ?? this.screenSecurityEnabled,
+      hideInAppSwitcher: hideInAppSwitcher ?? this.hideInAppSwitcher,
+      disappearingMessagesDefault: clearDisappearingMessages ? null : (disappearingMessagesDefault ?? this.disappearingMessagesDefault),
+      sendReadReceipts: sendReadReceipts ?? this.sendReadReceipts,
+      sendTypingIndicators: sendTypingIndicators ?? this.sendTypingIndicators,
+      notificationPreview: notificationPreview ?? this.notificationPreview,
+      incognitoKeyboard: incognitoKeyboard ?? this.incognitoKeyboard,
     );
   }
 
@@ -158,6 +226,12 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
         ? FontScale.values[scaleIndex]
         : SettingsDefaults.fontScale;
 
+    // Load notification preview
+    final notificationIndex = prefs.getInt(SettingsKeys.notificationPreview);
+    final notificationPreview = notificationIndex != null && notificationIndex < NotificationPreview.values.length
+        ? NotificationPreview.values[notificationIndex]
+        : SettingsDefaults.notificationPreview;
+
     state = AppSettings(
       bootstrapServer: bootstrap,
       relayServer: prefs.getString(SettingsKeys.relayServer) ??
@@ -178,6 +252,23 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
           SettingsDefaults.bubbleRadius,
       showMessagePreview: prefs.getBool(SettingsKeys.showMessagePreview) ??
           SettingsDefaults.showMessagePreview,
+      // Security settings
+      appLockEnabled: prefs.getBool(SettingsKeys.appLockEnabled) ??
+          SettingsDefaults.appLockEnabled,
+      appLockTimeout: prefs.getInt(SettingsKeys.appLockTimeout) ??
+          SettingsDefaults.appLockTimeout,
+      screenSecurityEnabled: prefs.getBool(SettingsKeys.screenSecurityEnabled) ??
+          SettingsDefaults.screenSecurityEnabled,
+      hideInAppSwitcher: prefs.getBool(SettingsKeys.hideInAppSwitcher) ??
+          SettingsDefaults.hideInAppSwitcher,
+      disappearingMessagesDefault: prefs.getInt(SettingsKeys.disappearingMessagesDefault),
+      sendReadReceipts: prefs.getBool(SettingsKeys.sendReadReceipts) ??
+          SettingsDefaults.sendReadReceipts,
+      sendTypingIndicators: prefs.getBool(SettingsKeys.sendTypingIndicators) ??
+          SettingsDefaults.sendTypingIndicators,
+      notificationPreview: notificationPreview,
+      incognitoKeyboard: prefs.getBool(SettingsKeys.incognitoKeyboard) ??
+          SettingsDefaults.incognitoKeyboard,
     );
   }
 
@@ -275,6 +366,76 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(SettingsKeys.showMessagePreview, show);
     state = state.copyWith(showMessagePreview: show);
+  }
+
+  // Security settings setters
+
+  /// Set app lock enabled
+  Future<void> setAppLockEnabled(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(SettingsKeys.appLockEnabled, value);
+    state = state.copyWith(appLockEnabled: value);
+  }
+
+  /// Set app lock timeout in seconds
+  Future<void> setAppLockTimeout(int seconds) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(SettingsKeys.appLockTimeout, seconds);
+    state = state.copyWith(appLockTimeout: seconds);
+  }
+
+  /// Set screen security (block screenshots)
+  Future<void> setScreenSecurityEnabled(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(SettingsKeys.screenSecurityEnabled, value);
+    state = state.copyWith(screenSecurityEnabled: value);
+  }
+
+  /// Set hide in app switcher
+  Future<void> setHideInAppSwitcher(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(SettingsKeys.hideInAppSwitcher, value);
+    state = state.copyWith(hideInAppSwitcher: value);
+  }
+
+  /// Set default disappearing messages duration (null = off)
+  Future<void> setDisappearingMessagesDefault(int? seconds) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (seconds == null) {
+      await prefs.remove(SettingsKeys.disappearingMessagesDefault);
+      state = state.copyWith(clearDisappearingMessages: true);
+    } else {
+      await prefs.setInt(SettingsKeys.disappearingMessagesDefault, seconds);
+      state = state.copyWith(disappearingMessagesDefault: seconds);
+    }
+  }
+
+  /// Set send read receipts
+  Future<void> setSendReadReceipts(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(SettingsKeys.sendReadReceipts, value);
+    state = state.copyWith(sendReadReceipts: value);
+  }
+
+  /// Set send typing indicators
+  Future<void> setSendTypingIndicators(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(SettingsKeys.sendTypingIndicators, value);
+    state = state.copyWith(sendTypingIndicators: value);
+  }
+
+  /// Set notification preview level
+  Future<void> setNotificationPreview(NotificationPreview preview) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(SettingsKeys.notificationPreview, preview.index);
+    state = state.copyWith(notificationPreview: preview);
+  }
+
+  /// Set incognito keyboard
+  Future<void> setIncognitoKeyboard(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(SettingsKeys.incognitoKeyboard, value);
+    state = state.copyWith(incognitoKeyboard: value);
   }
 }
 
