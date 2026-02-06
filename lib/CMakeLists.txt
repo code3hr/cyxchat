@@ -95,6 +95,49 @@ if(SODIUM_FOUND AND (NOT SODIUM_INCLUDE_DIRS OR NOT SODIUM_LIBRARIES))
     set(SODIUM_FOUND FALSE)
 endif()
 
+# Find miniupnpc (for UPnP support - needed when linking with cyxwiz that has UPnP)
+option(CYXCHAT_ENABLE_UPNP "Enable UPnP support (must match cyxwiz build)" ON)
+if(CYXCHAT_ENABLE_UPNP)
+    # Try vcpkg config first
+    find_package(miniupnpc CONFIG QUIET)
+    if(miniupnpc_FOUND)
+        set(UPNP_FOUND TRUE)
+        set(UPNP_TARGET miniupnpc::miniupnpc)
+        message(STATUS "Found miniupnpc via vcpkg")
+    endif()
+
+    # Manual fallback
+    if(NOT UPNP_FOUND)
+        find_path(UPNP_INCLUDE_DIR miniupnpc/miniupnpc.h
+            PATHS
+                "$ENV{MINIUPNPC_ROOT}/include"
+                "${CMAKE_CURRENT_SOURCE_DIR}/../vcpkg/packages/miniupnpc_x64-windows/include"
+                "${CMAKE_CURRENT_SOURCE_DIR}/../vcpkg/installed/x64-windows/include"
+                "C:/vcpkg/installed/x64-windows/include"
+                "/usr/local/include"
+                "/usr/include"
+        )
+        find_library(UPNP_LIBRARY
+            NAMES miniupnpc
+            PATHS
+                "$ENV{MINIUPNPC_ROOT}/lib"
+                "${CMAKE_CURRENT_SOURCE_DIR}/../vcpkg/packages/miniupnpc_x64-windows/lib"
+                "${CMAKE_CURRENT_SOURCE_DIR}/../vcpkg/installed/x64-windows/lib"
+                "C:/vcpkg/installed/x64-windows/lib"
+                "/usr/local/lib"
+                "/usr/lib"
+        )
+        if(UPNP_INCLUDE_DIR AND UPNP_LIBRARY)
+            set(UPNP_FOUND TRUE)
+            message(STATUS "Found miniupnpc: ${UPNP_LIBRARY}")
+        endif()
+    endif()
+
+    if(NOT UPNP_FOUND)
+        message(STATUS "miniupnpc not found - UPnP linking disabled")
+    endif()
+endif()
+
 # Check if explicit paths were provided on command line
 if(SODIUM_INCLUDE_DIR AND SODIUM_LIBRARY)
     set(SODIUM_FOUND TRUE)
@@ -228,6 +271,18 @@ if(CYXCHAT_BUILD_SHARED)
         target_link_libraries(cyxchat PRIVATE ${CYXWIZ_LIBRARY})
     endif()
 
+    # Link miniupnpc if UPnP is enabled (needed for cyxwiz UPnP support)
+    if(UPNP_FOUND)
+        if(UPNP_TARGET)
+            target_link_libraries(cyxchat PRIVATE ${UPNP_TARGET})
+        else()
+            target_link_libraries(cyxchat PRIVATE ${UPNP_LIBRARY})
+        endif()
+        if(WIN32)
+            target_link_libraries(cyxchat PRIVATE iphlpapi)
+        endif()
+    endif()
+
     set_target_properties(cyxchat PROPERTIES
         VERSION ${PROJECT_VERSION}
         SOVERSION 0
@@ -268,6 +323,18 @@ if(CYXCHAT_BUILD_STATIC)
         target_link_libraries(cyxchat_static PUBLIC ${SODIUM_LIBRARIES})
     endif()
 
+    # Link miniupnpc if UPnP is enabled
+    if(UPNP_FOUND)
+        if(UPNP_TARGET)
+            target_link_libraries(cyxchat_static PUBLIC ${UPNP_TARGET})
+        else()
+            target_link_libraries(cyxchat_static PUBLIC ${UPNP_LIBRARY})
+        endif()
+        if(WIN32)
+            target_link_libraries(cyxchat_static PUBLIC iphlpapi)
+        endif()
+    endif()
+
     set_target_properties(cyxchat_static PROPERTIES
         OUTPUT_NAME cyxchat_static
     )
@@ -305,6 +372,17 @@ if(CYXCHAT_BUILD_TESTS)
         target_link_libraries(test_cyxchat PRIVATE ${SODIUM_TARGET})
     elseif(SODIUM_LIBRARIES)
         target_link_libraries(test_cyxchat PRIVATE ${SODIUM_LIBRARIES})
+    endif()
+    # Link miniupnpc if UPnP is enabled
+    if(UPNP_FOUND)
+        if(UPNP_TARGET)
+            target_link_libraries(test_cyxchat PRIVATE ${UPNP_TARGET})
+        else()
+            target_link_libraries(test_cyxchat PRIVATE ${UPNP_LIBRARY})
+        endif()
+        if(WIN32)
+            target_link_libraries(test_cyxchat PRIVATE iphlpapi)
+        endif()
     endif()
 
     add_test(NAME test_cyxchat COMMAND test_cyxchat)
