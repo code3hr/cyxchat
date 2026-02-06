@@ -122,6 +122,19 @@ typedef void (*cyxchat_conn_complete_callback_t)(
     void *user_data
 );
 
+/**
+ * Connection progress callback - fires at each connection lifecycle event
+ * Provides real-time feedback for UI during connection establishment
+ */
+typedef void (*cyxchat_conn_progress_callback_t)(
+    const cyxwiz_node_id_t *peer_id,     /* Peer being connected to */
+    cyxchat_conn_event_t event,           /* Current event in lifecycle */
+    uint8_t retry_num,                    /* Current retry number (for ANNOUNCE_RETRY) */
+    uint8_t retry_max,                    /* Max retries (typically 10) */
+    cyxchat_conn_fail_t fail_reason,      /* Failure reason (for FAILED event) */
+    void *user_data
+);
+
 /* ============================================================
  * Lifecycle
  * ============================================================ */
@@ -401,6 +414,16 @@ CYXCHAT_API void cyxchat_conn_set_on_state_change(
 CYXCHAT_API void cyxchat_conn_set_on_data(
     cyxchat_conn_ctx_t *ctx,
     cyxchat_conn_data_callback_t callback,
+    void *user_data
+);
+
+/**
+ * Set connection progress callback
+ * Called at each step of the connection lifecycle for real-time UI feedback
+ */
+CYXCHAT_API void cyxchat_conn_set_on_progress(
+    cyxchat_conn_ctx_t *ctx,
+    cyxchat_conn_progress_callback_t callback,
     void *user_data
 );
 

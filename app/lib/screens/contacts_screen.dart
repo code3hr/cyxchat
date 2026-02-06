@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/contact.dart';
+import '../models/connection_progress.dart';
 import '../providers/conversation_provider.dart';
 import '../providers/contact_provider.dart';
 import '../providers/network_provider.dart';
@@ -128,6 +129,9 @@ class _ContactTile extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final connProvider = ref.watch(connectionNotifierProvider);
+    final progress = connProvider.getProgress(contact.nodeId);
+
     return ListTile(
       leading: Stack(
         children: [
@@ -144,7 +148,7 @@ class _ContactTile extends ConsumerWidget {
           Positioned(
             right: 0,
             bottom: 0,
-            child: _PresenceIndicator(contact: contact),
+            child: _PresenceIndicator(contact: contact, progress: progress),
           ),
         ],
       ),
@@ -161,14 +165,54 @@ class _ContactTile extends ConsumerWidget {
             ),
         ],
       ),
-      subtitle: Text(
-        contact.statusText ?? contact.presence.displayName,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(color: Colors.grey[600]),
-      ),
+      subtitle: _buildSubtitle(context, progress),
       onTap: onTap,
       onLongPress: () => _showContactOptions(context, ref),
+    );
+  }
+
+  Widget _buildSubtitle(BuildContext context, PeerConnectionProgress? progress) {
+    // Show connection progress if connecting
+    if (progress != null && progress.isConnecting) {
+      return Row(
+        children: [
+          SizedBox(
+            width: 10,
+            height: 10,
+            child: CircularProgressIndicator(
+              strokeWidth: 1.5,
+              color: progress.statusColor,
+            ),
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              progress.statusText,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 12, color: progress.statusColor),
+            ),
+          ),
+        ],
+      );
+    }
+
+    // Show failure status briefly
+    if (progress != null && progress.phase == ConnectionPhase.failed) {
+      return Text(
+        progress.statusText,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(fontSize: 12, color: Colors.red),
+      );
+    }
+
+    // Default: show presence or status text
+    return Text(
+      contact.statusText ?? contact.presence.displayName,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(color: Colors.grey[600]),
     );
   }
 
@@ -214,18 +258,38 @@ class _ContactTile extends ConsumerWidget {
   }
 }
 
-/// Presence indicator widget showing online/away/offline status
+/// Presence indicator widget showing online/away/offline/connecting status
 class _PresenceIndicator extends ConsumerWidget {
   final Contact contact;
-  const _PresenceIndicator({required this.contact});
+  final PeerConnectionProgress? progress;
+  const _PresenceIndicator({required this.contact, this.progress});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final connProvider = ref.watch(connectionNotifierProvider);
     final isReachable = connProvider.hasPeerKey(contact.nodeId);
-    
+
+    // Show connecting animation if actively connecting
+    if (progress != null && progress!.isConnecting) {
+      return Container(
+        width: 12,
+        height: 12,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          border: Border.all(
+            color: Theme.of(context).scaffoldBackgroundColor,
+            width: 2,
+          ),
+        ),
+        child: const CircularProgressIndicator(
+          strokeWidth: 1.5,
+          color: Colors.orange,
+        ),
+      );
+    }
+
     Color indicatorColor;
-    if (isReachable) {
+    if (progress?.isConnected == true || isReachable) {
       switch (contact.presence) {
         case PresenceStatus.away:
           indicatorColor = Colors.blue;
@@ -236,8 +300,10 @@ class _PresenceIndicator extends ConsumerWidget {
         default:
           indicatorColor = Colors.green;
       }
-    } else {
+    } else if (progress?.phase == ConnectionPhase.failed) {
       indicatorColor = Colors.red;
+    } else {
+      indicatorColor = Colors.grey;
     }
 
     return Container(

@@ -17,6 +17,7 @@ import '../providers/contact_provider.dart';
 import '../providers/group_ffi_provider.dart';
 import '../providers/queue_provider.dart';
 import '../models/queued_message.dart';
+import '../models/connection_progress.dart';
 import '../ffi/bindings.dart' show CyxChatFileState, CyxChatFileConst;
 import '../models/models.dart';
 import '../services/group_service.dart';
@@ -100,12 +101,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           data: (conv) {
             // Use the actual peer ID from the conversation, not the conversation ID
             final peerId = conv?.peerId;
+
+            // Get connection progress for real-time feedback
+            final progress = peerId != null && connectionProvider.initialized
+                ? connectionProvider.getProgress(peerId)
+                : null;
+
+            // Fallback to old method if no progress yet
             final hasKey = peerId != null &&
                 connectionProvider.initialized &&
                 connectionProvider.hasPeerKey(peerId);
-            final isConnecting = peerId != null &&
-                connectionProvider.initialized &&
-                !hasKey;
             final isRelayed = peerId != null &&
                 connectionProvider.initialized &&
                 connectionProvider.isRelayed(peerId);
@@ -113,15 +118,24 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             // Determine connection status text and color
             String statusText;
             Color statusColor;
-            if (isConnecting) {
-              statusText = 'Establishing secure connection...';
-              statusColor = Colors.orange;
+            bool showSpinner = false;
+
+            if (progress != null && progress.phase != ConnectionPhase.idle) {
+              // Use granular progress from callback
+              statusText = progress.statusText;
+              statusColor = progress.statusColor;
+              showSpinner = progress.isConnecting;
             } else if (hasKey && isRelayed) {
               statusText = 'Secured (via relay)';
               statusColor = Colors.blue;
             } else if (hasKey) {
               statusText = 'Secured (direct P2P)';
               statusColor = Colors.green;
+            } else if (peerId != null && connectionProvider.initialized) {
+              // No progress yet but peer exists - still connecting
+              statusText = 'Establishing secure connection...';
+              statusColor = Colors.orange;
+              showSpinner = true;
             } else {
               statusText = '';
               statusColor = Colors.grey;
@@ -132,9 +146,29 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               children: [
                 Text(conv?.title ?? 'Chat'),
                 if (statusText.isNotEmpty)
-                  Text(
-                    statusText,
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.normal, color: statusColor),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (showSpinner)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 6),
+                          child: SizedBox(
+                            width: 10,
+                            height: 10,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 1.5,
+                              valueColor: AlwaysStoppedAnimation(statusColor),
+                            ),
+                          ),
+                        ),
+                      Flexible(
+                        child: Text(
+                          statusText,
+                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.normal, color: statusColor),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
                   ),
               ],
             );

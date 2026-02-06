@@ -56,8 +56,11 @@ typedef struct {
     int has_pubkey;                 /* 1 if pubkey is valid */
 } cyxchat_pending_conn_t;
 
-/* Throttle interval for sending ANNOUNCEs to same peer (60 seconds) */
+/* Throttle interval for sending ANNOUNCEs to same peer */
 #define CYXCHAT_ANNOUNCE_THROTTLE_MS 10000
+/* Retry interval and max for key exchange */
+#define CYXCHAT_ANNOUNCE_RETRY_MS    3000  /* Retry every 3s until key exchange completes */
+#define CYXCHAT_ANNOUNCE_MAX_RETRIES 10    /* Give up after 30s */
 
 /* Per-peer connection info */
 typedef struct {
@@ -129,6 +132,10 @@ struct cyxchat_conn_ctx {
     /* DHT callbacks */
     cyxchat_dht_node_callback_t on_dht_node;
     void *dht_node_user_data;
+
+    /* Progress callback for real-time connection feedback */
+    cyxchat_conn_progress_callback_t on_progress;
+    void *progress_user_data;
 
     /* File context for direct mode routing */
     void *file_ctx;
@@ -231,6 +238,35 @@ static void set_peer_state(cyxchat_conn_ctx_t *ctx, cyxchat_peer_conn_t *peer,
         ctx->on_state_change(ctx, &peer->peer_id, old_state, new_state,
                             ctx->state_change_user_data);
     }
+}
+
+/* Fire progress event for real-time UI feedback */
+static void fire_progress_event(cyxchat_conn_ctx_t *ctx,
+                                 const cyxwiz_node_id_t *peer_id,
+                                 cyxchat_conn_event_t event,
+                                 uint8_t retry_num,
+                                 uint8_t retry_max,
+                                 cyxchat_conn_fail_t fail_reason)
+{
+    if (!ctx || !ctx->on_progress || !peer_id) return;
+
+    /* Input validation: clamp event to valid range */
+    if (event > CYXCHAT_CONN_EVENT_FAILED) {
+        event = CYXCHAT_CONN_EVENT_FAILED;
+    }
+
+    /* Input validation: clamp fail_reason to valid range */
+    if (fail_reason > CYXCHAT_CONN_FAIL_RELAY_UNAVAILABLE) {
+        fail_reason = CYXCHAT_CONN_FAIL_NONE;
+    }
+
+    /* Input validation: ensure retry_num doesn't exceed retry_max */
+    if (retry_max > 0 && retry_num > retry_max) {
+        retry_num = retry_max;
+    }
+
+    ctx->on_progress(peer_id, event, retry_num, retry_max, fail_reason,
+                     ctx->progress_user_data);
 }
 
 /* Relay data callback - forwards relay data to application */
@@ -439,6 +475,10 @@ static void on_peer_discovered(cyxwiz_transport_t *transport,
         if (conn && conn->state == CYXCHAT_CONN_CONNECTING) {
             /* The transport layer handles hole punching automatically */
             conn->rssi = peer->rssi;
+
+            /* Fire progress event: peer found */
+            fire_progress_event(ctx, &peer->id, CYXCHAT_CONN_EVENT_PEER_FOUND,
+                                0, CYXCHAT_ANNOUNCE_MAX_RETRIES, CYXCHAT_CONN_FAIL_NONE);
         }
     }
 
@@ -563,7 +603,16 @@ static void on_peer_key_received(const cyxwiz_node_id_t *peer_id,
             snprintf(hex_id + i*2, 3, "%02x", peer_id->bytes[i]);
         }
         CYXWIZ_INFO("Key exchange complete with peer %.16s...", hex_id);
-/* Store pubkey in peer connection for later retrieval */        if (conn) {            memcpy(conn->pubkey, peer_pubkey, 32);            conn->has_pubkey = 1;        }
+
+        /* Fire progress event: key received */
+        fire_progress_event(ctx, peer_id, CYXCHAT_CONN_EVENT_KEY_RECEIVED,
+                            0, CYXCHAT_ANNOUNCE_MAX_RETRIES, CYXCHAT_CONN_FAIL_NONE);
+
+        /* Store pubkey in peer connection for later retrieval */
+        if (conn) {
+            memcpy(conn->pubkey, peer_pubkey, 32);
+            conn->has_pubkey = 1;
+        }
 
         /* Set peer to connected/relaying state after successful key exchange.
          * Preserve relay state if already set. */
@@ -571,8 +620,14 @@ static void on_peer_key_received(const cyxwiz_node_id_t *peer_id,
             /* If relay is active for this peer, mark as relaying */
             if (conn->is_relayed) {
                 set_peer_state(ctx, conn, CYXCHAT_CONN_RELAYING);
+                /* Fire progress event: connected via relay */
+                fire_progress_event(ctx, peer_id, CYXCHAT_CONN_EVENT_CONNECTED_RELAY,
+                                    0, CYXCHAT_ANNOUNCE_MAX_RETRIES, CYXCHAT_CONN_FAIL_NONE);
             } else {
                 set_peer_state(ctx, conn, CYXCHAT_CONN_CONNECTED);
+                /* Fire progress event: connected P2P */
+                fire_progress_event(ctx, peer_id, CYXCHAT_CONN_EVENT_CONNECTED_P2P,
+                                    0, CYXCHAT_ANNOUNCE_MAX_RETRIES, CYXCHAT_CONN_FAIL_NONE);
             }
         }
         if (ctx->peer_table) {
@@ -653,12 +708,26 @@ static void send_announce_to_peer(cyxchat_conn_ctx_t *ctx,
 
     if (err == CYXWIZ_OK) {
         CYXWIZ_INFO("Sent key exchange announce to peer %.16s... (direct)", hex_id);
+        /* Fire progress event: announce sent */
+        cyxchat_peer_conn_t *conn = find_peer_conn(ctx, peer_id);
+        uint8_t retry = conn ? conn->announce_retries : 0;
+        if (retry == 0) {
+            fire_progress_event(ctx, peer_id, CYXCHAT_CONN_EVENT_ANNOUNCE_SENT,
+                                0, CYXCHAT_ANNOUNCE_MAX_RETRIES, CYXCHAT_CONN_FAIL_NONE);
+        }
     } else if (ctx->relay) {
         /* Direct send failed (peer address unknown) - try via relay */
         cyxchat_error_t relay_err = cyxchat_relay_send(ctx->relay, peer_id,
                                                         (uint8_t*)&announce, sizeof(announce));
         if (relay_err == CYXCHAT_OK) {
             CYXWIZ_INFO("Sent key exchange announce to peer %.16s... (via relay)", hex_id);
+            /* Fire progress event: announce sent */
+            cyxchat_peer_conn_t *conn = find_peer_conn(ctx, peer_id);
+            uint8_t retry = conn ? conn->announce_retries : 0;
+            if (retry == 0) {
+                fire_progress_event(ctx, peer_id, CYXCHAT_CONN_EVENT_ANNOUNCE_SENT,
+                                    0, CYXCHAT_ANNOUNCE_MAX_RETRIES, CYXCHAT_CONN_FAIL_NONE);
+            }
         } else {
             CYXWIZ_INFO("Failed to send announce to %.16s... (direct err=%d, relay err=%d)",
                         hex_id, err, relay_err);
@@ -975,6 +1044,10 @@ int cyxchat_conn_poll(cyxchat_conn_ctx_t *ctx, uint64_t now_ms)
             /* Hole punch timed out, try relay */
             cyxchat_peer_conn_t *peer = find_peer_conn(ctx, &pending->peer_id);
             if (peer) {
+                /* Fire progress event: relay fallback */
+                fire_progress_event(ctx, &pending->peer_id, CYXCHAT_CONN_EVENT_RELAY_FALLBACK,
+                                    0, CYXCHAT_ANNOUNCE_MAX_RETRIES, CYXCHAT_CONN_FAIL_NONE);
+
                 /* Switch to relay */
                 cyxchat_error_t relay_err = cyxchat_relay_connect(
                     ctx->relay, &pending->peer_id
@@ -997,6 +1070,11 @@ int cyxchat_conn_poll(cyxchat_conn_ctx_t *ctx, uint64_t now_ms)
                 } else {
                     set_peer_state(ctx, peer, CYXCHAT_CONN_DISCONNECTED);
 
+                    /* Fire progress event: connection failed */
+                    fire_progress_event(ctx, &pending->peer_id, CYXCHAT_CONN_EVENT_FAILED,
+                                        0, CYXCHAT_ANNOUNCE_MAX_RETRIES,
+                                        CYXCHAT_CONN_FAIL_RELAY_UNAVAILABLE);
+
                     if (pending->callback) {
                         pending->callback(ctx, &pending->peer_id, CYXCHAT_CONN_DISCONNECTED,
                                          CYXCHAT_ERR_TIMEOUT, pending->user_data);
@@ -1012,8 +1090,6 @@ int cyxchat_conn_poll(cyxchat_conn_ctx_t *ctx, uint64_t now_ms)
     /* Retry ANNOUNCE for peers that are connecting/relaying but haven't
      * completed key exchange yet (no pubkey). This is critical for mobile
      * networks where UDP packets are frequently dropped by carrier NAT. */
-    #define CYXCHAT_ANNOUNCE_RETRY_MS 3000  /* Retry every 3s until key exchange completes */
-    #define CYXCHAT_ANNOUNCE_MAX_RETRIES 10 /* Give up after 30s */
     for (size_t i = 0; i < CYXCHAT_MAX_PEER_CONNECTIONS; i++) {
         cyxchat_peer_conn_t *peer = &ctx->peers[i];
         if (!peer->active) continue;
@@ -1028,8 +1104,17 @@ int cyxchat_conn_poll(cyxchat_conn_ctx_t *ctx, uint64_t now_ms)
             if (peer->announce_retries <= CYXCHAT_ANNOUNCE_MAX_RETRIES) {
                 CYXWIZ_INFO("Retrying key exchange ANNOUNCE for peer (attempt %d/%d)",
                            peer->announce_retries, CYXCHAT_ANNOUNCE_MAX_RETRIES);
+                /* Fire progress event: announce retry */
+                fire_progress_event(ctx, &peer->peer_id, CYXCHAT_CONN_EVENT_ANNOUNCE_RETRY,
+                                    peer->announce_retries, CYXCHAT_ANNOUNCE_MAX_RETRIES,
+                                    CYXCHAT_CONN_FAIL_NONE);
                 send_announce_to_peer(ctx, &peer->peer_id);
                 peer->last_announce_sent = now_ms;
+            } else {
+                /* Fire progress event: key exchange failed */
+                fire_progress_event(ctx, &peer->peer_id, CYXCHAT_CONN_EVENT_FAILED,
+                                    peer->announce_retries, CYXCHAT_ANNOUNCE_MAX_RETRIES,
+                                    CYXCHAT_CONN_FAIL_KEY_TIMEOUT);
             }
         }
     }
@@ -1043,6 +1128,9 @@ int cyxchat_conn_poll(cyxchat_conn_ctx_t *ctx, uint64_t now_ms)
             uint64_t elapsed = now_ms - peer->last_activity;
 
             if (elapsed >= CYXCHAT_CONNECTION_TIMEOUT_MS) {
+                /* Fire progress event: disconnected */
+                fire_progress_event(ctx, &peer->peer_id, CYXCHAT_CONN_EVENT_DISCONNECTED,
+                                    0, CYXCHAT_ANNOUNCE_MAX_RETRIES, CYXCHAT_CONN_FAIL_NONE);
                 /* Peer timed out */
                 set_peer_state(ctx, peer, CYXCHAT_CONN_DISCONNECTED);
                 events++;
@@ -1105,11 +1193,19 @@ cyxchat_error_t cyxchat_conn_connect(cyxchat_conn_ctx_t *ctx,
     /* Set state to connecting */
     set_peer_state(ctx, peer, CYXCHAT_CONN_CONNECTING);
 
+    /* Fire progress event: lookup started */
+    fire_progress_event(ctx, peer_id, CYXCHAT_CONN_EVENT_LOOKUP_STARTED,
+                        0, CYXCHAT_ANNOUNCE_MAX_RETRIES, CYXCHAT_CONN_FAIL_NONE);
+
     /* Start relay connection immediately (parallel with hole punch) so
      * the announce can be delivered even if peer address is unknown */
     if (ctx->relay) {
         cyxchat_relay_connect(ctx->relay, peer_id);
     }
+
+    /* Fire progress event: hole punch start */
+    fire_progress_event(ctx, peer_id, CYXCHAT_CONN_EVENT_HOLE_PUNCH_START,
+                        0, CYXCHAT_ANNOUNCE_MAX_RETRIES, CYXCHAT_CONN_FAIL_NONE);
 
     /* Send announce immediately to initiate key exchange */
     if (ctx->onion) {
@@ -1527,6 +1623,15 @@ void cyxchat_conn_set_on_data(cyxchat_conn_ctx_t *ctx,
     if (!ctx) return;
     ctx->on_data = callback;
     ctx->data_user_data = user_data;
+}
+
+void cyxchat_conn_set_on_progress(cyxchat_conn_ctx_t *ctx,
+                                   cyxchat_conn_progress_callback_t callback,
+                                   void *user_data)
+{
+    if (!ctx) return;
+    ctx->on_progress = callback;
+    ctx->progress_user_data = user_data;
 }
 
 void cyxchat_conn_set_file_ctx(cyxchat_conn_ctx_t *ctx, void *file_ctx)
