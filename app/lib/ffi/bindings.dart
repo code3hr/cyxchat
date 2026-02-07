@@ -80,6 +80,57 @@ typedef _KeyDistCompleteCallback = Void Function(
     Size failedCount,
     Pointer<Void> userData);
 
+/// Native callback type for connection progress
+typedef _ConnProgressCallback = Void Function(
+    Pointer<Uint8> peerId,
+    Int32 event,
+    Uint8 retryNum,
+    Uint8 retryMax,
+    Int32 failReason,
+    Pointer<Void> userData);
+
+/// Connection progress event types (matches cyxchat_conn_event_t)
+class CyxChatConnEvent {
+  static const int lookupStarted = 0;
+  static const int peerFound = 1;
+  static const int announceSent = 2;
+  static const int announceRetry = 3;
+  static const int keyReceived = 4;
+  static const int holePunchStart = 5;
+  static const int connectedP2p = 6;
+  static const int relayFallback = 7;
+  static const int connectedRelay = 8;
+  static const int disconnected = 9;
+  static const int failed = 10;
+}
+
+/// Connection failure reasons (matches cyxchat_conn_fail_t)
+class CyxChatConnFail {
+  static const int none = 0;
+  static const int lookupTimeout = 1;
+  static const int keyTimeout = 2;
+  static const int peerUnreachable = 3;
+  static const int natBlocked = 4;
+  static const int relayUnavailable = 5;
+
+  static String message(int code) {
+    switch (code) {
+      case lookupTimeout:
+        return 'Network lookup timed out';
+      case keyTimeout:
+        return 'Key exchange timed out';
+      case peerUnreachable:
+        return 'Peer appears offline';
+      case natBlocked:
+        return 'NAT blocked, relay unavailable';
+      case relayUnavailable:
+        return 'Relay server unavailable';
+      default:
+        return 'Connection failed';
+    }
+  }
+}
+
 /// Native file metadata structure
 final class _FileMetaNative extends Struct {
   @Array(8)
@@ -554,6 +605,11 @@ class CyxChatBindings {
   /// Connection context pointer (opaque)
   Pointer<Void>? _connCtx;
 
+  /// Progress callback
+  NativeCallable<_ConnProgressCallback>? _onConnProgress;
+  void Function(String peerId, int event, int retry, int max, int fail)?
+      onConnProgress;
+
   /// Create connection context
   /// Returns error code (0 = success)
   int connCreate(String bootstrap, Pointer<Uint8> localId) {
@@ -574,9 +630,46 @@ class CyxChatBindings {
   /// Destroy connection context
   void connDestroy() {
     if (_connCtx != null) {
+      _onConnProgress?.close();
+      _onConnProgress = null;
       _native.cyxchat_conn_destroy(_connCtx!);
       _connCtx = null;
     }
+  }
+
+  /// Setup connection progress callback for real-time UI feedback
+  void connSetupProgressCallback() {
+    if (_connCtx == null) return;
+
+    // Close previous callback if exists to prevent memory leak on re-init
+    _onConnProgress?.close();
+
+    _onConnProgress = NativeCallable<_ConnProgressCallback>.listener(
+      _handleConnProgress,
+    );
+    _native.cyxchat_conn_set_on_progress(
+      _connCtx!,
+      _onConnProgress!.nativeFunction,
+      nullptr,
+    );
+  }
+
+  /// Handle connection progress events from C library
+  void _handleConnProgress(
+    Pointer<Uint8> peerId,
+    int event,
+    int retryNum,
+    int retryMax,
+    int failReason,
+    Pointer<Void> userData,
+  ) {
+    if (onConnProgress == null) return;
+
+    // Convert peer ID to hex string - copy bytes immediately
+    final hexId = _ptrToHex(peerId, 32);
+
+    // Invoke the Dart callback
+    onConnProgress!(hexId, event, retryNum, retryMax, failReason);
   }
 
   /// Poll connection events
@@ -635,6 +728,30 @@ class CyxChatBindings {
   bool connIsBootstrapConnected() {
     if (_connCtx == null) return false;
     return _native.cyxchat_conn_is_bootstrap_connected(_connCtx!) != 0;
+  }
+
+  /// Check if UPnP/NAT-PMP gateway was discovered
+  bool connIsUpnpAvailable() {
+    if (_connCtx == null) return false;
+    return _native.cyxchat_conn_is_upnp_available(_connCtx!) != 0;
+  }
+
+  /// Check if UPnP/NAT-PMP port mapping is active
+  bool connIsUpnpMappingActive() {
+    if (_connCtx == null) return false;
+    return _native.cyxchat_conn_is_upnp_mapping_active(_connCtx!) != 0;
+  }
+
+  /// Get UPnP/NAT-PMP external port (0 if no mapping)
+  int connGetUpnpExternalPort() {
+    if (_connCtx == null) return 0;
+    return _native.cyxchat_conn_get_upnp_external_port(_connCtx!);
+  }
+
+  /// Get UPnP/NAT-PMP lease remaining time in seconds (0 if no active mapping)
+  int connGetUpnpLeaseRemainingSec() {
+    if (_connCtx == null) return 0;
+    return _native.cyxchat_conn_get_upnp_lease_remaining_sec(_connCtx!);
   }
 
   /// Check if we have established a secure key with a peer
@@ -3590,6 +3707,22 @@ class CyxChatNative {
       Int32 Function(Pointer<Void>),
       int Function(Pointer<Void>)>('cyxchat_conn_is_bootstrap_connected');
 
+  late final cyxchat_conn_is_upnp_available = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>),
+      int Function(Pointer<Void>)>('cyxchat_conn_is_upnp_available');
+
+  late final cyxchat_conn_is_upnp_mapping_active = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>),
+      int Function(Pointer<Void>)>('cyxchat_conn_is_upnp_mapping_active');
+
+  late final cyxchat_conn_get_upnp_external_port = _lib.lookupFunction<
+      Uint16 Function(Pointer<Void>),
+      int Function(Pointer<Void>)>('cyxchat_conn_get_upnp_external_port');
+
+  late final cyxchat_conn_get_upnp_lease_remaining_sec = _lib.lookupFunction<
+      Uint32 Function(Pointer<Void>),
+      int Function(Pointer<Void>)>('cyxchat_conn_get_upnp_lease_remaining_sec');
+
   late final cyxchat_conn_has_peer_key = _lib.lookupFunction<
       Int32 Function(Pointer<Void>, Pointer<Uint8>),
       int Function(Pointer<Void>, Pointer<Uint8>)>('cyxchat_conn_has_peer_key');
@@ -3722,6 +3855,16 @@ late final cyxchat_conn_get_peer_pubkey = _lib.lookupFunction<      Int32 Functi
   late final cyxchat_conn_set_file_ctx = _lib.lookupFunction<
       Void Function(Pointer<Void>, Pointer<Void>),
       void Function(Pointer<Void>, Pointer<Void>)>('cyxchat_conn_set_file_ctx');
+
+  late final cyxchat_conn_set_on_progress = _lib.lookupFunction<
+      Void Function(
+          Pointer<Void>,
+          Pointer<NativeFunction<_ConnProgressCallback>>,
+          Pointer<Void>),
+      void Function(
+          Pointer<Void>,
+          Pointer<NativeFunction<_ConnProgressCallback>>,
+          Pointer<Void>)>('cyxchat_conn_set_on_progress');
 
   // Server registry functions
   late final cyxchat_conn_get_server_registry = _lib.lookupFunction<

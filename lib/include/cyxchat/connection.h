@@ -72,6 +72,11 @@ typedef struct {
     int dht_enabled;                    /* DHT is active */
     size_t dht_nodes;                   /* Nodes in DHT routing table */
     size_t dht_active_buckets;          /* Non-empty DHT buckets */
+    /* UPnP/NAT-PMP status */
+    int upnp_available;                 /* UPnP IGD or NAT-PMP found */
+    int upnp_mapping_active;            /* Port mapping is active */
+    uint16_t upnp_external_port;        /* Mapped external port */
+    uint32_t upnp_lease_remaining_sec;  /* Seconds until lease expires */
 } cyxchat_network_status_t;
 
 /* ============================================================
@@ -114,6 +119,19 @@ typedef void (*cyxchat_conn_complete_callback_t)(
     const cyxwiz_node_id_t *peer_id,
     cyxchat_conn_state_t state,
     cyxchat_error_t result,
+    void *user_data
+);
+
+/**
+ * Connection progress callback - fires at each connection lifecycle event
+ * Provides real-time feedback for UI during connection establishment
+ */
+typedef void (*cyxchat_conn_progress_callback_t)(
+    const cyxwiz_node_id_t *peer_id,     /* Peer being connected to */
+    cyxchat_conn_event_t event,           /* Current event in lifecycle */
+    uint8_t retry_num,                    /* Current retry number (for ANNOUNCE_RETRY) */
+    uint8_t retry_max,                    /* Max retries (typically 10) */
+    cyxchat_conn_fail_t fail_reason,      /* Failure reason (for FAILED event) */
     void *user_data
 );
 
@@ -267,6 +285,38 @@ CYXCHAT_API cyxchat_error_t cyxchat_conn_get_public_addr(
 CYXCHAT_API int cyxchat_conn_is_bootstrap_connected(cyxchat_conn_ctx_t *ctx);
 
 /**
+ * Check if UPnP/NAT-PMP gateway was discovered
+ *
+ * @param ctx           Connection context
+ * @return              1 if available, 0 if not
+ */
+CYXCHAT_API int cyxchat_conn_is_upnp_available(cyxchat_conn_ctx_t *ctx);
+
+/**
+ * Check if UPnP/NAT-PMP port mapping is active
+ *
+ * @param ctx           Connection context
+ * @return              1 if mapping active, 0 if not
+ */
+CYXCHAT_API int cyxchat_conn_is_upnp_mapping_active(cyxchat_conn_ctx_t *ctx);
+
+/**
+ * Get UPnP/NAT-PMP external port
+ *
+ * @param ctx           Connection context
+ * @return              Mapped external port, or 0 if no mapping
+ */
+CYXCHAT_API uint16_t cyxchat_conn_get_upnp_external_port(cyxchat_conn_ctx_t *ctx);
+
+/**
+ * Get UPnP/NAT-PMP lease remaining time
+ *
+ * @param ctx           Connection context
+ * @return              Seconds until lease expires, or 0 if no active mapping
+ */
+CYXCHAT_API uint32_t cyxchat_conn_get_upnp_lease_remaining_sec(cyxchat_conn_ctx_t *ctx);
+
+/**
  * Check if we have established a secure key with a peer
  * Key exchange must complete before messages can be sent.
  *
@@ -364,6 +414,16 @@ CYXCHAT_API void cyxchat_conn_set_on_state_change(
 CYXCHAT_API void cyxchat_conn_set_on_data(
     cyxchat_conn_ctx_t *ctx,
     cyxchat_conn_data_callback_t callback,
+    void *user_data
+);
+
+/**
+ * Set connection progress callback
+ * Called at each step of the connection lifecycle for real-time UI feedback
+ */
+CYXCHAT_API void cyxchat_conn_set_on_progress(
+    cyxchat_conn_ctx_t *ctx,
+    cyxchat_conn_progress_callback_t callback,
     void *user_data
 );
 

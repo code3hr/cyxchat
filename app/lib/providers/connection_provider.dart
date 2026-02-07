@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../services/identity_service.dart';
 import '../services/log_service.dart';
 import '../utils/node_id_utils.dart';
+import '../models/connection_progress.dart';
 import 'dart:async';
 import 'dart:ffi';
 import 'package:flutter/foundation.dart';
@@ -37,6 +38,11 @@ class NetworkStatus {
   final bool bootstrapConnected;
   final int activeConnections;
   final int relayConnections;
+  // UPnP/NAT-PMP status
+  final bool upnpAvailable;
+  final bool upnpMappingActive;
+  final int upnpExternalPort;
+  final int upnpLeaseRemainingSec;
 
   NetworkStatus({
     this.publicAddress,
@@ -45,14 +51,28 @@ class NetworkStatus {
     this.bootstrapConnected = false,
     this.activeConnections = 0,
     this.relayConnections = 0,
+    this.upnpAvailable = false,
+    this.upnpMappingActive = false,
+    this.upnpExternalPort = 0,
+    this.upnpLeaseRemainingSec = 0,
   });
 
   String get natTypeName => CyxChatNatType.name(natType);
   int get directConnections => activeConnections - relayConnections;
 
+  String get upnpStatusText {
+    if (upnpMappingActive) {
+      final mins = upnpLeaseRemainingSec ~/ 60;
+      return 'Port $upnpExternalPort mapped (${mins}min remaining)';
+    } else if (upnpAvailable) {
+      return 'Available but not mapped';
+    }
+    return 'Not available';
+  }
+
   @override
   String toString() => 'NetworkStatus(addr: $publicAddress, nat: $natTypeName, '
-      'active: $activeConnections, relay: $relayConnections)';
+      'active: $activeConnections, relay: $relayConnections, upnp: $upnpStatusText)';
 }
 
 /// Connection provider for managing P2P connections
@@ -64,6 +84,10 @@ class ConnectionProvider extends ChangeNotifier {
   NetworkStatus _networkStatus = NetworkStatus();
   final Map<String, PeerConnectionState> _peerStates = {};
 
+  // Progress tracking for real-time UI feedback
+  final Map<String, PeerConnectionProgress> _progress = {};
+  final _progressStream = StreamController<PeerConnectionProgress>.broadcast();
+
   // Polling timer
   Timer? _pollTimer;
   static const _pollInterval = Duration(milliseconds: 500);
@@ -72,6 +96,12 @@ class ConnectionProvider extends ChangeNotifier {
   bool get initialized => _initialized;
   NetworkStatus get networkStatus => _networkStatus;
   Map<String, PeerConnectionState> get peerStates => Map.unmodifiable(_peerStates);
+
+  /// Stream of connection progress events for real-time UI updates
+  Stream<PeerConnectionProgress> get progressStream => _progressStream.stream;
+
+  /// Get current progress for a specific peer
+  PeerConnectionProgress? getProgress(String peerIdHex) => _progress[peerIdHex];
 
   /// Initialize connection manager
   Future<bool> initialize({
@@ -95,6 +125,9 @@ class ConnectionProvider extends ChangeNotifier {
 
       _initialized = true;
 
+      // Setup progress callback for real-time UI feedback
+      _setupProgressCallback();
+
       // Start polling
       _startPolling();
 
@@ -105,17 +138,87 @@ class ConnectionProvider extends ChangeNotifier {
     }
   }
 
+  /// Setup progress callback for real-time connection feedback
+  void _setupProgressCallback() {
+    _bindings.onConnProgress = _handleProgressEvent;
+    _bindings.connSetupProgressCallback();
+  }
+
+  /// Handle progress events from C library
+  void _handleProgressEvent(
+    String peerId,
+    int event,
+    int retry,
+    int maxRetry,
+    int failReason,
+  ) {
+    // Guard against callbacks after provider is disposed
+    if (!_initialized) return;
+
+    final phase = PeerConnectionProgress.eventToPhase(event);
+    final progress = PeerConnectionProgress(
+      peerId: peerId,
+      phase: phase,
+      retryCount: retry,
+      maxRetries: maxRetry,
+      failReason: failReason != CyxChatConnFail.none
+          ? CyxChatConnFail.message(failReason)
+          : null,
+    );
+
+    _progress[peerId] = progress;
+
+    // Wrap stream add in try-catch to handle closed stream gracefully
+    try {
+      _progressStream.add(progress);
+    } on StateError {
+      // Stream closed, ignore - this can happen during shutdown
+      return;
+    }
+
+    notifyListeners();
+
+    // Log significant events
+    final log = LogService.instance;
+    switch (event) {
+      case CyxChatConnEvent.peerFound:
+        log.info('Peer found: ${peerId.substring(0, 16)}...', source: 'Connection');
+        break;
+      case CyxChatConnEvent.keyReceived:
+        log.info('Key exchange complete: ${peerId.substring(0, 16)}...', source: 'Connection');
+        break;
+      case CyxChatConnEvent.connectedP2p:
+        log.info('Connected P2P: ${peerId.substring(0, 16)}...', source: 'Connection');
+        break;
+      case CyxChatConnEvent.connectedRelay:
+        log.info('Connected via relay: ${peerId.substring(0, 16)}...', source: 'Connection');
+        break;
+      case CyxChatConnEvent.failed:
+        log.warning('Connection failed: ${peerId.substring(0, 16)}... - ${CyxChatConnFail.message(failReason)}', source: 'Connection');
+        break;
+      case CyxChatConnEvent.disconnected:
+        log.info('Disconnected: ${peerId.substring(0, 16)}...', source: 'Connection');
+        break;
+    }
+  }
+
   /// Shutdown connection manager
   void shutdown() {
     _stopPolling();
 
-    if (_initialized) {
-      _bindings.connDestroy();
-      _initialized = false;
-      _peerStates.clear();
-      _networkStatus = NetworkStatus();
-      notifyListeners();
-    }
+    // CRITICAL: Disable callback BEFORE closing stream to prevent
+    // race condition where callback fires after stream is closed
+    _bindings.onConnProgress = null;
+    _initialized = false;  // Guard against callbacks in flight
+
+    // Now safe to close the stream
+    _progressStream.close();
+
+    _bindings.connDestroy();
+    _peerStates.clear();
+    _progress.clear();
+    _networkStatus = NetworkStatus();
+    notifyListeners();
   }
 
   /// Connect to a peer
@@ -260,6 +363,12 @@ class ConnectionProvider extends ChangeNotifier {
     final publicAddr = _bindings.connGetPublicAddr();
     final bootstrapConnected = _bindings.connIsBootstrapConnected();
 
+    // Get UPnP/NAT-PMP status
+    final upnpAvailable = _bindings.connIsUpnpAvailable();
+    final upnpMappingActive = _bindings.connIsUpnpMappingActive();
+    final upnpExternalPort = _bindings.connGetUpnpExternalPort();
+    final upnpLeaseRemainingSec = _bindings.connGetUpnpLeaseRemainingSec();
+
     final newStatus = NetworkStatus(
       publicAddress: publicAddr,
       stunComplete: publicAddr != null,
@@ -270,6 +379,10 @@ class ConnectionProvider extends ChangeNotifier {
       relayConnections: _peerStates.values
           .where((p) => p.isConnected && p.isRelayed)
           .length,
+      upnpAvailable: upnpAvailable,
+      upnpMappingActive: upnpMappingActive,
+      upnpExternalPort: upnpExternalPort,
+      upnpLeaseRemainingSec: upnpLeaseRemainingSec,
     );
 
     // Log significant changes

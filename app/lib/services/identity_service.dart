@@ -254,4 +254,53 @@ class IdentityService {
 
     return 'cyxchat://add/${_currentIdentity!.nodeId}/$pubkeyHex';
   }
+
+  // ========== PIN Management ==========
+
+  /// Save PIN hash for app lock
+  /// We store a hash, not the raw PIN, for security
+  Future<void> savePinHash(String pin) async {
+    // Simple hash: SHA-256 of PIN + salt
+    // In production, use bcrypt or argon2
+    final salt = 'cyxchat_pin_salt_v1';
+    final pinWithSalt = '$pin$salt';
+
+    // Use simple hash for now (could use crypto package for SHA-256)
+    final hash = _simpleHash(pinWithSalt);
+    await _writeSecure('pin_hash', hash);
+  }
+
+  /// Verify PIN against stored hash
+  Future<bool> verifyPin(String pin) async {
+    final storedHash = await _readSecure('pin_hash');
+    if (storedHash == null) return false;
+
+    final salt = 'cyxchat_pin_salt_v1';
+    final pinWithSalt = '$pin$salt';
+    final hash = _simpleHash(pinWithSalt);
+
+    return hash == storedHash;
+  }
+
+  /// Check if a PIN is set
+  Future<bool> hasPinSet() async {
+    final storedHash = await _readSecure('pin_hash');
+    return storedHash != null;
+  }
+
+  /// Delete stored PIN
+  Future<void> deletePin() async {
+    await _deleteSecure('pin_hash');
+  }
+
+  /// Simple hash function (djb2 algorithm)
+  /// For production, use proper cryptographic hash
+  String _simpleHash(String input) {
+    int hash = 5381;
+    for (int i = 0; i < input.length; i++) {
+      hash = ((hash << 5) + hash) + input.codeUnitAt(i);
+      hash = hash & 0xFFFFFFFF; // Keep as 32-bit
+    }
+    return hash.toRadixString(16).padLeft(8, '0');
+  }
 }

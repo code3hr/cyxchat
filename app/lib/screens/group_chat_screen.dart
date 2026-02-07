@@ -33,8 +33,11 @@ class _GroupChatScreenState extends ConsumerState<GroupChatScreen> {
   @override
   void initState() {
     super.initState();
-    // Mark as read when opening
+    // Mark as read when opening and refresh messages
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      // Force refresh messages from database in case new ones arrived
+      // while the group chat screen was not active
+      ref.invalidate(groupMessagesProvider(widget.groupId));
       ref.read(groupActionsProvider).markAsRead(widget.groupId);
       _setupMessageListener();
     });

@@ -178,6 +178,35 @@ typedef enum {
 } cyxchat_msg_status_t;
 
 /* ============================================================
+ * Connection Progress Events
+ * Real-time feedback for peer connection lifecycle
+ * ============================================================ */
+
+typedef enum {
+    CYXCHAT_CONN_EVENT_LOOKUP_STARTED   = 0,  /* DHT/bootstrap query started */
+    CYXCHAT_CONN_EVENT_PEER_FOUND       = 1,  /* Peer address discovered */
+    CYXCHAT_CONN_EVENT_ANNOUNCE_SENT    = 2,  /* Key exchange ANNOUNCE sent */
+    CYXCHAT_CONN_EVENT_ANNOUNCE_RETRY   = 3,  /* ANNOUNCE retry (with count) */
+    CYXCHAT_CONN_EVENT_KEY_RECEIVED     = 4,  /* Peer's key received */
+    CYXCHAT_CONN_EVENT_HOLE_PUNCH_START = 5,  /* Direct P2P attempt started */
+    CYXCHAT_CONN_EVENT_CONNECTED_P2P    = 6,  /* Direct P2P success */
+    CYXCHAT_CONN_EVENT_RELAY_FALLBACK   = 7,  /* Falling back to relay */
+    CYXCHAT_CONN_EVENT_CONNECTED_RELAY  = 8,  /* Connected via relay */
+    CYXCHAT_CONN_EVENT_DISCONNECTED     = 9,  /* Peer disconnected */
+    CYXCHAT_CONN_EVENT_FAILED           = 10  /* Connection failed */
+} cyxchat_conn_event_t;
+
+/* Connection failure reasons */
+typedef enum {
+    CYXCHAT_CONN_FAIL_NONE              = 0,  /* No failure */
+    CYXCHAT_CONN_FAIL_LOOKUP_TIMEOUT    = 1,  /* DHT/bootstrap timeout */
+    CYXCHAT_CONN_FAIL_KEY_TIMEOUT       = 2,  /* Key exchange timeout (no ANNOUNCE response) */
+    CYXCHAT_CONN_FAIL_PEER_UNREACHABLE  = 3,  /* Peer not responding */
+    CYXCHAT_CONN_FAIL_NAT_BLOCKED       = 4,  /* Symmetric NAT, relay required but unavailable */
+    CYXCHAT_CONN_FAIL_RELAY_UNAVAILABLE = 5   /* Relay server not available */
+} cyxchat_conn_fail_t;
+
+/* ============================================================
  * Presence Status
  * ============================================================ */
 

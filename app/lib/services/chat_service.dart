@@ -36,7 +36,43 @@ class ChatService {
   StreamSubscription? _deleteSubscription;
   StreamSubscription? _editSubscription;
 
-  ChatService._();
+  // Disappearing messages cleanup timer
+  Timer? _disappearingMessagesTimer;
+
+  // Default disappearing messages setting (from settings)
+  int? _defaultDisappearingSeconds;
+
+  ChatService._() {
+    // Start cleanup timer for disappearing messages
+    _startDisappearingMessagesCleanup();
+  }
+
+  /// Set default disappearing messages duration from settings
+  void setDefaultDisappearingSeconds(int? seconds) {
+    _defaultDisappearingSeconds = seconds;
+  }
+
+  /// Start periodic cleanup of expired disappearing messages
+  void _startDisappearingMessagesCleanup() {
+    _disappearingMessagesTimer?.cancel();
+    // Check every 30 seconds for expired messages
+    _disappearingMessagesTimer = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) => _cleanupExpiredMessages(),
+    );
+  }
+
+  /// Delete expired disappearing messages
+  Future<void> _cleanupExpiredMessages() async {
+    try {
+      final deleted = await DatabaseService.instance.deleteExpiredMessages();
+      if (deleted > 0) {
+        debugPrint('ChatService: Deleted $deleted expired disappearing messages');
+      }
+    } catch (e) {
+      debugPrint('ChatService: Error cleaning up expired messages: $e');
+    }
+  }
 
   /// Connect to ChatProvider for FFI messaging
   void connectProvider(ChatProvider provider) {
@@ -595,6 +631,13 @@ class ChatService {
           now.difference(ts).inMilliseconds > _dedupWindowMs);
     }
 
+    // Filter out messages from blocked contacts
+    final isBlocked = await DatabaseService.instance.isContactBlocked(received.fromNodeId);
+    if (isBlocked) {
+      debugPrint('ChatService: Message from blocked contact ${received.fromNodeId} ignored');
+      return;
+    }
+
     try {
       final db = await DatabaseService.instance.database;
 
@@ -615,9 +658,24 @@ class ChatService {
         isOutgoing: false,
       );
 
+      // Get disappearing messages setting for this conversation
+      final disappearingSeconds = await DatabaseService.instance
+          .getConversationDisappearingTimer(conversation.id) ?? _defaultDisappearingSeconds;
+
+      // Calculate disappears_at if disappearing is enabled
+      int? disappearsAt;
+      if (disappearingSeconds != null && disappearingSeconds > 0) {
+        disappearsAt = DateTime.now().millisecondsSinceEpoch + (disappearingSeconds * 1000);
+      }
+
       // Save to database (transaction ensures atomicity)
+      final messageMap = message.toMap();
+      if (disappearsAt != null) {
+        messageMap['disappears_at'] = disappearsAt;
+      }
+
       await db.transaction((txn) async {
-        await txn.insert('messages', message.toMap());
+        await txn.insert('messages', messageMap);
         await txn.update(
           'conversations',
           {

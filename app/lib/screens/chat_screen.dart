@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io' as io;
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -16,6 +17,7 @@ import '../providers/contact_provider.dart';
 import '../providers/group_ffi_provider.dart';
 import '../providers/queue_provider.dart';
 import '../models/queued_message.dart';
+import '../models/connection_progress.dart';
 import '../ffi/bindings.dart' show CyxChatFileState, CyxChatFileConst;
 import '../models/models.dart';
 import '../services/group_service.dart';
@@ -39,8 +41,11 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   @override
   void initState() {
     super.initState();
-    // Mark as read when opening
+    // Mark as read when opening and refresh messages
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      // Force refresh messages from database in case new ones arrived
+      // while the chat screen was not active
+      ref.invalidate(messagesProvider(widget.conversationId));
       ref.read(chatActionsProvider).markAsRead(widget.conversationId);
       // Pre-connect to peer for faster first message
       _preConnectToPeer();
@@ -96,12 +101,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           data: (conv) {
             // Use the actual peer ID from the conversation, not the conversation ID
             final peerId = conv?.peerId;
+
+            // Get connection progress for real-time feedback
+            final progress = peerId != null && connectionProvider.initialized
+                ? connectionProvider.getProgress(peerId)
+                : null;
+
+            // Fallback to old method if no progress yet
             final hasKey = peerId != null &&
                 connectionProvider.initialized &&
                 connectionProvider.hasPeerKey(peerId);
-            final isConnecting = peerId != null &&
-                connectionProvider.initialized &&
-                !hasKey;
             final isRelayed = peerId != null &&
                 connectionProvider.initialized &&
                 connectionProvider.isRelayed(peerId);
@@ -109,15 +118,24 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             // Determine connection status text and color
             String statusText;
             Color statusColor;
-            if (isConnecting) {
-              statusText = 'Establishing secure connection...';
-              statusColor = Colors.orange;
+            bool showSpinner = false;
+
+            if (progress != null && progress.phase != ConnectionPhase.idle) {
+              // Use granular progress from callback
+              statusText = progress.statusText;
+              statusColor = progress.statusColor;
+              showSpinner = progress.isConnecting;
             } else if (hasKey && isRelayed) {
               statusText = 'Secured (via relay)';
               statusColor = Colors.blue;
             } else if (hasKey) {
               statusText = 'Secured (direct P2P)';
               statusColor = Colors.green;
+            } else if (peerId != null && connectionProvider.initialized) {
+              // No progress yet but peer exists - still connecting
+              statusText = 'Establishing secure connection...';
+              statusColor = Colors.orange;
+              showSpinner = true;
             } else {
               statusText = '';
               statusColor = Colors.grey;
@@ -128,9 +146,29 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               children: [
                 Text(conv?.title ?? 'Chat'),
                 if (statusText.isNotEmpty)
-                  Text(
-                    statusText,
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.normal, color: statusColor),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (showSpinner)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 6),
+                          child: SizedBox(
+                            width: 10,
+                            height: 10,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 1.5,
+                              valueColor: AlwaysStoppedAnimation(statusColor),
+                            ),
+                          ),
+                        ),
+                      Flexible(
+                        child: Text(
+                          statusText,
+                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.normal, color: statusColor),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
                   ),
               ],
             );
@@ -173,31 +211,33 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       ),
       body: Column(
         children: [
-          // Messages
+          // Messages with wallpaper
           Expanded(
-            child: messagesAsync.when(
-              data: (messages) {
-                if (messages.isEmpty) {
-                  return const _EmptyMessages();
-                }
-                return ListView.builder(
-                  controller: _scrollController,
-                  reverse: true,
-                  padding: const EdgeInsets.all(16),
-                  clipBehavior: Clip.hardEdge,
-                  itemCount: messages.length,
-                  itemBuilder: (context, index) {
-                    final message = messages[messages.length - 1 - index];
-                    return _MessageBubble(
-                      message: message,
-                      conversationId: widget.conversationId,
-                      onReply: () => _setReplyTo(message),
-                    );
-                  },
-                );
-              },
-              loading: () => const Center(child: CircularProgressIndicator()),
-              error: (error, _) => Center(child: Text('Error: $error')),
+            child: _ChatBackground(
+              child: messagesAsync.when(
+                data: (messages) {
+                  if (messages.isEmpty) {
+                    return const _EmptyMessages();
+                  }
+                  return ListView.builder(
+                    controller: _scrollController,
+                    reverse: true,
+                    padding: const EdgeInsets.all(16),
+                    clipBehavior: Clip.hardEdge,
+                    itemCount: messages.length,
+                    itemBuilder: (context, index) {
+                      final message = messages[messages.length - 1 - index];
+                      return _MessageBubble(
+                        message: message,
+                        conversationId: widget.conversationId,
+                        onReply: () => _setReplyTo(message),
+                      );
+                    },
+                  );
+                },
+                loading: () => const Center(child: CircularProgressIndicator()),
+                error: (error, _) => Center(child: Text('Error: $error')),
+              ),
             ),
           ),
 
@@ -538,6 +578,285 @@ class _EmptyMessages extends StatelessWidget {
   }
 }
 
+/// Chat background with wallpaper support
+class _ChatBackground extends ConsumerWidget {
+  final Widget child;
+
+  const _ChatBackground({required this.child});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final settings = ref.watch(settingsProvider);
+    final wallpaper = settings.chatWallpaper;
+    final colorScheme = Theme.of(context).colorScheme;
+
+    if (wallpaper == null) {
+      // No wallpaper - use default background
+      return child;
+    }
+
+    // Parse wallpaper setting
+    if (wallpaper.startsWith('solid:')) {
+      // Solid color wallpaper
+      final hex = wallpaper.replaceFirst('solid:', '');
+      Color? color;
+      try {
+        color = Color(int.parse(hex.replaceFirst('#', '0xFF')));
+      } catch (_) {
+        color = null;
+      }
+
+      return Container(
+        color: color ?? colorScheme.surface,
+        child: child,
+      );
+    } else if (wallpaper.startsWith('pattern:')) {
+      // Pattern wallpaper
+      final patternName = wallpaper.replaceFirst('pattern:', '');
+      return Stack(
+        children: [
+          Positioned.fill(
+            child: _PatternBackground(
+              pattern: patternName,
+              colorScheme: colorScheme,
+            ),
+          ),
+          child,
+        ],
+      );
+    } else if (wallpaper.startsWith('file:')) {
+      // Custom image wallpaper
+      final path = wallpaper.replaceFirst('file:', '');
+      final file = io.File(path);
+      if (file.existsSync()) {
+        return Stack(
+          children: [
+            Positioned.fill(
+              child: Image.file(
+                file,
+                fit: BoxFit.cover,
+              ),
+            ),
+            // Subtle overlay to ensure text readability
+            Positioned.fill(
+              child: Container(
+                color: colorScheme.surface.withOpacity(0.3),
+              ),
+            ),
+            child,
+          ],
+        );
+      }
+    }
+
+    // Fallback to default
+    return child;
+  }
+}
+
+/// Pattern background painter
+class _PatternBackground extends StatelessWidget {
+  final String pattern;
+  final ColorScheme colorScheme;
+
+  const _PatternBackground({
+    required this.pattern,
+    required this.colorScheme,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return CustomPaint(
+      painter: _PatternPainter(
+        pattern: pattern,
+        color: colorScheme.primary.withOpacity(0.1),
+        backgroundColor: colorScheme.surface,
+      ),
+      size: Size.infinite,
+    );
+  }
+}
+
+class _PatternPainter extends CustomPainter {
+  final String pattern;
+  final Color color;
+  final Color backgroundColor;
+
+  _PatternPainter({
+    required this.pattern,
+    required this.color,
+    required this.backgroundColor,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    // Fill background
+    canvas.drawRect(
+      Rect.fromLTWH(0, 0, size.width, size.height),
+      Paint()..color = backgroundColor,
+    );
+
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1;
+
+    switch (pattern) {
+      case 'circuit':
+        _paintCircuit(canvas, size, paint);
+        break;
+      case 'matrix':
+        _paintMatrix(canvas, size, paint);
+        break;
+      case 'hex':
+        _paintHex(canvas, size, paint);
+        break;
+      case 'binary':
+        _paintBinary(canvas, size, paint);
+        break;
+      case 'terminal':
+        _paintTerminal(canvas, size, paint);
+        break;
+      default:
+        _paintGrid(canvas, size, paint);
+    }
+  }
+
+  void _paintCircuit(Canvas canvas, Size size, Paint paint) {
+    const spacing = 40.0;
+    for (var x = 0.0; x < size.width; x += spacing) {
+      for (var y = 0.0; y < size.height; y += spacing) {
+        // Draw small circuits
+        canvas.drawCircle(Offset(x, y), 2, paint);
+        if ((x / spacing).toInt() % 2 == 0) {
+          canvas.drawLine(Offset(x, y), Offset(x + spacing, y), paint);
+        }
+        if ((y / spacing).toInt() % 3 == 0) {
+          canvas.drawLine(Offset(x, y), Offset(x, y + spacing), paint);
+        }
+      }
+    }
+  }
+
+  void _paintMatrix(Canvas canvas, Size size, Paint paint) {
+    const spacing = 20.0;
+    final textPainter = TextPainter(
+      textDirection: TextDirection.ltr,
+    );
+
+    for (var x = 0.0; x < size.width; x += spacing) {
+      for (var y = 0.0; y < size.height; y += spacing * 1.5) {
+        final char = String.fromCharCode(0x30 + ((x + y).toInt() % 10));
+        textPainter.text = TextSpan(
+          text: char,
+          style: TextStyle(
+            color: color,
+            fontSize: 12,
+            fontFamily: 'monospace',
+          ),
+        );
+        textPainter.layout();
+        textPainter.paint(canvas, Offset(x, y));
+      }
+    }
+  }
+
+  void _paintHex(Canvas canvas, Size size, Paint paint) {
+    const hexRadius = 20.0;
+    const hexWidth = hexRadius * 1.732;
+    var row = 0;
+
+    for (var y = 0.0; y < size.height + hexRadius; y += hexRadius * 1.5) {
+      final offset = (row % 2) * (hexWidth / 2);
+      for (var x = offset; x < size.width + hexWidth; x += hexWidth) {
+        _drawHexagon(canvas, Offset(x, y), hexRadius, paint);
+      }
+      row++;
+    }
+  }
+
+  void _drawHexagon(Canvas canvas, Offset center, double radius, Paint paint) {
+    final path = Path();
+    for (var i = 0; i < 6; i++) {
+      final angle = (i * 60 - 30) * math.pi / 180;
+      final point = Offset(
+        center.dx + radius * 0.8 * math.cos(angle),
+        center.dy + radius * 0.8 * math.sin(angle),
+      );
+      if (i == 0) {
+        path.moveTo(point.dx, point.dy);
+      } else {
+        path.lineTo(point.dx, point.dy);
+      }
+    }
+    path.close();
+    canvas.drawPath(path, paint);
+  }
+
+  void _paintBinary(Canvas canvas, Size size, Paint paint) {
+    const spacing = 16.0;
+    final textPainter = TextPainter(
+      textDirection: TextDirection.ltr,
+    );
+
+    for (var x = 0.0; x < size.width; x += spacing) {
+      for (var y = 0.0; y < size.height; y += spacing) {
+        final char = ((x + y).toInt() % 2).toString();
+        textPainter.text = TextSpan(
+          text: char,
+          style: TextStyle(
+            color: color,
+            fontSize: 10,
+            fontFamily: 'monospace',
+          ),
+        );
+        textPainter.layout();
+        textPainter.paint(canvas, Offset(x, y));
+      }
+    }
+  }
+
+  void _paintTerminal(Canvas canvas, Size size, Paint paint) {
+    const spacing = 24.0;
+    for (var y = spacing; y < size.height; y += spacing) {
+      canvas.drawLine(
+        Offset(8, y),
+        Offset(size.width - 8, y),
+        paint..strokeWidth = 0.5,
+      );
+    }
+    // Draw prompt symbols
+    final textPainter = TextPainter(
+      textDirection: TextDirection.ltr,
+    );
+    for (var y = spacing; y < size.height; y += spacing * 3) {
+      textPainter.text = TextSpan(
+        text: '>',
+        style: TextStyle(
+          color: color,
+          fontSize: 12,
+          fontFamily: 'monospace',
+        ),
+      );
+      textPainter.layout();
+      textPainter.paint(canvas, Offset(12, y - 8));
+    }
+  }
+
+  void _paintGrid(Canvas canvas, Size size, Paint paint) {
+    const spacing = 30.0;
+    for (var x = 0.0; x < size.width; x += spacing) {
+      canvas.drawLine(Offset(x, 0), Offset(x, size.height), paint..strokeWidth = 0.3);
+    }
+    for (var y = 0.0; y < size.height; y += spacing) {
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), paint..strokeWidth = 0.3);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
 class _MessageBubble extends ConsumerStatefulWidget {
   final Message message;
   final String conversationId;
@@ -567,6 +886,8 @@ class _MessageBubbleState extends ConsumerState<_MessageBubble> {
     final isOutgoing = widget.message.isOutgoing;
     final colorScheme = Theme.of(context).colorScheme;
     final maxBubbleHeight = 250.0; // Fixed max height for any message
+    final settings = ref.watch(settingsProvider);
+    final bubbleRadius = settings.bubbleRadius;
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
@@ -585,10 +906,10 @@ class _MessageBubbleState extends ConsumerState<_MessageBubble> {
                   ? colorScheme.primary
                   : colorScheme.surfaceContainerHighest,
               borderRadius: BorderRadius.only(
-                topLeft: const Radius.circular(16),
-                topRight: const Radius.circular(16),
-                bottomLeft: Radius.circular(isOutgoing ? 16 : 4),
-                bottomRight: Radius.circular(isOutgoing ? 4 : 16),
+                topLeft: Radius.circular(bubbleRadius),
+                topRight: Radius.circular(bubbleRadius),
+                bottomLeft: Radius.circular(isOutgoing ? bubbleRadius : 4),
+                bottomRight: Radius.circular(isOutgoing ? 4 : bubbleRadius),
               ),
             ),
             child: Scrollbar(
@@ -2195,15 +2516,22 @@ class _MessageInputState extends ConsumerState<_MessageInput> {
             Expanded(
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxHeight: 120),
-                child: TextField(
-                  controller: widget.controller,
-                  decoration: const InputDecoration(
-                    hintText: 'Message',
-                    border: InputBorder.none,
-                  ),
-                  textCapitalization: TextCapitalization.sentences,
-                  maxLines: null,
-                  onSubmitted: (_) => widget.onSend(),
+                child: Builder(
+                  builder: (context) {
+                    final settings = ref.watch(settingsProvider);
+                    return TextField(
+                      controller: widget.controller,
+                      decoration: const InputDecoration(
+                        hintText: 'Message',
+                        border: InputBorder.none,
+                      ),
+                      textCapitalization: TextCapitalization.sentences,
+                      maxLines: null,
+                      onSubmitted: (_) => widget.onSend(),
+                      // Incognito keyboard - request keyboard to not learn from typing
+                      enableIMEPersonalizedLearning: !settings.incognitoKeyboard,
+                    );
+                  },
                 ),
               ),
             ),
