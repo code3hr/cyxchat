@@ -27,7 +27,7 @@ class DatabaseService {
 
     return await openDatabase(
       path,
-      version: 11,
+      version: 12,
       onCreate: _createDatabase,
       onUpgrade: _upgradeDatabase,
     );
@@ -127,11 +127,23 @@ class DatabaseService {
         group_type INTEGER DEFAULT 0,
         who_can_add_members INTEGER DEFAULT 0,
         who_can_change_info INTEGER DEFAULT 1,
+        who_can_send INTEGER DEFAULT 0,
         message_history_visible INTEGER DEFAULT 1,
         slow_mode_seconds INTEGER DEFAULT 0,
         max_members INTEGER DEFAULT 200,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL
+      )
+    ''');
+
+    // Selected senders table (for who_can_send = SELECTED mode)
+    await db.execute('''
+      CREATE TABLE selected_senders (
+        group_id TEXT NOT NULL,
+        node_id TEXT NOT NULL,
+        added_at INTEGER NOT NULL,
+        PRIMARY KEY (group_id, node_id),
+        FOREIGN KEY (group_id) REFERENCES groups(id)
       )
     ''');
 
@@ -477,6 +489,22 @@ class DatabaseService {
         'CREATE INDEX IF NOT EXISTS idx_messages_disappears ON messages(disappears_at) WHERE disappears_at IS NOT NULL'
       );
     }
+
+    if (oldVersion < 12) {
+      // Version 12: Group send permissions (who can send messages)
+      await db.execute('ALTER TABLE groups ADD COLUMN who_can_send INTEGER DEFAULT 0');
+
+      // Selected senders table for SELECTED mode
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS selected_senders (
+          group_id TEXT NOT NULL,
+          node_id TEXT NOT NULL,
+          added_at INTEGER NOT NULL,
+          PRIMARY KEY (group_id, node_id),
+          FOREIGN KEY (group_id) REFERENCES groups(id)
+        )
+      ''');
+    }
   }
 
   Future<void> close() async {
@@ -495,6 +523,7 @@ class DatabaseService {
     await db.delete('pinned_messages');
     await db.delete('member_restrictions');
     await db.delete('admin_permissions');
+    await db.delete('selected_senders');
     await db.delete('group_members');
     await db.delete('groups');
     await db.delete('messages');

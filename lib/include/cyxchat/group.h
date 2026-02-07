@@ -71,8 +71,13 @@ typedef struct {
     /* Group Settings */
     cyxchat_group_add_setting_t who_can_add;    /* Who can add members */
     cyxchat_group_edit_setting_t who_can_edit;  /* Who can edit group info */
+    cyxchat_group_send_setting_t who_can_send;  /* Who can send messages */
     uint16_t slow_mode_seconds;                 /* 0 = disabled */
     int message_history_visible;                /* New members can see history */
+
+    /* Selected senders (when who_can_send = CYXCHAT_GROUP_SEND_SELECTED) */
+    cyxwiz_node_id_t selected_senders[CYXCHAT_MAX_GROUP_MEMBERS];
+    uint8_t selected_sender_count;
 
     /* State */
     int left;                                   /* We left this group */
@@ -709,6 +714,62 @@ CYXCHAT_API cyxchat_error_t cyxchat_group_set_who_can_edit(
     cyxchat_group_ctx_t *ctx,
     const cyxchat_group_id_t *group_id,
     cyxchat_group_edit_setting_t setting
+);
+
+/**
+ * Set who can send messages
+ *
+ * @param ctx           Group context
+ * @param group_id      Group ID
+ * @param setting       CYXCHAT_GROUP_SEND_ALL, ADMINS, or SELECTED
+ * @return              CYXCHAT_OK on success
+ */
+CYXCHAT_API cyxchat_error_t cyxchat_group_set_who_can_send(
+    cyxchat_group_ctx_t *ctx,
+    const cyxchat_group_id_t *group_id,
+    cyxchat_group_send_setting_t setting
+);
+
+/**
+ * Get who can send messages setting
+ */
+CYXCHAT_API cyxchat_group_send_setting_t cyxchat_group_get_who_can_send(
+    cyxchat_group_ctx_t *ctx,
+    const cyxchat_group_id_t *group_id
+);
+
+/**
+ * Add member to selected senders list
+ * Only effective when who_can_send = CYXCHAT_GROUP_SEND_SELECTED
+ *
+ * @param ctx           Group context
+ * @param group_id      Group ID
+ * @param member        Member to allow sending
+ * @return              CYXCHAT_OK on success
+ */
+CYXCHAT_API cyxchat_error_t cyxchat_group_add_selected_sender(
+    cyxchat_group_ctx_t *ctx,
+    const cyxchat_group_id_t *group_id,
+    const cyxwiz_node_id_t *member
+);
+
+/**
+ * Remove member from selected senders list
+ */
+CYXCHAT_API cyxchat_error_t cyxchat_group_remove_selected_sender(
+    cyxchat_group_ctx_t *ctx,
+    const cyxchat_group_id_t *group_id,
+    const cyxwiz_node_id_t *member
+);
+
+/**
+ * Check if member can send messages
+ * Returns 1 if allowed, 0 if not
+ */
+CYXCHAT_API int cyxchat_group_can_send(
+    cyxchat_group_ctx_t *ctx,
+    const cyxchat_group_id_t *group_id,
+    const cyxwiz_node_id_t *member
 );
 
 /**

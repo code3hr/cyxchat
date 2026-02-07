@@ -752,6 +752,67 @@ class GroupFFIProvider extends ChangeNotifier {
     return false;
   }
 
+  /// Set who can send messages (see CyxChatGroupSendSetting)
+  /// 0 = everyone, 1 = admins only, 2 = selected members
+  Future<bool> setWhoCanSend({
+    required String groupId,
+    required int setting,
+  }) async {
+    if (!_initialized) return false;
+
+    final result = _bindings.groupSetWhoCanSend(groupId, setting);
+    if (result == CyxChatError.ok) {
+      notifyListeners();
+      return true;
+    }
+    return false;
+  }
+
+  /// Get who can send messages setting
+  int getWhoCanSend(String groupId) {
+    if (!_initialized) return CyxChatGroupSendSetting.all;
+    return _bindings.groupGetWhoCanSend(groupId);
+  }
+
+  /// Add a member to selected senders list
+  Future<bool> addSelectedSender({
+    required String groupId,
+    required String memberId,
+  }) async {
+    if (!_initialized) return false;
+
+    final result = _bindings.groupAddSelectedSender(groupId, memberId);
+    if (result == CyxChatError.ok) {
+      notifyListeners();
+      return true;
+    }
+    return false;
+  }
+
+  /// Remove a member from selected senders list
+  Future<bool> removeSelectedSender({
+    required String groupId,
+    required String memberId,
+  }) async {
+    if (!_initialized) return false;
+
+    final result = _bindings.groupRemoveSelectedSender(groupId, memberId);
+    if (result == CyxChatError.ok) {
+      notifyListeners();
+      return true;
+    }
+    return false;
+  }
+
+  /// Check if a member can send messages in this group
+  bool canMemberSend({
+    required String groupId,
+    required String memberId,
+  }) {
+    if (!_initialized) return false;
+    return _bindings.groupCanSend(groupId, memberId);
+  }
+
   /// Get group type (0 = basic, 1 = supergroup)
   int getGroupType(String groupId) {
     if (!_initialized) return 0;

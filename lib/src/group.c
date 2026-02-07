@@ -797,6 +797,86 @@ static size_t deserialize_group_leave(
 }
 
 /* ============================================================
+ * GROUP_MEMBER_LIST Wire Format
+ * ============================================================
+ *
+ * Sent by admin to new member after they join, containing all
+ * existing members so the new member can send to everyone.
+ *
+ *  +0: type (1 byte) = 0x81
+ *  +1: group_id (8 bytes)
+ *  +9: member_count (1 byte)
+ * +10: members (N * 33 bytes each): node_id(32) + role(1)
+ *
+ * Max: 10 + 32*33 = 1066 bytes (fits in onion with 1-hop)
+ */
+
+#define GROUP_MEMBER_LIST_HEADER_SIZE 10
+#define GROUP_MEMBER_LIST_ENTRY_SIZE 33
+#define GROUP_MEMBER_LIST_MAX_MEMBERS 32
+
+static size_t serialize_group_member_list(
+    uint8_t *out,
+    size_t out_size,
+    const cyxchat_group_id_t *group_id,
+    const cyxchat_group_member_t *members,
+    uint8_t member_count
+) {
+    size_t required = GROUP_MEMBER_LIST_HEADER_SIZE +
+                      (member_count * GROUP_MEMBER_LIST_ENTRY_SIZE);
+    if (out_size < required) return 0;
+
+    size_t offset = 0;
+
+    out[offset++] = CYXCHAT_MSG_GROUP_MEMBER_LIST;
+
+    memcpy(out + offset, group_id->bytes, CYXCHAT_GROUP_ID_SIZE);
+    offset += CYXCHAT_GROUP_ID_SIZE;
+
+    out[offset++] = member_count;
+
+    for (uint8_t i = 0; i < member_count; i++) {
+        memcpy(out + offset, members[i].node_id.bytes, 32);
+        offset += 32;
+        out[offset++] = (uint8_t)members[i].role;
+    }
+
+    return offset;
+}
+
+static size_t deserialize_group_member_list(
+    const uint8_t *in,
+    size_t len,
+    cyxchat_group_id_t *group_id_out,
+    cyxchat_group_member_t *members_out,
+    uint8_t *member_count_out
+) {
+    if (len < GROUP_MEMBER_LIST_HEADER_SIZE) return 0;
+
+    size_t offset = 1;  /* Skip type */
+
+    memcpy(group_id_out->bytes, in + offset, CYXCHAT_GROUP_ID_SIZE);
+    offset += CYXCHAT_GROUP_ID_SIZE;
+
+    uint8_t count = in[offset++];
+    if (count > GROUP_MEMBER_LIST_MAX_MEMBERS) count = GROUP_MEMBER_LIST_MAX_MEMBERS;
+
+    size_t required = GROUP_MEMBER_LIST_HEADER_SIZE +
+                      (count * GROUP_MEMBER_LIST_ENTRY_SIZE);
+    if (len < required) return 0;
+
+    for (uint8_t i = 0; i < count; i++) {
+        memset(&members_out[i], 0, sizeof(cyxchat_group_member_t));
+        memcpy(members_out[i].node_id.bytes, in + offset, 32);
+        offset += 32;
+        members_out[i].role = (cyxchat_group_role_t)in[offset++];
+    }
+
+    *member_count_out = count;
+    return offset;
+}
+
+/* ============================================================
  * GROUP_KICK Wire Format
  * ============================================================
  *
@@ -2343,6 +2423,12 @@ cyxchat_error_t cyxchat_group_send_text(
         return CYXCHAT_ERR_NOT_MEMBER;
     }
 
+    /* Check send permission based on group settings */
+    if (!cyxchat_group_can_send(ctx, group_id, &ctx->local_id)) {
+        CYXWIZ_WARN("Send blocked: who_can_send=%d, not permitted", group->who_can_send);
+        return CYXCHAT_ERR_NOT_ADMIN; /* Reuse error code for "not permitted" */
+    }
+
     /* Generate message ID */
     cyxchat_msg_id_t msg_id;
     cyxchat_generate_msg_id(&msg_id);
@@ -3128,11 +3214,116 @@ static void handle_group_join(
     cyxchat_node_id_to_hex(&member_id, member_hex);
     CYXWIZ_INFO("Member %.16s... joined group %s", member_hex, group_hex);
 
+    /* If we are admin/owner, send member list to the new member
+     * so they can send messages to all existing members */
+    if (get_role(group, &ctx->local_id) >= CYXCHAT_ROLE_ADMIN) {
+        /* Build and send member list */
+        uint8_t wire[1200];
+        size_t wire_len = serialize_group_member_list(
+            wire, sizeof(wire),
+            &group_id,
+            group->members,
+            group->member_count
+        );
+
+        if (wire_len > 0) {
+            cyxwiz_onion_ctx_t *onion = cyxchat_get_onion(ctx->chat_ctx);
+            if (onion) {
+                cyxwiz_error_t err = cyxwiz_onion_send_to(onion, &member_id, wire, wire_len);
+                if (err == CYXWIZ_OK) {
+                    CYXWIZ_INFO("Sent member list (%u members) to new member %.16s...",
+                                group->member_count, member_hex);
+                } else {
+                    CYXWIZ_WARN("Failed to send member list to new member: %d", err);
+                }
+            }
+        }
+    }
+
     /* Invoke callback */
     if (ctx->on_member_join) {
         ctx->on_member_join(ctx, &group_id, &member_id, ctx->on_member_join_data);
     } else {
     }
+}
+
+/**
+ * Handle incoming GROUP_MEMBER_LIST
+ * Received by new members to populate their local member list
+ */
+static void handle_member_list(
+    cyxchat_group_ctx_t *ctx,
+    const cyxwiz_node_id_t *from,
+    const uint8_t *data,
+    size_t len
+) {
+    (void)from;
+
+    cyxchat_group_id_t group_id;
+    cyxchat_group_member_t members[GROUP_MEMBER_LIST_MAX_MEMBERS];
+    uint8_t member_count = 0;
+
+    size_t parsed = deserialize_group_member_list(
+        data, len,
+        &group_id, members, &member_count
+    );
+
+    if (parsed == 0) {
+        CYXWIZ_WARN("Failed to parse GROUP_MEMBER_LIST message");
+        return;
+    }
+
+    /* Find group */
+    cyxchat_group_t *group = find_group(ctx, &group_id);
+    if (!group) {
+        CYXWIZ_DEBUG("Ignoring member list for unknown group");
+        return;
+    }
+
+    char group_hex[17];
+    cyxchat_group_id_to_hex(&group_id, group_hex);
+    CYXWIZ_INFO("Received member list for group %s: %u members", group_hex, member_count);
+
+    /* Add each member we don't already have */
+    int added_count = 0;
+    for (uint8_t i = 0; i < member_count; i++) {
+        /* Skip self */
+        if (memcmp(&members[i].node_id, &ctx->local_id, 32) == 0) {
+            continue;
+        }
+
+        /* Skip if already member */
+        if (is_member(group, &members[i].node_id)) {
+            /* Update role if needed */
+            cyxchat_group_member_t *existing = find_member(group, &members[i].node_id);
+            if (existing && existing->role != members[i].role) {
+                existing->role = members[i].role;
+            }
+            continue;
+        }
+
+        /* Check capacity */
+        if (group->member_count >= CYXCHAT_MAX_GROUP_MEMBERS) {
+            CYXWIZ_WARN("Group full, cannot add more members from sync");
+            break;
+        }
+
+        /* Add member */
+        cyxchat_group_member_t *new_mem = &group->members[group->member_count];
+        memset(new_mem, 0, sizeof(cyxchat_group_member_t));
+        memcpy(&new_mem->node_id, &members[i].node_id, sizeof(cyxwiz_node_id_t));
+        new_mem->role = members[i].role;
+        new_mem->joined_at = cyxchat_timestamp_ms();
+        group->member_count++;
+        added_count++;
+
+        char mem_hex[65];
+        cyxchat_node_id_to_hex(&members[i].node_id, mem_hex);
+        CYXWIZ_DEBUG("Added member from sync: %.16s... (role=%d)", mem_hex, members[i].role);
+    }
+
+    CYXWIZ_INFO("Member list sync complete: added %d new members (total: %u)",
+                added_count, group->member_count);
 }
 
 /**
@@ -3579,6 +3770,10 @@ void cyxchat_group_handle_message(
             handle_group_text_ack(ctx, from, data, len);
             break;
 
+        case CYXCHAT_MSG_GROUP_MEMBER_LIST:
+            handle_member_list(ctx, from, data, len);
+            break;
+
         default:
             CYXWIZ_WARN("Unknown group message type: 0x%02x", type);
             break;
@@ -3965,6 +4160,182 @@ cyxchat_error_t cyxchat_group_set_who_can_edit(
     CYXWIZ_INFO("Set who_can_edit to %d", setting);
 
     return CYXCHAT_OK;
+}
+
+/**
+ * Set who can send messages
+ */
+cyxchat_error_t cyxchat_group_set_who_can_send(
+    cyxchat_group_ctx_t *ctx,
+    const cyxchat_group_id_t *group_id,
+    cyxchat_group_send_setting_t setting
+) {
+    if (!ctx || !group_id) {
+        return CYXCHAT_ERR_NULL;
+    }
+
+    cyxchat_group_t *group = find_group(ctx, group_id);
+    if (!group) {
+        return CYXCHAT_ERR_NOT_FOUND;
+    }
+
+    /* Only admin/owner can change this setting */
+    if (get_role(group, &ctx->local_id) < CYXCHAT_ROLE_ADMIN) {
+        return CYXCHAT_ERR_NOT_ADMIN;
+    }
+
+    group->who_can_send = setting;
+
+    CYXWIZ_INFO("Set who_can_send to %d", setting);
+
+    /* TODO: Broadcast settings change to all members */
+
+    return CYXCHAT_OK;
+}
+
+/**
+ * Get who can send messages setting
+ */
+cyxchat_group_send_setting_t cyxchat_group_get_who_can_send(
+    cyxchat_group_ctx_t *ctx,
+    const cyxchat_group_id_t *group_id
+) {
+    if (!ctx || !group_id) {
+        return CYXCHAT_GROUP_SEND_ALL;
+    }
+
+    cyxchat_group_t *group = find_group(ctx, group_id);
+    if (!group) {
+        return CYXCHAT_GROUP_SEND_ALL;
+    }
+
+    return group->who_can_send;
+}
+
+/**
+ * Add member to selected senders list
+ */
+cyxchat_error_t cyxchat_group_add_selected_sender(
+    cyxchat_group_ctx_t *ctx,
+    const cyxchat_group_id_t *group_id,
+    const cyxwiz_node_id_t *member
+) {
+    if (!ctx || !group_id || !member) {
+        return CYXCHAT_ERR_NULL;
+    }
+
+    cyxchat_group_t *group = find_group(ctx, group_id);
+    if (!group) {
+        return CYXCHAT_ERR_NOT_FOUND;
+    }
+
+    /* Only admin/owner can manage selected senders */
+    if (get_role(group, &ctx->local_id) < CYXCHAT_ROLE_ADMIN) {
+        return CYXCHAT_ERR_NOT_ADMIN;
+    }
+
+    /* Check if already in list */
+    for (uint8_t i = 0; i < group->selected_sender_count; i++) {
+        if (memcmp(&group->selected_senders[i], member, 32) == 0) {
+            return CYXCHAT_OK; /* Already added */
+        }
+    }
+
+    /* Add to list */
+    if (group->selected_sender_count >= CYXCHAT_MAX_GROUP_MEMBERS) {
+        return CYXCHAT_ERR_FULL;
+    }
+
+    memcpy(&group->selected_senders[group->selected_sender_count], member, 32);
+    group->selected_sender_count++;
+
+    CYXWIZ_INFO("Added member to selected senders");
+
+    return CYXCHAT_OK;
+}
+
+/**
+ * Remove member from selected senders list
+ */
+cyxchat_error_t cyxchat_group_remove_selected_sender(
+    cyxchat_group_ctx_t *ctx,
+    const cyxchat_group_id_t *group_id,
+    const cyxwiz_node_id_t *member
+) {
+    if (!ctx || !group_id || !member) {
+        return CYXCHAT_ERR_NULL;
+    }
+
+    cyxchat_group_t *group = find_group(ctx, group_id);
+    if (!group) {
+        return CYXCHAT_ERR_NOT_FOUND;
+    }
+
+    /* Only admin/owner can manage selected senders */
+    if (get_role(group, &ctx->local_id) < CYXCHAT_ROLE_ADMIN) {
+        return CYXCHAT_ERR_NOT_ADMIN;
+    }
+
+    /* Find and remove */
+    for (uint8_t i = 0; i < group->selected_sender_count; i++) {
+        if (memcmp(&group->selected_senders[i], member, 32) == 0) {
+            /* Shift remaining elements */
+            if (i < group->selected_sender_count - 1) {
+                memmove(&group->selected_senders[i],
+                        &group->selected_senders[i + 1],
+                        (group->selected_sender_count - i - 1) * 32);
+            }
+            group->selected_sender_count--;
+            CYXWIZ_INFO("Removed member from selected senders");
+            return CYXCHAT_OK;
+        }
+    }
+
+    return CYXCHAT_ERR_NOT_FOUND;
+}
+
+/**
+ * Check if member can send messages
+ */
+int cyxchat_group_can_send(
+    cyxchat_group_ctx_t *ctx,
+    const cyxchat_group_id_t *group_id,
+    const cyxwiz_node_id_t *member
+) {
+    if (!ctx || !group_id || !member) {
+        return 0;
+    }
+
+    cyxchat_group_t *group = find_group(ctx, group_id);
+    if (!group) {
+        return 0;
+    }
+
+    /* Check based on setting */
+    switch (group->who_can_send) {
+        case CYXCHAT_GROUP_SEND_ALL:
+            return 1; /* Everyone can send */
+
+        case CYXCHAT_GROUP_SEND_ADMINS:
+            /* Only admins and owner can send */
+            return get_role(group, member) >= CYXCHAT_ROLE_ADMIN;
+
+        case CYXCHAT_GROUP_SEND_SELECTED:
+            /* Admins/owner always can send */
+            if (get_role(group, member) >= CYXCHAT_ROLE_ADMIN) {
+                return 1;
+            }
+            /* Check if in selected senders list */
+            for (uint8_t i = 0; i < group->selected_sender_count; i++) {
+                if (memcmp(&group->selected_senders[i], member, 32) == 0) {
+                    return 1;
+                }
+            }
+            return 0;
+
+        default:
+            return 1;
+    }
 }
 
 /**

@@ -137,7 +137,9 @@ extern "C" {
 #define CYXCHAT_MSG_GROUP_VIDEO       0x75    /* Group video thumbnail + metadata */
 
 /* Retransmission ACK (0x80) - separate range to avoid group message conflicts */
-#define CYXCHAT_MSG_GROUP_TEXT_ACK  0x80    /* Group text delivery ACK */
+#define CYXCHAT_MSG_GROUP_TEXT_ACK      0x80    /* Group text delivery ACK */
+#define CYXCHAT_MSG_GROUP_MEMBER_LIST   0x81    /* Member list sync (admin -> new member) */
+#define CYXCHAT_MSG_GROUP_SETTINGS      0x82    /* Group settings sync */
 
 /* DNS Messages (0xD0-0xD9) - CyxChat internal DNS */
 #define CYXCHAT_MSG_DNS_REGISTER      0xD0  /* Register name with signature */
@@ -319,6 +321,13 @@ typedef enum {
     CYXCHAT_GROUP_SETTING_ALL_CAN_EDIT    = 0,  /* All can edit group info */
     CYXCHAT_GROUP_SETTING_ADMINS_CAN_EDIT = 1   /* Only admins can edit info */
 } cyxchat_group_edit_setting_t;
+
+/* Who can send messages to the group */
+typedef enum {
+    CYXCHAT_GROUP_SEND_ALL      = 0,  /* Everyone can send (default) */
+    CYXCHAT_GROUP_SEND_ADMINS   = 1,  /* Only admins can send (broadcast/channel mode) */
+    CYXCHAT_GROUP_SEND_SELECTED = 2   /* Only selected members can send */
+} cyxchat_group_send_setting_t;
 
 /* ============================================================
  * Message Header (common to all messages)

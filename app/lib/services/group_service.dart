@@ -510,7 +510,8 @@ class GroupService {
 
     final group = Group.fromMap(rows.first);
     final members = await getGroupMembers(id);
-    return group.copyWith(members: members);
+    final selectedSenders = await getSelectedSenders(id);
+    return group.copyWith(members: members, selectedSenders: selectedSenders);
   }
 
   /// Get group members
@@ -2016,6 +2017,165 @@ class GroupService {
     }
 
     return true;
+  }
+
+  /// Set who can send messages
+  Future<bool> setWhoCanSend({
+    required String groupId,
+    required WhoCanSendMessages setting,
+  }) async {
+    final db = await DatabaseService.instance.database;
+
+    // Set via FFI
+    if (_ffiProvider != null && _ffiProvider!.initialized) {
+      final success = await _ffiProvider!.setWhoCanSend(
+        groupId: groupId,
+        setting: setting.index,
+      );
+      if (!success) {
+        _log.error('Failed to set who can send via FFI',
+            source: 'GroupService');
+        return false;
+      }
+    }
+
+    // Update database
+    await db.update(
+      'groups',
+      {
+        'who_can_send': setting.index,
+        'updated_at': DateTime.now().millisecondsSinceEpoch,
+      },
+      where: 'id = ?',
+      whereArgs: [groupId],
+    );
+
+    _log.info('Set who can send to ${setting.displayName}',
+        source: 'GroupService');
+
+    // Notify update
+    final group = await getGroup(groupId);
+    if (group != null) {
+      _groupUpdateController.add(group);
+    }
+
+    return true;
+  }
+
+  /// Add a member to selected senders list
+  Future<bool> addSelectedSender({
+    required String groupId,
+    required String memberId,
+  }) async {
+    final db = await DatabaseService.instance.database;
+
+    // Add via FFI
+    if (_ffiProvider != null && _ffiProvider!.initialized) {
+      final success = await _ffiProvider!.addSelectedSender(
+        groupId: groupId,
+        memberId: memberId,
+      );
+      if (!success) {
+        _log.error('Failed to add selected sender via FFI',
+            source: 'GroupService');
+        return false;
+      }
+    }
+
+    // Update database
+    await db.insert(
+      'selected_senders',
+      {
+        'group_id': groupId,
+        'node_id': memberId,
+        'added_at': DateTime.now().millisecondsSinceEpoch,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+
+    _log.info('Added ${memberId.substring(0, 8)}... to selected senders',
+        source: 'GroupService');
+
+    // Notify update
+    final group = await getGroup(groupId);
+    if (group != null) {
+      _groupUpdateController.add(group);
+    }
+
+    return true;
+  }
+
+  /// Remove a member from selected senders list
+  Future<bool> removeSelectedSender({
+    required String groupId,
+    required String memberId,
+  }) async {
+    final db = await DatabaseService.instance.database;
+
+    // Remove via FFI
+    if (_ffiProvider != null && _ffiProvider!.initialized) {
+      final success = await _ffiProvider!.removeSelectedSender(
+        groupId: groupId,
+        memberId: memberId,
+      );
+      if (!success) {
+        _log.error('Failed to remove selected sender via FFI',
+            source: 'GroupService');
+        return false;
+      }
+    }
+
+    // Update database
+    await db.delete(
+      'selected_senders',
+      where: 'group_id = ? AND node_id = ?',
+      whereArgs: [groupId, memberId],
+    );
+
+    _log.info('Removed ${memberId.substring(0, 8)}... from selected senders',
+        source: 'GroupService');
+
+    // Notify update
+    final group = await getGroup(groupId);
+    if (group != null) {
+      _groupUpdateController.add(group);
+    }
+
+    return true;
+  }
+
+  /// Get list of selected senders for a group
+  Future<List<String>> getSelectedSenders(String groupId) async {
+    final db = await DatabaseService.instance.database;
+
+    final rows = await db.query(
+      'selected_senders',
+      columns: ['node_id'],
+      where: 'group_id = ?',
+      whereArgs: [groupId],
+    );
+
+    return rows.map((row) => row['node_id'] as String).toList();
+  }
+
+  /// Check if a member can send messages in a group
+  Future<bool> canMemberSend({
+    required String groupId,
+    required String memberId,
+  }) async {
+    // Check FFI first if available
+    if (_ffiProvider != null && _ffiProvider!.initialized) {
+      return _ffiProvider!.canMemberSend(
+        groupId: groupId,
+        memberId: memberId,
+      );
+    }
+
+    // Fallback to database check
+    final group = await getGroup(groupId);
+    if (group == null) return false;
+
+    return group.canUserSend(memberId);
   }
 
   /// Set message history visibility for new members

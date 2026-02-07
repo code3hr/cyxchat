@@ -21,7 +21,7 @@ A technical comparison of CyxChat with Meshtastic, Signal, Briar, and Matrix/Ses
 | **Read Receipts** | Yes | Yes | No | No | Yes | No |
 | **Message Replies** | Yes | Yes | No | Yes | Yes | No |
 | **Group Chat** | Yes (50 max) | Yes | Yes | Yes | Yes | Yes |
-| **Voice/Video** | Planned | Yes | No | No | Yes | No |
+| **Voice/Video** | Planned (WebRTC) | Yes (WebRTC) | No | No | Yes | No |
 | **File Transfer** | Yes (64KB) | Yes | Yes | Yes | Yes | No |
 
 ---
@@ -344,6 +344,297 @@ CyxChat:        You → Peer → Peer → Recipient
 
 ---
 
+## Protocol Comparison: CyxChat vs WebRTC
+
+### Understanding the Protocols
+
+**WebRTC** is the industry standard for real-time communication (audio/video). It's a full stack:
+
+```
+WebRTC Protocol Stack:
+
+┌─────────────────────────────────────┐
+│  Application (Video/Audio/Data)     │
+├─────────────────────────────────────┤
+│  SRTP (Secure Real-time Protocol)   │  ← Media encryption
+│  SCTP (Stream Control)              │  ← Data channels
+├─────────────────────────────────────┤
+│  DTLS (Datagram TLS)                │  ← Key exchange
+├─────────────────────────────────────┤
+│  ICE (Interactive Connectivity)     │  ← NAT traversal
+│    ├── STUN (discovery)             │
+│    └── TURN (relay fallback)        │
+├─────────────────────────────────────┤
+│  UDP (preferred) / TCP (fallback)   │  ← Transport
+└─────────────────────────────────────┘
+```
+
+**CyxChat Protocol** is a custom lightweight protocol optimized for text messaging:
+
+```
+CyxChat Protocol Stack:
+
+┌─────────────────────────────────────┐
+│  Application (Text/Files/Presence)  │
+├─────────────────────────────────────┤
+│  Onion Routing (optional)           │  ← Metadata protection
+├─────────────────────────────────────┤
+│  XChaCha20-Poly1305                 │  ← E2E encryption
+├─────────────────────────────────────┤
+│  X25519 Key Exchange                │  ← ECDH key agreement
+├─────────────────────────────────────┤
+│  STUN + UDP Hole Punch              │  ← NAT traversal
+│    └── Relay fallback               │
+├─────────────────────────────────────┤
+│  UDP                                │  ← Transport
+└─────────────────────────────────────┘
+```
+
+### Protocol Comparison Table
+
+| Feature | CyxChat Protocol | WebRTC |
+|---------|------------------|--------|
+| **Primary Use** | Text, files, presence | Audio, video, data |
+| **Transport** | UDP only | UDP preferred, TCP fallback |
+| **NAT Traversal** | STUN + custom hole punch | ICE (STUN + TURN) |
+| **Relay** | Custom relay server | TURN servers |
+| **Encryption** | XChaCha20-Poly1305 | DTLS + SRTP |
+| **Key Exchange** | X25519 ECDH | DTLS handshake |
+| **Metadata Protection** | Onion routing (optional) | None |
+| **Complexity** | Low (~5K lines) | High (~100K+ lines) |
+| **Browser Support** | No (native only) | Yes (built into browsers) |
+| **Codecs** | N/A | Opus, VP8, VP9, H.264, AV1 |
+| **Bandwidth Adaptation** | N/A | Built-in |
+
+### NAT Traversal Comparison
+
+Both protocols solve the same problem but differently:
+
+```
+CyxChat NAT Traversal:
+
+1. STUN discovery (get public IP:port)
+2. Exchange addresses via bootstrap server
+3. UDP hole punch (5 rapid packets)
+4. Success → Direct P2P
+5. Fail → Use relay server
+
+WebRTC NAT Traversal (ICE):
+
+1. Gather candidates (host, srflx, relay)
+2. Exchange candidates via signaling
+3. Connectivity checks (STUN binding)
+4. Prioritize: direct > server reflexive > relay
+5. Select best working path
+```
+
+| Aspect | CyxChat | WebRTC ICE |
+|--------|---------|------------|
+| Candidate types | 2 (direct, relay) | 3 (host, srflx, relay) |
+| Fallback | Single relay | Multiple TURN servers |
+| Trickle candidates | No | Yes |
+| Candidate pairing | Simple | Full mesh testing |
+| Connection time | Fast (~2s) | Varies (~1-5s) |
+
+---
+
+## How Major Apps Handle Text vs Calls
+
+Every major messaging app uses **different protocols** for text and calls:
+
+### Signal
+
+```
+┌─────────────────────────────────────────────┐
+│                  Signal                      │
+├─────────────────────┬───────────────────────┤
+│    Text Messages    │    Voice/Video Calls  │
+│    ──────────────   │    ────────────────   │
+│    Signal Protocol  │    WebRTC             │
+│    (custom)         │    (standard)         │
+│                     │                       │
+│  • Double Ratchet   │  • ICE/STUN/TURN      │
+│  • Server-routed    │  • P2P when possible  │
+│  • Store & forward  │  • Opus/VP8 codecs    │
+└─────────────────────┴───────────────────────┘
+```
+
+### WhatsApp
+
+```
+┌─────────────────────────────────────────────┐
+│                 WhatsApp                     │
+├─────────────────────┬───────────────────────┤
+│    Text Messages    │    Voice/Video Calls  │
+│    ──────────────   │    ────────────────   │
+│    Signal Protocol  │    WebRTC-based       │
+│    (licensed)       │    (modified)         │
+│                     │                       │
+│  • Server-routed    │  • ICE for NAT        │
+│  • Cloud backup     │  • Custom TURN infra  │
+│  • E2E encrypted    │  • Group calls        │
+└─────────────────────┴───────────────────────┘
+```
+
+### Telegram
+
+```
+┌─────────────────────────────────────────────┐
+│                 Telegram                     │
+├─────────────────────┬───────────────────────┤
+│    Text Messages    │    Voice/Video Calls  │
+│    ──────────────   │    ────────────────   │
+│    MTProto          │    WebRTC             │
+│    (custom)         │    (standard)         │
+│                     │                       │
+│  • Server-routed    │  • P2P preferred      │
+│  • Cloud storage    │  • Relay fallback     │
+│  • NOT E2E default! │  • E2E encrypted      │
+└─────────────────────┴───────────────────────┘
+
+Note: Telegram text is NOT end-to-end encrypted
+by default (only "Secret Chats" are E2E).
+```
+
+### Discord
+
+```
+┌─────────────────────────────────────────────┐
+│                  Discord                     │
+├─────────────────────┬───────────────────────┤
+│    Text Messages    │    Voice/Video Calls  │
+│    ──────────────   │    ────────────────   │
+│    Custom protocol  │    WebRTC             │
+│    (WebSocket)      │    (modified)         │
+│                     │                       │
+│  • Server-routed    │  • SFU for groups     │
+│  • NOT E2E          │  • NOT E2E            │
+│  • Real-time via WS │  • Low latency        │
+└─────────────────────┴───────────────────────┘
+
+Note: Discord has NO end-to-end encryption.
+```
+
+### CyxChat (Planned Architecture)
+
+```
+┌─────────────────────────────────────────────┐
+│                  CyxChat                     │
+├─────────────────────┬───────────────────────┤
+│    Text/Files       │    Voice/Video Calls  │
+│    ──────────────   │    ────────────────   │
+│    CyxChat Protocol │    WebRTC             │
+│    (custom UDP)     │    (standard)         │
+│                     │                       │
+│  • P2P first        │  • ICE/STUN           │
+│  • Relay fallback   │  • Use CyxChat relay  │
+│  • Onion routing    │    as TURN fallback   │
+│  • Offline queue    │  • Opus/VP8 codecs    │
+│  • E2E encrypted    │  • E2E (DTLS-SRTP)    │
+└─────────────────────┴───────────────────────┘
+
+Signaling for WebRTC happens over CyxChat protocol.
+```
+
+---
+
+## Why This Hybrid Approach?
+
+### Why NOT Use WebRTC for Everything?
+
+| Concern | WebRTC | CyxChat Protocol |
+|---------|--------|------------------|
+| Text efficiency | Data channels have overhead | Optimized for small messages |
+| Onion routing | Not built-in | Native support |
+| Offline queue | Not supported | Built-in |
+| Simplicity | Complex stack | Minimal |
+| Control | Browser API constraints | Full control |
+| Metadata | No protection | Onion routing |
+
+### Why NOT Build Custom Audio/Video?
+
+Building real-time media from scratch requires:
+
+```
+Audio pipeline:
+├── Codec (Opus) encoding/decoding
+├── Jitter buffer
+├── Packet loss concealment
+├── Echo cancellation
+├── Noise suppression
+├── Automatic gain control
+└── Clock synchronization
+
+Video pipeline:
+├── Codec (VP8/VP9/H.264) encoding/decoding
+├── Resolution adaptation
+├── Bandwidth estimation
+├── Keyframe requests
+├── Frame buffering
+└── Lip sync
+
+Time to implement: 2-3 years
+Result: Worse than WebRTC
+```
+
+WebRTC handles all of this. Every serious app uses it for calls.
+
+---
+
+## CyxChat Call Integration Design
+
+### Signaling via CyxChat Protocol
+
+```
+Call Setup Flow:
+
+1. Alice wants to call Bob
+2. Alice checks: Is Bob online? (via bootstrap)
+3. Alice → Bob: CALL_OFFER (via CyxChat protocol)
+   └── Contains: SDP offer (WebRTC session description)
+4. Bob → Alice: CALL_ANSWER (via CyxChat protocol)
+   └── Contains: SDP answer
+5. Exchange ICE candidates (via CyxChat protocol)
+6. WebRTC establishes direct media connection
+7. Call audio/video flows via WebRTC P2P
+8. Call hangup signaled via CyxChat protocol
+
+CyxChat protocol = signaling transport
+WebRTC = media transport
+```
+
+### Relay Integration
+
+```
+CyxChat relay server can also serve as TURN:
+
+Scenario: Both users behind symmetric NAT
+
+1. WebRTC ICE fails direct connection
+2. Falls back to TURN relay
+3. CyxChat relay acts as TURN server
+4. Media flows: Alice → Relay → Bob
+
+Same infrastructure, dual purpose:
+├── Text relay (CyxChat protocol)
+└── Media relay (TURN for WebRTC)
+```
+
+---
+
+## Security Comparison for Calls
+
+| Aspect | CyxChat (planned) | Signal | WhatsApp | Telegram |
+|--------|-------------------|--------|----------|----------|
+| Signaling encryption | E2E (CyxChat) | E2E | E2E | Server-side |
+| Media encryption | DTLS-SRTP | DTLS-SRTP | DTLS-SRTP | SRTP |
+| Key verification | Safety numbers | Safety numbers | Security code | Emoji |
+| Metadata (who calls) | Bootstrap sees | Server sees | Server sees | Server sees |
+| P2P media | When possible | When possible | When possible | When possible |
+| Relay | CyxChat relay | Signal TURN | WhatsApp TURN | Telegram TURN |
+
+---
+
 ## Summary
 
 | Aspect | Winner | Why |
@@ -372,5 +663,5 @@ It's not trying to replace Signal for everyday users. It's for those who need:
 
 ---
 
-*Document version: 1.1*
-*Last updated: January 2026*
+*Document version: 1.2*
+*Last updated: February 2026*

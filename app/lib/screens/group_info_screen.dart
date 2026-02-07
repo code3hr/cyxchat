@@ -117,8 +117,10 @@ class _GroupInfoScreenState extends ConsumerState<GroupInfoScreen> {
                   onSlowModeChanged: (seconds) => _setSlowMode(seconds),
                   onWhoCanAddChanged: (setting) => _setWhoCanAdd(setting),
                   onWhoCanEditChanged: (setting) => _setWhoCanEdit(setting),
+                  onWhoCanSendChanged: (setting) => _setWhoCanSend(setting),
                   onHistoryVisibleChanged: (visible) => _setHistoryVisible(visible),
                   onUpgradeToSupergroup: () => _upgradeToSupergroup(),
+                  onManageSelectedSenders: () => _showManageSelectedSenders(group),
                 ),
 
               if (canManageMembers) const SizedBox(height: 24),
@@ -502,6 +504,61 @@ class _GroupInfoScreenState extends ConsumerState<GroupInfoScreen> {
         );
       }
     }
+  }
+
+  Future<void> _setWhoCanSend(WhoCanSendMessages setting) async {
+    try {
+      await GroupService.instance.setWhoCanSend(
+        groupId: widget.groupId,
+        setting: setting,
+      );
+      ref.invalidate(groupProvider(widget.groupId));
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to update setting: $e')),
+        );
+      }
+    }
+  }
+
+  void _showManageSelectedSenders(Group group) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.bgDarkSecondary,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) {
+        return DraggableScrollableSheet(
+          initialChildSize: 0.6,
+          minChildSize: 0.4,
+          maxChildSize: 0.9,
+          expand: false,
+          builder: (context, scrollController) {
+            return _SelectedSendersSheet(
+              group: group,
+              scrollController: scrollController,
+              onToggleSender: (memberId, isSelected) async {
+                if (isSelected) {
+                  await GroupService.instance.addSelectedSender(
+                    groupId: group.id,
+                    memberId: memberId,
+                  );
+                } else {
+                  await GroupService.instance.removeSelectedSender(
+                    groupId: group.id,
+                    memberId: memberId,
+                  );
+                }
+                ref.invalidate(groupProvider(widget.groupId));
+              },
+            );
+          },
+        );
+      },
+    );
   }
 
   Future<void> _setHistoryVisible(bool visible) async {
@@ -1173,8 +1230,10 @@ class _GroupSettingsSection extends StatelessWidget {
   final void Function(int seconds) onSlowModeChanged;
   final void Function(WhoCanAddMembers) onWhoCanAddChanged;
   final void Function(WhoCanChangeInfo) onWhoCanEditChanged;
+  final void Function(WhoCanSendMessages) onWhoCanSendChanged;
   final void Function(bool visible) onHistoryVisibleChanged;
   final VoidCallback onUpgradeToSupergroup;
+  final VoidCallback? onManageSelectedSenders;
 
   const _GroupSettingsSection({
     required this.group,
@@ -1182,8 +1241,10 @@ class _GroupSettingsSection extends StatelessWidget {
     required this.onSlowModeChanged,
     required this.onWhoCanAddChanged,
     required this.onWhoCanEditChanged,
+    required this.onWhoCanSendChanged,
     required this.onHistoryVisibleChanged,
     required this.onUpgradeToSupergroup,
+    this.onManageSelectedSenders,
   });
 
   @override
@@ -1285,6 +1346,35 @@ class _GroupSettingsSection extends StatelessWidget {
           ),
           trailing: Icon(Icons.chevron_right, color: AppColors.textDarkSecondary),
           onTap: () => _showWhoCanEditDialog(context),
+        ),
+
+        // Who can send messages
+        ListTile(
+          leading: const Icon(Icons.message),
+          title: const Text('Who Can Send Messages'),
+          subtitle: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                group.whoCanSend.displayName,
+                style: TextStyle(
+                  color: AppColors.textDarkSecondary,
+                  fontSize: 12,
+                ),
+              ),
+              if (group.whoCanSend == WhoCanSendMessages.selectedOnly &&
+                  group.selectedSenders.isNotEmpty)
+                Text(
+                  '${group.selectedSenders.length} member(s) can send',
+                  style: TextStyle(
+                    color: AppColors.primary,
+                    fontSize: 11,
+                  ),
+                ),
+            ],
+          ),
+          trailing: Icon(Icons.chevron_right, color: AppColors.textDarkSecondary),
+          onTap: () => _showWhoCanSendDialog(context),
         ),
 
         // Message history visible
@@ -1561,6 +1651,129 @@ class _GroupSettingsSection extends StatelessWidget {
                 onTap: () {
                   Navigator.pop(context);
                   onWhoCanEditChanged(WhoCanChangeInfo.adminsOnly);
+                },
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _showWhoCanSendDialog(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.bgDarkSecondary,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 8),
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppColors.textDarkSecondary,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Who Can Send Messages',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Control who can send messages in this group',
+                style: TextStyle(
+                  color: AppColors.textDarkSecondary,
+                  fontSize: 13,
+                ),
+              ),
+              const SizedBox(height: 16),
+              ListTile(
+                leading: Icon(
+                  Icons.check,
+                  color: group.whoCanSend == WhoCanSendMessages.everyone
+                      ? AppColors.primary
+                      : Colors.transparent,
+                ),
+                title: const Text('Everyone'),
+                subtitle: Text(
+                  'All members can send messages',
+                  style: TextStyle(
+                    color: AppColors.textDarkSecondary,
+                    fontSize: 12,
+                  ),
+                ),
+                onTap: () {
+                  Navigator.pop(context);
+                  onWhoCanSendChanged(WhoCanSendMessages.everyone);
+                },
+              ),
+              ListTile(
+                leading: Icon(
+                  Icons.check,
+                  color: group.whoCanSend == WhoCanSendMessages.adminsOnly
+                      ? AppColors.primary
+                      : Colors.transparent,
+                ),
+                title: const Text('Admins Only'),
+                subtitle: Text(
+                  'Only admins can send (broadcast mode)',
+                  style: TextStyle(
+                    color: AppColors.textDarkSecondary,
+                    fontSize: 12,
+                  ),
+                ),
+                onTap: () {
+                  Navigator.pop(context);
+                  onWhoCanSendChanged(WhoCanSendMessages.adminsOnly);
+                },
+              ),
+              ListTile(
+                leading: Icon(
+                  Icons.check,
+                  color: group.whoCanSend == WhoCanSendMessages.selectedOnly
+                      ? AppColors.primary
+                      : Colors.transparent,
+                ),
+                title: const Text('Selected Members'),
+                subtitle: Text(
+                  'Only selected members can send',
+                  style: TextStyle(
+                    color: AppColors.textDarkSecondary,
+                    fontSize: 12,
+                  ),
+                ),
+                trailing: group.whoCanSend == WhoCanSendMessages.selectedOnly &&
+                        onManageSelectedSenders != null
+                    ? TextButton(
+                        onPressed: () {
+                          Navigator.pop(context);
+                          onManageSelectedSenders!();
+                        },
+                        child: const Text('Manage'),
+                      )
+                    : null,
+                onTap: () {
+                  Navigator.pop(context);
+                  onWhoCanSendChanged(WhoCanSendMessages.selectedOnly);
+                  // If switching to selected mode, offer to manage senders
+                  if (group.whoCanSend != WhoCanSendMessages.selectedOnly &&
+                      onManageSelectedSenders != null) {
+                    Future.delayed(const Duration(milliseconds: 300), () {
+                      onManageSelectedSenders!();
+                    });
+                  }
                 },
               ),
               const SizedBox(height: 8),
@@ -1917,6 +2130,136 @@ class _AddMemberDialogState extends ConsumerState<_AddMemberDialog>
         TextButton(
           onPressed: () => Navigator.pop(context),
           child: const Text('Cancel'),
+        ),
+      ],
+    );
+  }
+}
+
+/// Sheet for managing selected senders
+class _SelectedSendersSheet extends StatelessWidget {
+  final Group group;
+  final ScrollController scrollController;
+  final Future<void> Function(String memberId, bool isSelected) onToggleSender;
+
+  const _SelectedSendersSheet({
+    required this.group,
+    required this.scrollController,
+    required this.onToggleSender,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // Filter out admins and owner (they can always send)
+    final selectableMembers = group.members.where((m) =>
+        m.role == GroupRole.member && m.nodeId != group.creatorId).toList();
+
+    return Column(
+      children: [
+        const SizedBox(height: 8),
+        Container(
+          width: 40,
+          height: 4,
+          decoration: BoxDecoration(
+            color: AppColors.textDarkSecondary,
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        const SizedBox(height: 16),
+        const Text(
+          'Manage Selected Senders',
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Select members who can send messages',
+          style: TextStyle(
+            color: AppColors.textDarkSecondary,
+            fontSize: 13,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AppColors.primary.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.info_outline, size: 16, color: AppColors.primary),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Admins and owner can always send messages',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: AppColors.primary,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Expanded(
+          child: selectableMembers.isEmpty
+              ? Center(
+                  child: Text(
+                    'No regular members to select',
+                    style: TextStyle(
+                      color: AppColors.textDarkSecondary,
+                      fontSize: 14,
+                    ),
+                  ),
+                )
+              : ListView.builder(
+                  controller: scrollController,
+                  itemCount: selectableMembers.length,
+                  itemBuilder: (context, index) {
+                    final member = selectableMembers[index];
+                    final isSelected =
+                        group.selectedSenders.contains(member.nodeId);
+                    final shortId = member.nodeId.length >= 8
+                        ? member.nodeId.substring(0, 8)
+                        : member.nodeId;
+
+                    return CheckboxListTile(
+                      value: isSelected,
+                      onChanged: (value) {
+                        onToggleSender(member.nodeId, value ?? false);
+                      },
+                      title: Text(
+                        member.displayName ?? shortId,
+                        style: const TextStyle(fontSize: 15),
+                      ),
+                      subtitle: Text(
+                        '$shortId...',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontFamily: 'monospace',
+                          color: AppColors.textDarkSecondary,
+                        ),
+                      ),
+                      secondary: CircleAvatar(
+                        backgroundColor: AppColors.primary.withOpacity(0.2),
+                        child: Text(
+                          (member.displayName ?? shortId)
+                              .substring(0, 1)
+                              .toUpperCase(),
+                          style: TextStyle(color: AppColors.primary),
+                        ),
+                      ),
+                      activeColor: AppColors.primary,
+                    );
+                  },
+                ),
         ),
       ],
     );

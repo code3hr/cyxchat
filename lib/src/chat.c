@@ -846,6 +846,17 @@ static void on_onion_delivery(
         if (frag_is_complete(entry)) {
             CYXWIZ_INFO("All %u fragments received, reassembling message", total_frags);
 
+            /* Check for duplicate before reassembling (same msg arriving via both paths) */
+            if (is_duplicate_msg(ctx, actual_sender, &msg_id, now_ms)) {
+                CYXWIZ_INFO("Duplicate fragmented message, ignoring");
+                /* Send ACK anyway so sender stops retransmitting */
+                if (type == CYXCHAT_MSG_TEXT) {
+                    cyxchat_send_ack(ctx, actual_sender, &msg_id, CYXCHAT_STATUS_DELIVERED);
+                }
+                entry->valid = 0;
+                return;
+            }
+
             /* Reassemble message */
             uint8_t reassembled[FRAG_MAX_TEXT + 1];
             size_t total_len;
@@ -860,7 +871,7 @@ static void on_onion_delivery(
             queued_data[0] = (uint8_t)(total_len & 0xFF);
             queued_data[1] = (uint8_t)((total_len >> 8) & 0xFF);
             memcpy(queued_data + 2, reassembled, total_len);
-            
+
             CYXWIZ_INFO("Queuing reassembled message: %zu bytes", total_len);
             queue_push(ctx, actual_sender, type, queued_data, 2 + total_len);
 

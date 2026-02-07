@@ -477,6 +477,139 @@ Peer A                      Relay Server                      Peer B
 
 ---
 
+## Relay + Onion Routing Interaction
+
+### Protocol Layer Stack
+
+Onion routing operates **above** the transport layer. Relay fallback happens at the transport layer:
+
+```
+┌─────────────────────────────────────┐
+│  Application (Chat messages)        │  ← Your message content
+├─────────────────────────────────────┤
+│  Onion Routing                      │  ← Layered encryption, hides destination
+├─────────────────────────────────────┤
+│  Mesh Router                        │  ← Multi-hop path selection
+├─────────────────────────────────────┤
+│  Transport (UDP)                    │  ← Relay fallback happens HERE
+│    • Direct P2P (hole punch)        │
+│    • OR Relay (when punch fails)    │
+└─────────────────────────────────────┘
+```
+
+This means onion routing still works when using relay - the relay just becomes the transport mechanism.
+
+### How It Works Together
+
+**Direct P2P + Onion (best privacy):**
+```
+Alice ──encrypt layers──► Hop1 ──► Hop2 ──► Bob
+                            │
+                     Each hop only knows
+                     previous + next hop
+```
+
+**Relay + Onion (when hole punch fails):**
+```
+Alice ──encrypt layers──► [Relay] ──► Hop1 ──► Hop2 ──► Bob
+                             │
+                      Relay sees encrypted
+                      onion blob, not content
+                      or final destination
+```
+
+**Relay + Direct (no onion, 1-hop):**
+```
+Alice ──encrypt──► [Relay] ──► Bob
+                      │
+               Relay sees both
+               Alice and Bob IDs
+               (from relay header)
+```
+
+### Privacy Comparison
+
+| Scenario | Content | Final Destination | Metadata |
+|----------|---------|-------------------|----------|
+| **Direct P2P** | Hidden (E2E) | Exposed to first hop | Minimal (no intermediary) |
+| **Direct P2P + Onion** | Hidden (E2E) | Hidden (onion) | Minimal |
+| **Relay only** | Hidden (E2E) | **Exposed** (relay header) | Relay sees both parties |
+| **Relay + Onion** | Hidden (E2E) | Hidden (onion) | Relay sees Alice + first hop only |
+
+### Detailed Metadata Exposure
+
+**Direct P2P (no relay):**
+| What | Who Sees It |
+|------|-------------|
+| Your IP address | Direct peer only |
+| Message timing | No central observer |
+| Communication pattern | No central observer |
+| Who you talk to | Direct peer only |
+
+**Relay (without multi-hop onion):**
+| What | Who Sees It |
+|------|-------------|
+| Your IP address | Relay server |
+| Message timing | Relay server |
+| Communication pattern | Relay server |
+| Who you talk to | **Relay server** (from_id, to_id in header) |
+| Message content | Nobody (E2E encrypted) |
+
+**Relay + Multi-hop Onion:**
+| What | Who Sees It |
+|------|-------------|
+| Your IP address | Relay server |
+| Message timing | Relay server |
+| That you're communicating | Relay server |
+| **Who you're talking to** | **Hidden** (onion hides final destination) |
+| Message content | Nobody (E2E encrypted) |
+
+### When Is Each Mode Used?
+
+```
+Connection attempt flow:
+
+1. Try UDP hole punch
+   ├── Success → Direct P2P
+   │             └── Onion optional (use /anon command)
+   │
+   └── Fail (symmetric NAT, firewall)
+             │
+             ▼
+2. Fall back to relay
+   └── Onion still works on top
+       └── Use multi-hop for destination privacy
+```
+
+### Practical Implications
+
+**For most users (relay fallback):**
+- Message content is always protected (E2E encryption)
+- Relay server knows you're talking to someone
+- If using 1-hop direct to recipient: relay knows exactly who
+- If using multi-hop onion: relay only knows first hop
+
+**For maximum privacy:**
+- Prefer direct P2P connections (hole punch success)
+- Use multi-hop onion routing for sensitive conversations
+- Be aware that relay server is a metadata observer
+- Consider self-hosting relay for full control
+
+### Summary
+
+| Privacy Goal | Direct P2P | Relay | Relay + Onion |
+|--------------|------------|-------|---------------|
+| Hide message content | Yes | Yes | Yes |
+| Hide who you talk to | No* | No | **Yes** |
+| Hide that you're active | Yes | No | No |
+| No central observer | Yes | No | No |
+
+*Direct P2P: your peer knows, but no third party observes.
+
+**Bottom line:** Relay + Onion provides "content privacy" but not "metadata privacy" for the fact you're communicating. It does hide your final destination from the relay when using multi-hop circuits.
+
+---
+
 ## Known Limitations
 
 ### IP Change During Active Session

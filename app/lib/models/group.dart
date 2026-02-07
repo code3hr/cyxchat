@@ -67,6 +67,42 @@ enum WhoCanChangeInfo {
   }
 }
 
+/// Who can send messages setting
+enum WhoCanSendMessages {
+  everyone,       // All members can send messages (default)
+  adminsOnly,     // Only admins can send (broadcast/channel mode)
+  selectedOnly;   // Only selected members can send
+
+  String get displayName {
+    switch (this) {
+      case WhoCanSendMessages.everyone:
+        return 'Everyone';
+      case WhoCanSendMessages.adminsOnly:
+        return 'Admins Only';
+      case WhoCanSendMessages.selectedOnly:
+        return 'Selected Members';
+    }
+  }
+
+  String get description {
+    switch (this) {
+      case WhoCanSendMessages.everyone:
+        return 'All members can send messages';
+      case WhoCanSendMessages.adminsOnly:
+        return 'Only admins can send messages (broadcast mode)';
+      case WhoCanSendMessages.selectedOnly:
+        return 'Only selected members can send messages';
+    }
+  }
+
+  static WhoCanSendMessages fromInt(int value) {
+    if (value >= 0 && value < WhoCanSendMessages.values.length) {
+      return WhoCanSendMessages.values[value];
+    }
+    return WhoCanSendMessages.everyone;
+  }
+}
+
 /// Group chat entry
 class Group extends Equatable {
   final String id;
@@ -77,6 +113,8 @@ class Group extends Equatable {
   final GroupType groupType;
   final WhoCanAddMembers whoCanAddMembers;
   final WhoCanChangeInfo whoCanChangeInfo;
+  final WhoCanSendMessages whoCanSend;
+  final List<String> selectedSenders;  // Node IDs of selected senders
   final bool messageHistoryVisible;
   final int slowModeSeconds;
   final int maxMembers;
@@ -96,6 +134,8 @@ class Group extends Equatable {
     this.groupType = GroupType.basic,
     this.whoCanAddMembers = WhoCanAddMembers.everyone,
     this.whoCanChangeInfo = WhoCanChangeInfo.adminsOnly,
+    this.whoCanSend = WhoCanSendMessages.everyone,
+    this.selectedSenders = const [],
     this.messageHistoryVisible = true,
     this.slowModeSeconds = 0,
     this.maxMembers = 200,
@@ -117,6 +157,10 @@ class Group extends Equatable {
       groupType: GroupType.fromInt(map['group_type'] as int? ?? 0),
       whoCanAddMembers: WhoCanAddMembers.fromInt(map['who_can_add_members'] as int? ?? 0),
       whoCanChangeInfo: WhoCanChangeInfo.fromInt(map['who_can_change_info'] as int? ?? 1),
+      whoCanSend: WhoCanSendMessages.fromInt(map['who_can_send'] as int? ?? 0),
+      selectedSenders: (map['selected_senders'] as List<dynamic>?)
+          ?.map((e) => e as String)
+          .toList() ?? [],
       messageHistoryVisible: (map['message_history_visible'] as int? ?? 1) == 1,
       slowModeSeconds: map['slow_mode_seconds'] as int? ?? 0,
       maxMembers: map['max_members'] as int? ?? 200,
@@ -134,6 +178,7 @@ class Group extends Equatable {
   /// Convert to map for database insertion
   /// Note: last_message_text, last_message_at, unread_count are computed from
   /// messages table via JOIN query, not stored in groups table
+  /// Note: selected_senders is stored in separate table, not included here
   Map<String, dynamic> toMap() {
     return {
       'id': id,
@@ -144,6 +189,7 @@ class Group extends Equatable {
       'group_type': groupType.index,
       'who_can_add_members': whoCanAddMembers.index,
       'who_can_change_info': whoCanChangeInfo.index,
+      'who_can_send': whoCanSend.index,
       'message_history_visible': messageHistoryVisible ? 1 : 0,
       'slow_mode_seconds': slowModeSeconds,
       'max_members': maxMembers,
@@ -234,6 +280,24 @@ class Group extends Equatable {
     return isAdmin(nodeId);
   }
 
+  /// Check if a user can send messages based on group settings
+  bool canUserSend(String nodeId) {
+    // Owner and admins can always send
+    if (isOwner(nodeId) || isAdmin(nodeId)) return true;
+
+    switch (whoCanSend) {
+      case WhoCanSendMessages.everyone:
+        return true;
+      case WhoCanSendMessages.adminsOnly:
+        return false; // Already checked above
+      case WhoCanSendMessages.selectedOnly:
+        return selectedSenders.contains(nodeId);
+    }
+  }
+
+  /// Check if a member is a selected sender
+  bool isSelectedSender(String nodeId) => selectedSenders.contains(nodeId);
+
   /// Format slow mode for display
   String get slowModeDisplay {
     if (slowModeSeconds == 0) return 'Off';
@@ -252,6 +316,8 @@ class Group extends Equatable {
         groupType,
         whoCanAddMembers,
         whoCanChangeInfo,
+        whoCanSend,
+        selectedSenders,
         messageHistoryVisible,
         slowModeSeconds,
         maxMembers,
@@ -272,6 +338,8 @@ class Group extends Equatable {
     GroupType? groupType,
     WhoCanAddMembers? whoCanAddMembers,
     WhoCanChangeInfo? whoCanChangeInfo,
+    WhoCanSendMessages? whoCanSend,
+    List<String>? selectedSenders,
     bool? messageHistoryVisible,
     int? slowModeSeconds,
     int? maxMembers,
@@ -291,6 +359,8 @@ class Group extends Equatable {
       groupType: groupType ?? this.groupType,
       whoCanAddMembers: whoCanAddMembers ?? this.whoCanAddMembers,
       whoCanChangeInfo: whoCanChangeInfo ?? this.whoCanChangeInfo,
+      whoCanSend: whoCanSend ?? this.whoCanSend,
+      selectedSenders: selectedSenders ?? this.selectedSenders,
       messageHistoryVisible: messageHistoryVisible ?? this.messageHistoryVisible,
       slowModeSeconds: slowModeSeconds ?? this.slowModeSeconds,
       maxMembers: maxMembers ?? this.maxMembers,
