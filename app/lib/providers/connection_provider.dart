@@ -152,6 +152,9 @@ class ConnectionProvider extends ChangeNotifier {
     int maxRetry,
     int failReason,
   ) {
+    // Debug: confirm callback is firing
+    debugPrint('CONN-CALLBACK: event=$event for ${peerId.substring(0, 16)}...');
+
     // Guard against callbacks after provider is disposed
     if (!_initialized) return;
 
@@ -178,27 +181,42 @@ class ConnectionProvider extends ChangeNotifier {
 
     notifyListeners();
 
-    // Log significant events
+    // Log significant events with detailed path info
     final log = LogService.instance;
+    final shortId = peerId.length > 16 ? peerId.substring(0, 16) : peerId;
     switch (event) {
       case CyxChatConnEvent.peerFound:
-        log.info('Peer found: ${peerId.substring(0, 16)}...', source: 'Connection');
+        log.info('CONN: Peer discovered $shortId...', source: 'Connection');
+        break;
+      case CyxChatConnEvent.announceSent:
+        log.info('CONN: ANNOUNCE sent to $shortId... (key exchange attempt ${retry + 1}/$maxRetry)', source: 'Connection');
+        break;
+      case CyxChatConnEvent.announceRetry:
+        log.warning('CONN: ANNOUNCE retry $retry/$maxRetry to $shortId... (waiting for key)', source: 'Connection');
         break;
       case CyxChatConnEvent.keyReceived:
-        log.info('Key exchange complete: ${peerId.substring(0, 16)}...', source: 'Connection');
+        log.info('CONN: KEY RECEIVED from $shortId... - can now send encrypted messages', source: 'Connection');
+        break;
+      case CyxChatConnEvent.holePunchStart:
+        log.info('CONN: HOLE PUNCH starting to $shortId... (attempting direct P2P)', source: 'Connection');
         break;
       case CyxChatConnEvent.connectedP2p:
-        log.info('Connected P2P: ${peerId.substring(0, 16)}...', source: 'Connection');
+        log.info('CONN: ✓ DIRECT P2P to $shortId... - hole punch succeeded!', source: 'Connection');
+        break;
+      case CyxChatConnEvent.relayFallback:
+        log.warning('CONN: RELAY FALLBACK for $shortId... - hole punch failed, using relay', source: 'Connection');
         break;
       case CyxChatConnEvent.connectedRelay:
-        log.info('Connected via relay: ${peerId.substring(0, 16)}...', source: 'Connection');
+        log.info('CONN: ✓ VIA RELAY to $shortId... - messages will go through bootstrap server', source: 'Connection');
         break;
       case CyxChatConnEvent.failed:
-        log.warning('Connection failed: ${peerId.substring(0, 16)}... - ${CyxChatConnFail.message(failReason)}', source: 'Connection');
+        log.error('CONN: FAILED to $shortId... - ${CyxChatConnFail.message(failReason)}', source: 'Connection');
         break;
       case CyxChatConnEvent.disconnected:
-        log.info('Disconnected: ${peerId.substring(0, 16)}...', source: 'Connection');
+        log.info('CONN: DISCONNECTED from $shortId...', source: 'Connection');
         break;
+      default:
+        log.debug('CONN: Event $event for $shortId... (retry $retry/$maxRetry)', source: 'Connection');
     }
   }
 
@@ -288,7 +306,25 @@ class ConnectionProvider extends ChangeNotifier {
 
   /// Check if connection is via relay
   bool isRelayed(String peerIdHex) {
-    return _peerStates[peerIdHex]?.isRelayed ?? false;
+    if (!_initialized) return false;
+
+    final peerId = NodeIdUtils.toBytesAsList(peerIdHex);
+    final peerIdPtr = calloc<Uint8>(32);
+
+    try {
+      for (int i = 0; i < 32 && i < peerId.length; i++) {
+        peerIdPtr[i] = peerId[i];
+      }
+      final relayed = _bindings.connIsRelayed(peerIdPtr);
+
+      // Log the relay status for debugging asymmetric connections
+      final shortId = peerIdHex.length > 16 ? peerIdHex.substring(0, 16) : peerIdHex;
+      debugPrint('CONN-STATUS: $shortId... isRelayed=$relayed');
+
+      return relayed;
+    } finally {
+      calloc.free(peerIdPtr);
+    }
   }
 
   /// Check if we have established secure key with peer

@@ -663,6 +663,8 @@ class CyxChatBindings {
     int failReason,
     Pointer<Void> userData,
   ) {
+    // Debug: C library called this callback
+    print('FFI: _handleConnProgress event=$event retry=$retryNum');
     if (onConnProgress == null) return;
 
     // Convert peer ID to hex string - copy bytes immediately
