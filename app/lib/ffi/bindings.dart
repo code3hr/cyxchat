@@ -2145,6 +2145,108 @@ class CyxChatBindings {
     }
   }
 
+  /// Set who can send messages (0=all, 1=admins, 2=selected)
+  int groupSetWhoCanSend(String groupIdHex, int setting) {
+    if (_groupCtx == null) return CyxChatError.errNull;
+    final groupIdPtr = calloc<Uint8>(8);
+    try {
+      final parseResult = groupIdFromHex(groupIdHex, groupIdPtr);
+      if (parseResult != 0) return parseResult;
+      return _native.cyxchat_group_set_who_can_send(
+        _groupCtx!,
+        groupIdPtr,
+        setting,
+      );
+    } finally {
+      calloc.free(groupIdPtr);
+    }
+  }
+
+  /// Get who can send messages setting
+  int groupGetWhoCanSend(String groupIdHex) {
+    if (_groupCtx == null) return 0;
+    final groupIdPtr = calloc<Uint8>(8);
+    try {
+      final parseResult = groupIdFromHex(groupIdHex, groupIdPtr);
+      if (parseResult != 0) return 0;
+      return _native.cyxchat_group_get_who_can_send(
+        _groupCtx!,
+        groupIdPtr,
+      );
+    } finally {
+      calloc.free(groupIdPtr);
+    }
+  }
+
+  /// Add member to selected senders list
+  int groupAddSelectedSender(String groupIdHex, String memberIdHex) {
+    if (_groupCtx == null) return CyxChatError.errNull;
+    final groupIdPtr = calloc<Uint8>(8);
+    final memberIdPtr = calloc<Uint8>(32);
+    try {
+      final parseResult = groupIdFromHex(groupIdHex, groupIdPtr);
+      if (parseResult != 0) return parseResult;
+      final memberBytes = _hexToBytes(memberIdHex);
+      for (int i = 0; i < 32 && i < memberBytes.length; i++) {
+        memberIdPtr[i] = memberBytes[i];
+      }
+      return _native.cyxchat_group_add_selected_sender(
+        _groupCtx!,
+        groupIdPtr,
+        memberIdPtr,
+      );
+    } finally {
+      calloc.free(groupIdPtr);
+      calloc.free(memberIdPtr);
+    }
+  }
+
+  /// Remove member from selected senders list
+  int groupRemoveSelectedSender(String groupIdHex, String memberIdHex) {
+    if (_groupCtx == null) return CyxChatError.errNull;
+    final groupIdPtr = calloc<Uint8>(8);
+    final memberIdPtr = calloc<Uint8>(32);
+    try {
+      final parseResult = groupIdFromHex(groupIdHex, groupIdPtr);
+      if (parseResult != 0) return parseResult;
+      final memberBytes = _hexToBytes(memberIdHex);
+      for (int i = 0; i < 32 && i < memberBytes.length; i++) {
+        memberIdPtr[i] = memberBytes[i];
+      }
+      return _native.cyxchat_group_remove_selected_sender(
+        _groupCtx!,
+        groupIdPtr,
+        memberIdPtr,
+      );
+    } finally {
+      calloc.free(groupIdPtr);
+      calloc.free(memberIdPtr);
+    }
+  }
+
+  /// Check if member can send messages
+  bool groupCanSend(String groupIdHex, String memberIdHex) {
+    if (_groupCtx == null) return false;
+    final groupIdPtr = calloc<Uint8>(8);
+    final memberIdPtr = calloc<Uint8>(32);
+    try {
+      final parseResult = groupIdFromHex(groupIdHex, groupIdPtr);
+      if (parseResult != 0) return false;
+      final memberBytes = _hexToBytes(memberIdHex);
+      for (int i = 0; i < 32 && i < memberBytes.length; i++) {
+        memberIdPtr[i] = memberBytes[i];
+      }
+      return _native.cyxchat_group_can_send(
+        _groupCtx!,
+        groupIdPtr,
+        memberIdPtr,
+      ) != 0;
+    } finally {
+      calloc.free(groupIdPtr);
+      calloc.free(memberIdPtr);
+    }
+  }
+
   /// Get group type (basic or supergroup)
   int groupGetType(String groupIdHex) {
     if (_groupCtx == null) return 0;
@@ -4211,6 +4313,31 @@ late final cyxchat_conn_get_peer_pubkey = _lib.lookupFunction<      Int32 Functi
       int Function(Pointer<Void>, Pointer<Uint8>, int)>(
       'cyxchat_group_set_who_can_edit');
 
+  late final cyxchat_group_set_who_can_send = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>, Int32),
+      int Function(Pointer<Void>, Pointer<Uint8>, int)>(
+      'cyxchat_group_set_who_can_send');
+
+  late final cyxchat_group_get_who_can_send = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>),
+      int Function(Pointer<Void>, Pointer<Uint8>)>(
+      'cyxchat_group_get_who_can_send');
+
+  late final cyxchat_group_add_selected_sender = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>),
+      int Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>)>(
+      'cyxchat_group_add_selected_sender');
+
+  late final cyxchat_group_remove_selected_sender = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>),
+      int Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>)>(
+      'cyxchat_group_remove_selected_sender');
+
+  late final cyxchat_group_can_send = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>),
+      int Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>)>(
+      'cyxchat_group_can_send');
+
   late final cyxchat_group_get_type = _lib.lookupFunction<
       Int32 Function(Pointer<Void>, Pointer<Uint8>),
       int Function(Pointer<Void>, Pointer<Uint8>)>(
@@ -4735,6 +4862,31 @@ class CyxChatGroupRole {
 
   static bool canPromote(int role) {
     return role == owner;
+  }
+}
+
+/// Group send permission settings (matches cyxchat_group_send_setting_t)
+class CyxChatGroupSendSetting {
+  static const all = 0;      // Everyone can send (default)
+  static const admins = 1;   // Only admins can send (broadcast/channel mode)
+  static const selected = 2; // Only selected members can send
+
+  static String name(int setting) {
+    switch (setting) {
+      case all: return 'Everyone';
+      case admins: return 'Admins Only';
+      case selected: return 'Selected Members';
+      default: return 'Unknown';
+    }
+  }
+
+  static String description(int setting) {
+    switch (setting) {
+      case all: return 'All members can send messages';
+      case admins: return 'Only admins can send messages (broadcast mode)';
+      case selected: return 'Only selected members can send messages';
+      default: return '';
+    }
   }
 }
 
