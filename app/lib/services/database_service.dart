@@ -27,7 +27,7 @@ class DatabaseService {
 
     return await openDatabase(
       path,
-      version: 10,
+      version: 11,
       onCreate: _createDatabase,
       onUpgrade: _upgradeDatabase,
     );
@@ -75,6 +75,7 @@ class DatabaseService {
         is_archived INTEGER DEFAULT 0,
         is_muted INTEGER DEFAULT 0,
         last_activity_at INTEGER,
+        disappearing_seconds INTEGER,
         FOREIGN KEY (peer_id) REFERENCES contacts(node_id)
       )
     ''');
@@ -101,6 +102,7 @@ class DatabaseService {
         media_type TEXT,
         media_metadata TEXT,
         thumbnail_path TEXT,
+        disappears_at INTEGER,
         FOREIGN KEY (conversation_id) REFERENCES conversations(id)
       )
     ''');
@@ -464,6 +466,17 @@ class DatabaseService {
         'CREATE INDEX IF NOT EXISTS idx_offline_queue_retry ON offline_queue(next_retry_at ASC)'
       );
     }
+
+    if (oldVersion < 11) {
+      // Version 11: Disappearing messages support
+      await db.execute('ALTER TABLE messages ADD COLUMN disappears_at INTEGER');
+      await db.execute('ALTER TABLE conversations ADD COLUMN disappearing_seconds INTEGER');
+
+      // Index for efficient cleanup of expired messages
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_messages_disappears ON messages(disappears_at) WHERE disappears_at IS NOT NULL'
+      );
+    }
   }
 
   Future<void> close() async {
@@ -489,5 +502,109 @@ class DatabaseService {
     await db.delete('contacts');
     await db.delete('identity');
     await db.delete('settings');
+  }
+
+  // ========== Blocked Contacts ==========
+
+  /// Block a contact
+  Future<void> blockContact(String nodeId) async {
+    final db = await database;
+    await db.update(
+      'contacts',
+      {'blocked': 1},
+      where: 'node_id = ?',
+      whereArgs: [nodeId],
+    );
+  }
+
+  /// Unblock a contact
+  Future<void> unblockContact(String nodeId) async {
+    final db = await database;
+    await db.update(
+      'contacts',
+      {'blocked': 0},
+      where: 'node_id = ?',
+      whereArgs: [nodeId],
+    );
+  }
+
+  /// Check if a contact is blocked
+  Future<bool> isContactBlocked(String nodeId) async {
+    final db = await database;
+    final result = await db.query(
+      'contacts',
+      columns: ['blocked'],
+      where: 'node_id = ?',
+      whereArgs: [nodeId],
+    );
+    if (result.isEmpty) return false;
+    return result.first['blocked'] == 1;
+  }
+
+  /// Get all blocked contacts
+  Future<List<Map<String, dynamic>>> getBlockedContacts() async {
+    final db = await database;
+    return await db.query(
+      'contacts',
+      where: 'blocked = 1',
+      orderBy: 'display_name ASC',
+    );
+  }
+
+  /// Get count of blocked contacts
+  Future<int> getBlockedContactCount() async {
+    final db = await database;
+    final result = await db.rawQuery(
+      'SELECT COUNT(*) as count FROM contacts WHERE blocked = 1',
+    );
+    return result.first['count'] as int;
+  }
+
+  // ========== Disappearing Messages ==========
+
+  /// Set disappearing messages timer for a conversation
+  Future<void> setConversationDisappearingTimer(String conversationId, int? seconds) async {
+    final db = await database;
+    await db.update(
+      'conversations',
+      {'disappearing_seconds': seconds},
+      where: 'id = ?',
+      whereArgs: [conversationId],
+    );
+  }
+
+  /// Get disappearing messages timer for a conversation
+  Future<int?> getConversationDisappearingTimer(String conversationId) async {
+    final db = await database;
+    final result = await db.query(
+      'conversations',
+      columns: ['disappearing_seconds'],
+      where: 'id = ?',
+      whereArgs: [conversationId],
+    );
+    if (result.isEmpty) return null;
+    return result.first['disappearing_seconds'] as int?;
+  }
+
+  /// Delete all expired disappearing messages
+  Future<int> deleteExpiredMessages() async {
+    final db = await database;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    return await db.delete(
+      'messages',
+      where: 'disappears_at IS NOT NULL AND disappears_at <= ?',
+      whereArgs: [now],
+    );
+  }
+
+  /// Set disappears_at time for a message
+  Future<void> setMessageDisappearsAt(String messageId, int? disappearsAt) async {
+    final db = await database;
+    await db.update(
+      'messages',
+      {'disappears_at': disappearsAt},
+      where: 'id = ?',
+      whereArgs: [messageId],
+    );
   }
 }

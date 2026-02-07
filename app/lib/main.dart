@@ -12,6 +12,7 @@ import 'package:cyxchat/providers/identity_provider.dart';
 import 'package:cyxchat/providers/settings_provider.dart';
 import 'package:cyxchat/theme/app_themes.dart';
 import 'package:cyxchat/widgets/app_lock_wrapper.dart';
+import 'package:cyxchat/services/screen_security_service.dart';
 
 // App colors
 class AppColors {
@@ -83,6 +84,18 @@ class CyxChatApp extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final identityAsync = ref.watch(identityProvider);
     final settings = ref.watch(settingsProvider);
+
+    // Apply screen security setting (Android only)
+    ref.listen<AppSettings>(settingsProvider, (previous, next) {
+      if (previous?.screenSecurityEnabled != next.screenSecurityEnabled) {
+        ScreenSecurityService.instance.setSecureFlag(next.screenSecurityEnabled);
+      }
+    });
+
+    // Apply screen security on first build
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ScreenSecurityService.instance.setSecureFlag(settings.screenSecurityEnabled);
+    });
 
     // Get theme data based on settings
     final themeData = AppThemes.getThemeData(

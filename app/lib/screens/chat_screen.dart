@@ -2516,15 +2516,22 @@ class _MessageInputState extends ConsumerState<_MessageInput> {
             Expanded(
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxHeight: 120),
-                child: TextField(
-                  controller: widget.controller,
-                  decoration: const InputDecoration(
-                    hintText: 'Message',
-                    border: InputBorder.none,
-                  ),
-                  textCapitalization: TextCapitalization.sentences,
-                  maxLines: null,
-                  onSubmitted: (_) => widget.onSend(),
+                child: Builder(
+                  builder: (context) {
+                    final settings = ref.watch(settingsProvider);
+                    return TextField(
+                      controller: widget.controller,
+                      decoration: const InputDecoration(
+                        hintText: 'Message',
+                        border: InputBorder.none,
+                      ),
+                      textCapitalization: TextCapitalization.sentences,
+                      maxLines: null,
+                      onSubmitted: (_) => widget.onSend(),
+                      // Incognito keyboard - request keyboard to not learn from typing
+                      enableIMEPersonalizedLearning: !settings.incognitoKeyboard,
+                    );
+                  },
                 ),
               ),
             ),

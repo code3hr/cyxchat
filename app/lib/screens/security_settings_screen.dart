@@ -1,6 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/settings_provider.dart';
+import '../services/database_service.dart';
+import 'blocked_contacts_screen.dart';
+
+/// Provider for blocked contact count
+final blockedContactCountProvider = FutureProvider<int>((ref) async {
+  return await DatabaseService.instance.getBlockedContactCount();
+});
 
 /// Security Settings Screen
 /// Provides controls for app lock, screen security, message privacy, etc.
@@ -177,21 +184,25 @@ class SecuritySettingsScreen extends ConsumerWidget {
                   icon: Icons.people_outline_rounded,
                   iconGradient: [colorScheme.tertiary ?? colorScheme.secondary, colorScheme.primary],
                   children: [
-                    _SecurityTile(
-                      icon: Icons.block_rounded,
-                      title: 'Blocked Contacts',
-                      subtitle: 'Manage blocked users',
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: colorScheme.surfaceContainerHighest,
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: Text(
-                              '0', // TODO: Get actual blocked count
+                    Consumer(
+                      builder: (context, ref, _) {
+                        final blockedCountAsync = ref.watch(blockedContactCountProvider);
+                        final blockedCount = blockedCountAsync.valueOrNull ?? 0;
+                        return _SecurityTile(
+                          icon: Icons.block_rounded,
+                          title: 'Blocked Contacts',
+                          subtitle: 'Manage blocked users',
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: colorScheme.surfaceContainerHighest,
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: Text(
+                                  '$blockedCount',
                               style: TextStyle(
                                 fontSize: 12,
                                 fontWeight: FontWeight.w600,
@@ -199,23 +210,22 @@ class SecuritySettingsScreen extends ConsumerWidget {
                               ),
                             ),
                           ),
-                          const SizedBox(width: 4),
-                          Icon(
-                            Icons.chevron_right_rounded,
-                            color: colorScheme.onSurface.withAlpha(128),
+                              const SizedBox(width: 4),
+                              Icon(
+                                Icons.chevron_right_rounded,
+                                color: colorScheme.onSurface.withAlpha(128),
+                              ),
+                            ],
                           ),
-                        ],
-                      ),
-                      onTap: () {
-                        // TODO: Navigate to blocked contacts screen
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: const Text('Blocked contacts coming soon'),
-                            behavior: SnackBarBehavior.floating,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                          ),
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(builder: (_) => const BlockedContactsScreen()),
+                            ).then((_) {
+                              // Refresh count when returning
+                              ref.invalidate(blockedContactCountProvider);
+                            });
+                          },
                         );
                       },
                     ),

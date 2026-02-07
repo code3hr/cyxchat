@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:local_auth/local_auth.dart';
 import '../providers/settings_provider.dart';
+import '../services/identity_service.dart';
 
 /// App Lock Screen
 /// Shown when the app is locked and requires authentication
@@ -101,8 +102,8 @@ class _LockScreenState extends ConsumerState<LockScreen> {
       _error = null;
     });
 
-    // Auto-submit when 4-6 digits entered
-    if (_pin.length == 4 || _pin.length == 6) {
+    // Auto-submit when 6 digits entered (or manually via biometric button area)
+    if (_pin.length == 6) {
       _verifyPin();
     }
   }
@@ -115,14 +116,31 @@ class _LockScreenState extends ConsumerState<LockScreen> {
     });
   }
 
-  void _verifyPin() {
-    // For now, accept any 4-6 digit PIN as valid
-    // TODO: Compare against stored PIN hash
-    if (_pin.length >= 4) {
+  Future<void> _verifyPin() async {
+    if (_pin.length < 4) {
+      setState(() {
+        _error = 'PIN must be at least 4 digits';
+        _pin = '';
+      });
+      return;
+    }
+
+    // Check if PIN is set
+    final hasPin = await IdentityService.instance.hasPinSet();
+    if (!hasPin) {
+      // No PIN set yet - this is first unlock, save this PIN
+      await IdentityService.instance.savePinHash(_pin);
+      widget.onUnlocked();
+      return;
+    }
+
+    // Verify against stored PIN
+    final isValid = await IdentityService.instance.verifyPin(_pin);
+    if (isValid) {
       widget.onUnlocked();
     } else {
       setState(() {
-        _error = 'PIN must be at least 4 digits';
+        _error = 'Incorrect PIN';
         _pin = '';
       });
     }
