@@ -271,7 +271,7 @@ static void set_server_state(cyxchat_server_registry_t *reg,
     if (reg->on_state_change) {
         cyxchat_server_info_t info;
         memset(&info, 0, sizeof(info));
-        strncpy(info.addr, srv->addr, sizeof(info.addr) - 1);
+        snprintf(info.addr, sizeof(info.addr), "%s", srv->addr);
         memcpy(info.pubkey, srv->pubkey, CYXCHAT_SERVER_PUBKEY_SIZE);
         info.state = new_state;
         info.latency_ms = srv->latency_ms;
@@ -289,7 +289,7 @@ static void set_server_state(cyxchat_server_registry_t *reg,
 static void fill_server_info(const cyxchat_server_entry_t *srv, cyxchat_server_info_t *out)
 {
     memset(out, 0, sizeof(*out));
-    strncpy(out->addr, srv->addr, sizeof(out->addr) - 1);
+    snprintf(out->addr, sizeof(out->addr), "%s", srv->addr);
     memcpy(out->pubkey, srv->pubkey, CYXCHAT_SERVER_PUBKEY_SIZE);
     out->state = srv->state;
     out->latency_ms = srv->latency_ms;

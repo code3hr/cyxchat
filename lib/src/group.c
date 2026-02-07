@@ -561,7 +561,10 @@ static size_t serialize_group_invite(
     /* Group name (64 bytes, null-padded) */
     memset(out + offset, 0, CYXCHAT_MAX_DISPLAY_NAME);
     if (group_name) {
-        strncpy((char*)(out + offset), group_name, CYXCHAT_MAX_DISPLAY_NAME - 1);
+        size_t name_len = strlen(group_name);
+        if (name_len > CYXCHAT_MAX_DISPLAY_NAME - 1)
+            name_len = CYXCHAT_MAX_DISPLAY_NAME - 1;
+        memcpy(out + offset, group_name, name_len);
     }
     offset += CYXCHAT_MAX_DISPLAY_NAME;
 
