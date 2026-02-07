@@ -236,16 +236,114 @@ static const char* stun_servers[] = {
 ### Connection Attempt Sequence
 
 ```
-1. Try direct hole punch (works ~80% of time)
+1. UPnP/NAT-PMP port mapping (at transport init)
+   ├─ Works ~40% of home routers
+   └─ If successful, skip hole punching entirely
    ↓ fail
-2. Try port prediction (works ~30% for symmetric)
+2. Try direct hole punch (works ~80% of time)
    ↓ fail
-3. Try UPnP/NAT-PMP (works ~40% of home routers)
+3. Try port prediction (works ~30% for symmetric)
    ↓ fail
 4. Use relay node (always works, still encrypted)
 
 Total success: ~95%+
 ```
+
+---
+
+## UPnP/NAT-PMP Port Mapping
+
+### What Is UPnP?
+
+UPnP (Universal Plug and Play) IGD (Internet Gateway Device) allows applications
+to automatically configure port forwarding on the router without manual setup.
+
+NAT-PMP (NAT Port Mapping Protocol) is Apple's simpler alternative, commonly
+found in Apple routers and some other vendors.
+
+### How It Works
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                     UPnP Port Mapping                             │
+├──────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  CyxChat App                              Router (IGD)           │
+│       │                                       │                  │
+│       │── SSDP Discovery ────────────────────►│                  │
+│       │   (M-SEARCH for upnp:rootdevice)      │                  │
+│       │                                       │                  │
+│       │◄── SSDP Response ─────────────────────│                  │
+│       │    (Location: http://192.168.1.1...)  │                  │
+│       │                                       │                  │
+│       │── AddPortMapping ────────────────────►│                  │
+│       │   (internal:12345, external:12345,    │                  │
+│       │    protocol:UDP, lease:3600s)         │                  │
+│       │                                       │                  │
+│       │◄── Success ───────────────────────────│                  │
+│       │                                       │                  │
+│       │   Result: External traffic to port    │                  │
+│       │   12345 forwards to this device       │                  │
+│                                                                  │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+### CyxWiz UPnP API
+
+```c
+// Create UPnP state
+cyxwiz_upnp_state_t *upnp;
+cyxwiz_upnp_create(&upnp);
+
+// Discover gateway (2 second timeout)
+if (cyxwiz_upnp_discover(upnp) == CYXWIZ_OK) {
+    // Gateway found! Add port mapping
+    cyxwiz_upnp_add_mapping(upnp,
+        12345,    // internal port
+        0,        // external port (0 = same as internal)
+        3600      // lease duration (1 hour)
+    );
+}
+
+// Get status
+cyxwiz_upnp_status_t status;
+cyxwiz_upnp_get_status(upnp, &status);
+printf("LAN: %s, WAN: %s, Port: %d\n",
+    status.lan_addr, status.wan_addr, status.external_port);
+
+// Cleanup (removes mapping)
+cyxwiz_upnp_destroy(upnp);
+```
+
+### UPnP vs Hole Punching
+
+| Feature | UPnP/NAT-PMP | UDP Hole Punch |
+|---------|--------------|----------------|
+| Router support | ~40% | ~80% |
+| Setup time | 2-3 seconds | 100-500ms |
+| Incoming connections | Immediate | Need simultaneous punch |
+| Requires peer online | No | Yes |
+| Works with symmetric NAT | Yes | No |
+| Lease management | Required (hourly renewal) | NAT timeout (~60s) |
+
+### When UPnP Fails
+
+UPnP may fail due to:
+- Router doesn't support UPnP/NAT-PMP
+- UPnP disabled in router settings
+- ISP-managed router with locked settings
+- Double NAT (carrier-grade NAT)
+- Firewall blocking SSDP
+
+When UPnP fails, CyxWiz automatically falls back to hole punching, then relay.
+
+### Security Considerations
+
+UPnP port mappings are visible to the local network. The mapping:
+- Only opens the specific port requested
+- Is removed on app shutdown
+- Has a 1-hour lease (auto-renewed while app runs)
+- Does not expose any credentials
 
 ### Relay Fallback
 

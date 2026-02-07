@@ -251,7 +251,59 @@ Complete end-to-end documentation of how messages flow through the CyxChat syste
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-### Phase 2: STUN Discovery
+### Phase 2: UPnP/NAT-PMP Port Mapping
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│ UPnP IGD / NAT-PMP PORT MAPPING                                  │
+├──────────────────────────────────────────────────────────────────┤
+│ UDP transport init attempts automatic port forwarding:           │
+│                                                                  │
+│   ├─ cyxwiz_upnp_create() - Initialize UPnP state               │
+│   ├─ cyxwiz_upnp_discover() - Find gateway (2s timeout)         │
+│   │   ├─ Try UPnP IGD (Internet Gateway Device) first           │
+│   │   └─ Fallback to NAT-PMP (Apple protocol)                   │
+│   │                                                              │
+│   ├─ If gateway found:                                           │
+│   │   ├─ Get LAN address (e.g., 192.168.1.116)                  │
+│   │   ├─ Get WAN address (e.g., 92.96.37.107)                   │
+│   │   └─ cyxwiz_upnp_add_mapping(local_port, 0, 3600)           │
+│   │       ├─ Maps local_port -> same external port              │
+│   │       └─ Lease duration: 1 hour (auto-renewed)              │
+│   │                                                              │
+│   └─> Result:                                                    │
+│       ├─ SUCCESS: Direct incoming connections possible           │
+│       │           (Skip hole punching for this peer)             │
+│       └─ FAIL: Fall back to hole punching + relay               │
+│                                                                  │
+│ Log output when UPnP succeeds:                                   │
+│   [INFO] UPnP: Discovering IGD/NAT-PMP gateway...               │
+│   [INFO] UPnP: Found IGD, LAN=192.168.1.116, WAN=92.96.37.107   │
+│   [INFO] UPnP: Adding port mapping 192.168.1.116:12345 -> 12345 │
+│   [INFO] UPnP: Port mapping added successfully, expires in 3600s│
+│                                                                  │
+│ Renewal: 5 minutes before lease expiry                           │
+│ Cleanup: Mapping removed on shutdown (cyxwiz_upnp_destroy)       │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+### UPnP Status Structure
+
+```c
+typedef struct {
+    bool discovered;            // UPnP IGD or NAT-PMP gateway found
+    bool mapping_active;        // Port mapping is active
+    char lan_addr[64];          // Local/LAN IP address
+    char wan_addr[64];          // External/WAN IP address
+    uint16_t internal_port;     // Internal (local) port
+    uint16_t external_port;     // External (mapped) port
+    uint32_t lease_duration;    // Lease duration in seconds
+    uint64_t lease_expiry_ms;   // Absolute time when lease expires
+    bool is_natpmp;             // True if using NAT-PMP, false if UPnP IGD
+} cyxwiz_upnp_status_t;
+```
+
+### Phase 3: STUN Discovery
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
@@ -274,11 +326,12 @@ Complete end-to-end documentation of how messages flow through the CyxChat syste
 │   │   └─ BLOCKED: No external connectivity                       │
 │   └─> Store public endpoint for bootstrap registration           │
 │                                                                  │
+│ Note: If UPnP succeeded, STUN may report same port (no NAT)      │
 │ Refresh: Every 60 seconds (NAT mappings expire)                  │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-### Phase 3: Bootstrap Registration
+### Phase 4: Bootstrap Registration
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
@@ -298,7 +351,7 @@ Complete end-to-end documentation of how messages flow through the CyxChat syste
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-### Phase 4: Peer Connection
+### Phase 5: Peer Connection
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
@@ -340,6 +393,36 @@ Complete end-to-end documentation of how messages flow through the CyxChat syste
 │   └─> State = CONNECTED, is_relayed = 1                          │
 │                                                                  │
 └──────────────────────────────────────────────────────────────────┘
+```
+
+### Connection Method Comparison
+
+| Method | Success Rate | Latency | Requirements | Privacy |
+|--------|-------------|---------|--------------|---------|
+| **UPnP/NAT-PMP** | ~40% of routers | Best (0ms overhead) | Router support | Best (direct P2P) |
+| **UDP Hole Punch** | ~80% | Good (100-300ms setup) | Non-symmetric NAT | Good (direct P2P) |
+| **Relay Fallback** | 100% | Fair (+50-100ms) | Relay server | Metadata visible |
+
+### Connection Attempt Flow
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    CONNECTION PRIORITY                           │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  1. UPnP/NAT-PMP (during transport init)                        │
+│     ├─ SUCCESS: Port mapped, accept direct incoming             │
+│     └─ FAIL: Continue to hole punch                             │
+│                                                                  │
+│  2. UDP Hole Punch (during peer connect)                        │
+│     ├─ SUCCESS: Direct P2P established                          │
+│     └─ FAIL: Fall back to relay                                 │
+│                                                                  │
+│  3. Relay (guaranteed fallback)                                 │
+│     └─ Always works, messages still E2E encrypted               │
+│                                                                  │
+│  Combined success rate: ~95%+                                    │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ## Wire Formats
@@ -541,6 +624,9 @@ Solution (after fix):
 |-----------|----------|---------|
 | Chat poll | 50ms | Check for received messages |
 | Connection poll | 100ms | Update connection state |
+| **UPnP discovery** | 2s timeout | Find IGD/NAT-PMP gateway |
+| **UPnP lease** | 3600s (1 hour) | Port mapping duration |
+| **UPnP renewal** | 5 min before expiry | Renew port mapping |
 | STUN refresh | 60s | Rediscover public IP |
 | Bootstrap register | 60s | Re-register with server |
 | Keepalive | 30s | Maintain NAT mapping |
