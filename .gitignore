@@ -11,6 +11,7 @@ lib/build/
 
 # Flutter/Dart
 app/.dart_tool/
+lib/.dart_tool/
 app/.packages
 app/.pub-cache/
 app/.pub/
