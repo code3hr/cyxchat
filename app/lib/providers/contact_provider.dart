@@ -1,8 +1,11 @@
-import 'dart:typed_data';
+import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/contact.dart';
 import '../services/database_service.dart';
+import 'connection_provider.dart';
 import 'conversation_provider.dart';
+import 'network_provider.dart';
 
 /// Provider for all contacts
 final contactsProvider = FutureProvider<List<Contact>>((ref) async {
@@ -200,5 +203,78 @@ class ContactActions {
       statusText: statusText,
     );
     _ref.invalidate(contactsProvider);
+  }
+
+  /// Query presence for a single contact
+  void queryPresence(String nodeId) {
+    final connProvider = _ref.read(connectionNotifierProvider);
+    connProvider.queryPresence(nodeId);
+    debugPrint('ContactActions: Querying presence for ${nodeId.substring(0, 16)}...');
+  }
+
+  /// Query presence for all contacts
+  Future<void> queryAllPresence() async {
+    final contacts = await ContactService.instance.getContacts();
+    final connProvider = _ref.read(connectionNotifierProvider);
+    
+    debugPrint('ContactActions: Querying presence for ${contacts.length} contacts');
+    for (final contact in contacts) {
+      connProvider.queryPresence(contact.nodeId);
+      // Small delay to avoid flooding the server
+      await Future.delayed(const Duration(milliseconds: 50));
+    }
+  }
+}
+
+/// Provider for presence sync - listens to connection provider for presence updates
+final presenceSyncProvider = Provider<PresenceSync>((ref) {
+  final sync = PresenceSync(ref);
+  ref.onDispose(() => sync.dispose());
+  return sync;
+});
+
+/// Presence synchronization handler
+class PresenceSync {
+  final Ref _ref;
+  StreamSubscription? _subscription;
+  bool _enabled = true;
+
+  PresenceSync(this._ref) {
+    _setupListener();
+  }
+
+  void _setupListener() {
+    final connProvider = _ref.read(connectionNotifierProvider);
+    _subscription = connProvider.presenceStream.listen(_handlePresenceUpdate);
+    debugPrint('PresenceSync: Listening for presence updates');
+  }
+
+  void _handlePresenceUpdate(MapEntry<String, bool> update) async {
+    if (!_enabled) return;
+
+    final peerId = update.key;
+    final online = update.value;
+    
+    debugPrint('PresenceSync: Received presence for ${peerId.substring(0, 16)}... online=$online');
+
+    // Update contact in database
+    final presence = online ? PresenceStatus.online : PresenceStatus.offline;
+    await ContactService.instance.updatePresence(peerId, presence);
+    
+    // Invalidate provider to refresh UI
+    _ref.invalidate(contactsProvider);
+  }
+
+  /// Enable or disable presence sync
+  set enabled(bool value) {
+    _enabled = value;
+    debugPrint('PresenceSync: enabled=$value');
+  }
+
+  bool get enabled => _enabled;
+
+  void dispose() {
+    _subscription?.cancel();
+    _subscription = null;
   }
 }

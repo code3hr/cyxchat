@@ -10,6 +10,7 @@ import '../providers/network_provider.dart';
 import '../providers/connection_provider.dart';
 import '../providers/file_provider.dart';
 import '../providers/chat_provider.dart';
+import '../providers/contact_provider.dart';
 import '../services/identity_service.dart';
 import '../services/log_service.dart';
 import '../models/identity.dart';
@@ -157,6 +158,7 @@ class SettingsScreen extends ConsumerWidget {
                   children: [
                     const _NetworkStatusTile(),
                     const _ServerConfigTile(),
+                    const _PresenceSyncTile(),
                   ],
                 ),
 
@@ -1995,6 +1997,83 @@ class _FastFileTransferTile extends ConsumerWidget {
             ),
           ),
       ],
+    );
+  }
+}
+
+/// Presence sync toggle tile
+class _PresenceSyncTile extends ConsumerWidget {
+  const _PresenceSyncTile();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final settings = ref.watch(settingsProvider);
+    final isEnabled = settings.presenceSyncEnabled;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: isEnabled
+                  ? Colors.green.withOpacity(0.15)
+                  : Theme.of(context).colorScheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(
+              Icons.circle_rounded,
+              size: 20,
+              color: isEnabled ? Colors.green : Theme.of(context).colorScheme.onSurface,
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Presence Sync',
+                  style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                        fontWeight: FontWeight.w500,
+                      ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  isEnabled
+                      ? 'Contact online status synced from server'
+                      : 'Contact online status not synced',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurface.withAlpha(153),
+                      ),
+                ),
+              ],
+            ),
+          ),
+          Switch(
+            value: isEnabled,
+            onChanged: (value) async {
+              await ref.read(settingsProvider.notifier).setPresenceSyncEnabled(value);
+
+              // Enable/disable presence sync
+              try {
+                final presenceSync = ref.read(presenceSyncProvider);
+                presenceSync.enabled = value;
+
+                // If enabling, query all contacts
+                if (value) {
+                  await ref.read(contactActionsProvider).queryAllPresence();
+                }
+              } catch (e) {
+                debugPrint('Failed to update presence sync: $e');
+              }
+            },
+            activeColor: Colors.green,
+          ),
+        ],
+      ),
     );
   }
 }

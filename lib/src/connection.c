@@ -137,6 +137,10 @@ struct cyxchat_conn_ctx {
     cyxchat_conn_progress_callback_t on_progress;
     void *progress_user_data;
 
+    /* Presence query callback */
+    cyxchat_presence_callback_t on_presence;
+    void *presence_user_data;
+
     /* File context for direct mode routing */
     void *file_ctx;
 
@@ -248,7 +252,15 @@ static void fire_progress_event(cyxchat_conn_ctx_t *ctx,
                                  uint8_t retry_max,
                                  cyxchat_conn_fail_t fail_reason)
 {
-    if (!ctx || !ctx->on_progress || !peer_id) return;
+    if (!ctx || !peer_id) {
+        CYXWIZ_DEBUG("fire_progress_event: ctx=%p peer=%p - skipping", (void*)ctx, (void*)peer_id);
+        return;
+    }
+    if (!ctx->on_progress) {
+        CYXWIZ_DEBUG("fire_progress_event: event=%d but no callback registered", event);
+        return;
+    }
+    CYXWIZ_INFO("PROGRESS: event=%d retry=%d/%d fail=%d", event, retry_num, retry_max, fail_reason);
 
     /* Input validation: clamp event to valid range */
     if (event > CYXCHAT_CONN_EVENT_FAILED) {
@@ -385,6 +397,7 @@ static void on_transport_recv(cyxwiz_transport_t *transport,
         return;
     }
 
+/* Handle presence query response from server */    if (len >= 34 && data[0] == CYXCHAT_PRESENCE_RESPONSE) {        if (ctx->on_presence) {            const cyxwiz_node_id_t *peer_id = (const cyxwiz_node_id_t *)(data + 1);            uint8_t online = data[33];            ctx->on_presence(peer_id, online, ctx->presence_user_data);        }        return;    }
     /* Check for relay messages and handle them */
     if (len > 0 && ctx->relay && cyxchat_relay_is_relay_message(data[0])) {
         cyxchat_relay_handle_message(ctx->relay, data, len);
@@ -1652,6 +1665,7 @@ void cyxchat_conn_set_on_progress(cyxchat_conn_ctx_t *ctx,
     if (!ctx) return;
     ctx->on_progress = callback;
     ctx->progress_user_data = user_data;
+    CYXWIZ_INFO("Progress callback registered: %p", (void*)callback);
 }
 
 void cyxchat_conn_set_file_ctx(cyxchat_conn_ctx_t *ctx, void *file_ctx)
@@ -1659,6 +1673,49 @@ void cyxchat_conn_set_file_ctx(cyxchat_conn_ctx_t *ctx, void *file_ctx)
     if (!ctx) return;
     ctx->file_ctx = file_ctx;
     CYXWIZ_INFO("Connection: file context set for direct mode routing");
+}
+
+/* ============================================================
+ * Presence Query
+ * ============================================================ */
+
+void cyxchat_conn_set_presence_callback(cyxchat_conn_ctx_t *ctx,
+                                        cyxchat_presence_callback_t callback,
+                                        void *user_data)
+{
+    if (!ctx) return;
+    ctx->on_presence = callback;
+    ctx->presence_user_data = user_data;
+    CYXWIZ_INFO("Presence callback registered: %p", (void*)callback);
+}
+
+cyxchat_error_t cyxchat_conn_query_presence(cyxchat_conn_ctx_t *ctx,
+                                            const cyxwiz_node_id_t *peer_id)
+{
+    if (!ctx || !peer_id) {
+        return CYXCHAT_ERR_NULL;
+    }
+
+    if (!ctx->transport) {
+        return CYXCHAT_ERR_INVALID;
+    }
+
+    /* Build presence query message */
+    uint8_t msg[1 + 32 + 32];  /* type + requester_id + peer_id */
+    msg[0] = CYXCHAT_PRESENCE_QUERY;
+    memcpy(&msg[1], &ctx->local_id, 32);
+    memcpy(&msg[33], peer_id, 32);
+
+    /* Send to bootstrap server via transport */
+    cyxwiz_error_t err = ctx->transport->ops->send(
+        ctx->transport, NULL, msg, sizeof(msg)
+    );
+
+    if (err != CYXWIZ_OK) {
+        return CYXCHAT_ERR_NETWORK;
+    }
+
+    return CYXCHAT_OK;
 }
 
 /* ============================================================

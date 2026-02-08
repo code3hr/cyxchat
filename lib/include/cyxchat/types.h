@@ -150,6 +150,10 @@ extern "C" {
 #define CYXCHAT_MSG_DNS_UPDATE_ACK    0xD5  /* Update confirmed */
 #define CYXCHAT_MSG_DNS_ANNOUNCE      0xD6  /* Gossip announcement */
 
+/* Server Presence Query (0xB0-0xB1) - Check if peer is online via server */
+#define CYXCHAT_PRESENCE_QUERY        0xB0  /* Query server if peer is online */
+#define CYXCHAT_PRESENCE_RESPONSE     0xB1  /* Server response: online/offline */
+
 /* ============================================================
  * ID Types
  * ============================================================ */

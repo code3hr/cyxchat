@@ -17,6 +17,8 @@ class SettingsKeys {
   static const String chatWallpaper = 'chat_wallpaper';
   static const String bubbleRadius = 'bubble_radius';
   static const String showMessagePreview = 'show_message_preview';
+  // Presence settings
+  static const String presenceSyncEnabled = 'presence_sync_enabled';
   // Security settings
   static const String appLockEnabled = 'app_lock_enabled';
   static const String appLockTimeout = 'app_lock_timeout';
@@ -59,6 +61,8 @@ class SettingsDefaults {
   static const String? chatWallpaper = null; // No wallpaper by default
   static const double bubbleRadius = 12.0;
   static const bool showMessagePreview = true;
+  // Presence defaults
+  static const bool presenceSyncEnabled = true; // On by default
   // Security defaults
   static const bool appLockEnabled = false;
   static const int appLockTimeout = 60; // 1 minute
@@ -86,6 +90,8 @@ class AppSettings {
   final String? chatWallpaper;
   final double bubbleRadius;
   final bool showMessagePreview;
+  // Presence settings
+  final bool presenceSyncEnabled;
   // Security settings
   final bool appLockEnabled;
   final int appLockTimeout; // seconds
@@ -110,6 +116,8 @@ class AppSettings {
     this.chatWallpaper,
     this.bubbleRadius = 12.0,
     this.showMessagePreview = true,
+    // Presence settings
+    this.presenceSyncEnabled = true,
     // Security defaults
     this.appLockEnabled = false,
     this.appLockTimeout = 60,
@@ -136,6 +144,8 @@ class AppSettings {
     bool clearWallpaper = false,
     double? bubbleRadius,
     bool? showMessagePreview,
+    // Presence settings
+    bool? presenceSyncEnabled,
     // Security settings
     bool? appLockEnabled,
     int? appLockTimeout,
@@ -161,6 +171,8 @@ class AppSettings {
       chatWallpaper: clearWallpaper ? null : (chatWallpaper ?? this.chatWallpaper),
       bubbleRadius: bubbleRadius ?? this.bubbleRadius,
       showMessagePreview: showMessagePreview ?? this.showMessagePreview,
+      // Presence settings
+      presenceSyncEnabled: presenceSyncEnabled ?? this.presenceSyncEnabled,
       // Security settings
       appLockEnabled: appLockEnabled ?? this.appLockEnabled,
       appLockTimeout: appLockTimeout ?? this.appLockTimeout,
@@ -252,6 +264,9 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
           SettingsDefaults.bubbleRadius,
       showMessagePreview: prefs.getBool(SettingsKeys.showMessagePreview) ??
           SettingsDefaults.showMessagePreview,
+      // Presence settings
+      presenceSyncEnabled: prefs.getBool(SettingsKeys.presenceSyncEnabled) ??
+          SettingsDefaults.presenceSyncEnabled,
       // Security settings
       appLockEnabled: prefs.getBool(SettingsKeys.appLockEnabled) ??
           SettingsDefaults.appLockEnabled,
@@ -366,6 +381,13 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(SettingsKeys.showMessagePreview, show);
     state = state.copyWith(showMessagePreview: show);
+  }
+
+  /// Set presence sync enabled
+  Future<void> setPresenceSyncEnabled(bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(SettingsKeys.presenceSyncEnabled, value);
+    state = state.copyWith(presenceSyncEnabled: value);
   }
 
   // Security settings setters

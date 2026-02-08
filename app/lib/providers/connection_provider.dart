@@ -88,6 +88,10 @@ class ConnectionProvider extends ChangeNotifier {
   final Map<String, PeerConnectionProgress> _progress = {};
   final _progressStream = StreamController<PeerConnectionProgress>.broadcast();
 
+  // Presence tracking
+  final Map<String, bool> _onlineStatus = {};
+  final _presenceStream = StreamController<MapEntry<String, bool>>.broadcast();
+
   // Polling timer
   Timer? _pollTimer;
   static const _pollInterval = Duration(milliseconds: 500);
@@ -101,7 +105,20 @@ class ConnectionProvider extends ChangeNotifier {
   Stream<PeerConnectionProgress> get progressStream => _progressStream.stream;
 
   /// Get current progress for a specific peer
-  PeerConnectionProgress? getProgress(String peerIdHex) => _progress[peerIdHex];
+  /// Normalizes peer ID by removing dashes to match callback format
+  PeerConnectionProgress? getProgress(String peerIdHex) {
+    final normalized = peerIdHex.replaceAll('-', '').toLowerCase();
+    return _progress[normalized];
+  }
+
+  /// Stream of presence updates (peer ID, online status)
+  Stream<MapEntry<String, bool>> get presenceStream => _presenceStream.stream;
+
+  /// Get online status for a peer
+  bool? getOnlineStatus(String peerIdHex) {
+    final normalized = peerIdHex.replaceAll('-', '').toLowerCase();
+    return _onlineStatus[normalized];
+  }
 
   /// Initialize connection manager
   Future<bool> initialize({
@@ -128,6 +145,9 @@ class ConnectionProvider extends ChangeNotifier {
       // Setup progress callback for real-time UI feedback
       _setupProgressCallback();
 
+      // Setup presence callback for online status
+      _setupPresenceCallback();
+
       // Start polling
       _startPolling();
 
@@ -142,6 +162,51 @@ class ConnectionProvider extends ChangeNotifier {
   void _setupProgressCallback() {
     _bindings.onConnProgress = _handleProgressEvent;
     _bindings.connSetupProgressCallback();
+  }
+
+  /// Setup presence callback for online status updates
+  void _setupPresenceCallback() {
+    _bindings.onPresence = _handlePresenceEvent;
+    _bindings.connSetupPresenceCallback();
+  }
+
+  /// Handle presence events from C library
+  void _handlePresenceEvent(String peerId, bool online) {
+    debugPrint('PRESENCE-CALLBACK: peer=${peerId.substring(0, 16)}... online=$online');
+
+    // Guard against callbacks after provider is disposed
+    if (!_initialized) return;
+
+    // Normalize peer ID
+    final normalizedId = peerId.replaceAll('-', '').toLowerCase();
+    _onlineStatus[normalizedId] = online;
+
+    // Notify listeners via stream
+    try {
+      _presenceStream.add(MapEntry(normalizedId, online));
+    } on StateError {
+      // Stream closed, ignore
+      return;
+    }
+
+    notifyListeners();
+  }
+
+  /// Query presence for a specific peer from server
+  int queryPresence(String peerIdHex) {
+    if (!_initialized) return CyxChatError.errNull;
+
+    final peerId = NodeIdUtils.toBytesAsList(peerIdHex);
+    final peerIdPtr = calloc<Uint8>(32);
+
+    try {
+      for (int i = 0; i < 32 && i < peerId.length; i++) {
+        peerIdPtr[i] = peerId[i];
+      }
+      return _bindings.connQueryPresence(peerIdPtr);
+    } finally {
+      calloc.free(peerIdPtr);
+    }
   }
 
   /// Handle progress events from C library
@@ -169,7 +234,9 @@ class ConnectionProvider extends ChangeNotifier {
           : null,
     );
 
-    _progress[peerId] = progress;
+    // Normalize peer ID to ensure consistent key format
+    final normalizedId = peerId.replaceAll('-', '').toLowerCase();
+    _progress[normalizedId] = progress;
 
     // Wrap stream add in try-catch to handle closed stream gracefully
     try {
@@ -224,17 +291,20 @@ class ConnectionProvider extends ChangeNotifier {
   void shutdown() {
     _stopPolling();
 
-    // CRITICAL: Disable callback BEFORE closing stream to prevent
+    // CRITICAL: Disable callbacks BEFORE closing streams to prevent
     // race condition where callback fires after stream is closed
     _bindings.onConnProgress = null;
+    _bindings.onPresence = null;
     _initialized = false;  // Guard against callbacks in flight
 
-    // Now safe to close the stream
+    // Now safe to close the streams
     _progressStream.close();
+    _presenceStream.close();
 
     _bindings.connDestroy();
     _peerStates.clear();
     _progress.clear();
+    _onlineStatus.clear();
     _networkStatus = NetworkStatus();
     notifyListeners();
   }

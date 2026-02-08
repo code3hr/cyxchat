@@ -28,7 +28,7 @@ extern "C" {
 #define CYXCHAT_HOLE_PUNCH_TIMEOUT_MS   5000    /* Time before relay fallback */
 #define CYXCHAT_HOLE_PUNCH_ATTEMPTS     5       /* Punch attempts */
 #define CYXCHAT_HOLE_PUNCH_INTERVAL_MS  50      /* Between attempts */
-#define CYXCHAT_KEEPALIVE_INTERVAL_MS   30000   /* Keepalive interval */
+#define CYXCHAT_KEEPALIVE_INTERVAL_MS   2000   /* Keepalive interval */
 #define CYXCHAT_CONNECTION_TIMEOUT_MS   90000   /* Peer timeout */
 #define CYXCHAT_STUN_INTERVAL_MS        60000   /* STUN refresh interval */
 
@@ -425,6 +425,44 @@ CYXCHAT_API void cyxchat_conn_set_on_progress(
     cyxchat_conn_ctx_t *ctx,
     cyxchat_conn_progress_callback_t callback,
     void *user_data
+);
+
+/* ============================================================
+ * Presence Query
+ * ============================================================ */
+
+/**
+ * Callback for presence query results
+ * @param peer_id   The peer queried
+ * @param online    1 if online, 0 if offline
+ * @param user_data User data pointer
+ */
+typedef void (*cyxchat_presence_callback_t)(
+    const cyxwiz_node_id_t *peer_id,
+    int online,
+    void *user_data
+);
+
+/**
+ * Set callback for presence query responses
+ */
+CYXCHAT_API void cyxchat_conn_set_presence_callback(
+    cyxchat_conn_ctx_t *ctx,
+    cyxchat_presence_callback_t callback,
+    void *user_data
+);
+
+/**
+ * Query server for peer online status
+ * Result delivered via presence callback
+ *
+ * @param ctx       Connection context
+ * @param peer_id   Peer to check
+ * @return          CYXCHAT_OK on success
+ */
+CYXCHAT_API cyxchat_error_t cyxchat_conn_query_presence(
+    cyxchat_conn_ctx_t *ctx,
+    const cyxwiz_node_id_t *peer_id
 );
 
 /* ============================================================

@@ -89,6 +89,12 @@ typedef _ConnProgressCallback = Void Function(
     Int32 failReason,
     Pointer<Void> userData);
 
+/// Native callback type for presence query response
+typedef _PresenceCallback = Void Function(
+    Pointer<Uint8> peerId,
+    Int32 online,
+    Pointer<Void> userData);
+
 /// Connection progress event types (matches cyxchat_conn_event_t)
 class CyxChatConnEvent {
   static const int lookupStarted = 0;
@@ -610,6 +616,10 @@ class CyxChatBindings {
   void Function(String peerId, int event, int retry, int max, int fail)?
       onConnProgress;
 
+  /// Presence callback
+  NativeCallable<_PresenceCallback>? _onPresence;
+  void Function(String peerId, bool online)? onPresence;
+
   /// Create connection context
   /// Returns error code (0 = success)
   int connCreate(String bootstrap, Pointer<Uint8> localId) {
@@ -632,6 +642,8 @@ class CyxChatBindings {
     if (_connCtx != null) {
       _onConnProgress?.close();
       _onConnProgress = null;
+      _onPresence?.close();
+      _onPresence = null;
       _native.cyxchat_conn_destroy(_connCtx!);
       _connCtx = null;
     }
@@ -639,7 +651,10 @@ class CyxChatBindings {
 
   /// Setup connection progress callback for real-time UI feedback
   void connSetupProgressCallback() {
-    if (_connCtx == null) return;
+    if (_connCtx == null) {
+      print('FFI: connSetupProgressCallback - no conn ctx!');
+      return;
+    }
 
     // Close previous callback if exists to prevent memory leak on re-init
     _onConnProgress?.close();
@@ -652,6 +667,7 @@ class CyxChatBindings {
       _onConnProgress!.nativeFunction,
       nullptr,
     );
+    print('FFI: Progress callback registered with C library');
   }
 
   /// Handle connection progress events from C library
@@ -672,6 +688,49 @@ class CyxChatBindings {
 
     // Invoke the Dart callback
     onConnProgress!(hexId, event, retryNum, retryMax, failReason);
+  }
+
+  /// Setup presence query callback
+  void connSetupPresenceCallback() {
+    if (_connCtx == null) {
+      print('FFI: connSetupPresenceCallback - no conn ctx!');
+      return;
+    }
+
+    // Close previous callback if exists
+    _onPresence?.close();
+
+    _onPresence = NativeCallable<_PresenceCallback>.listener(
+      _handlePresence,
+    );
+    _native.cyxchat_conn_set_presence_callback(
+      _connCtx!,
+      _onPresence!.nativeFunction,
+      nullptr,
+    );
+    print('FFI: Presence callback registered with C library');
+  }
+
+  /// Handle presence query response from C library
+  void _handlePresence(
+    Pointer<Uint8> peerId,
+    int online,
+    Pointer<Void> userData,
+  ) {
+    print('FFI: _handlePresence online=$online');
+    if (onPresence == null) return;
+
+    // Convert peer ID to hex string
+    final hexId = _ptrToHex(peerId, 32);
+
+    // Invoke the Dart callback
+    onPresence!(hexId, online != 0);
+  }
+
+  /// Query presence of a peer from server
+  int connQueryPresence(Pointer<Uint8> peerId) {
+    if (_connCtx == null) return CyxChatError.errNull;
+    return _native.cyxchat_conn_query_presence(_connCtx!, peerId);
   }
 
   /// Poll connection events
@@ -3969,6 +4028,20 @@ late final cyxchat_conn_get_peer_pubkey = _lib.lookupFunction<      Int32 Functi
           Pointer<Void>,
           Pointer<NativeFunction<_ConnProgressCallback>>,
           Pointer<Void>)>('cyxchat_conn_set_on_progress');
+
+  late final cyxchat_conn_set_presence_callback = _lib.lookupFunction<
+      Void Function(
+          Pointer<Void>,
+          Pointer<NativeFunction<_PresenceCallback>>,
+          Pointer<Void>),
+      void Function(
+          Pointer<Void>,
+          Pointer<NativeFunction<_PresenceCallback>>,
+          Pointer<Void>)>('cyxchat_conn_set_presence_callback');
+
+  late final cyxchat_conn_query_presence = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>),
+      int Function(Pointer<Void>, Pointer<Uint8>)>('cyxchat_conn_query_presence');
 
   // Server registry functions
   late final cyxchat_conn_get_server_registry = _lib.lookupFunction<

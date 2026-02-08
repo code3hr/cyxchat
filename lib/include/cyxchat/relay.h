@@ -23,7 +23,7 @@ extern "C" {
 #define CYXCHAT_MAX_RELAY_SERVERS       4       /* Max relay servers */
 #define CYXCHAT_MAX_RELAY_CONNECTIONS   16      /* Max relayed connections */
 #define CYXCHAT_RELAY_TIMEOUT_MS        10000   /* Relay connection timeout */
-#define CYXCHAT_RELAY_KEEPALIVE_MS      30000   /* Keepalive interval */
+#define CYXCHAT_RELAY_KEEPALIVE_MS      2000   /* Keepalive interval */
 
 /* ============================================================
  * Relay Protocol Message Types
