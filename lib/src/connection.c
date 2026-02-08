@@ -600,6 +600,11 @@ static void on_peer_key_received(const cyxwiz_node_id_t *peer_id,
         }
     }
 
+    /* Skip if key exchange already completed - don't rotate keys */
+    if (conn && conn->has_pubkey) {
+        return;
+    }
+
     /* Throttle key exchange processing */
     if (conn && conn->last_key_exchange > 0) {
         uint64_t elapsed = now - conn->last_key_exchange;
