@@ -312,9 +312,18 @@ static void on_relay_data(cyxchat_relay_ctx_t *relay_ctx,
 
         /* Discovery sends ANNOUNCE_ACK via transport which fails for
          * relay-only peers (no direct address). Send our own ANNOUNCE
-         * back via relay so the peer gets our pubkey too. */
+         * back via relay so the peer gets our pubkey too.
+         * IMPORTANT: Only respond if we don't have peer's key yet AND
+         * enough time has passed to prevent ping-pong flooding. */
         if (data[0] == 0x01 /* ANNOUNCE */ && ctx->onion) {
-            send_announce_to_peer(ctx, from);
+            cyxchat_peer_conn_t *conn = find_peer_conn(ctx, from);
+            uint64_t now = get_time_ms();
+            int need_key = !conn || !conn->has_pubkey;
+            int throttle_ok = !conn || (now - conn->last_announce_sent >= CYXCHAT_ANNOUNCE_THROTTLE_MS);
+            if (need_key && throttle_ok) {
+                send_announce_to_peer(ctx, from);
+                if (conn) conn->last_announce_sent = now;
+            }
         }
     }
 
@@ -397,9 +406,18 @@ static void on_transport_recv(cyxwiz_transport_t *transport,
 
         /* Send ANNOUNCE back to complete bidirectional key exchange.
          * This is critical when ANNOUNCE arrives via transport-level relay
-         * (0xF8) which bypasses the application relay callback. */
+         * (0xF8) which bypasses the application relay callback.
+         * IMPORTANT: Only respond if we don't have peer's key yet AND
+         * enough time has passed to prevent ping-pong flooding. */
         if (data[0] == CYXCHAT_DISC_ANNOUNCE && ctx->onion) {
-            send_announce_to_peer(ctx, from);
+            cyxchat_peer_conn_t *conn = find_peer_conn(ctx, from);
+            uint64_t now = get_time_ms();
+            int need_key = !conn || !conn->has_pubkey;
+            int throttle_ok = !conn || (now - conn->last_announce_sent >= CYXCHAT_ANNOUNCE_THROTTLE_MS);
+            if (need_key && throttle_ok) {
+                send_announce_to_peer(ctx, from);
+                if (conn) conn->last_announce_sent = now;
+            }
         }
         /* Don't return - also process below for connection state updates */
     }
