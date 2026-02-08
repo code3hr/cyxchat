@@ -20,6 +20,7 @@ import '../models/queued_message.dart';
 import '../models/connection_progress.dart';
 import '../ffi/bindings.dart' show CyxChatFileState, CyxChatFileConst;
 import '../models/models.dart';
+import '../services/chat_service.dart';
 import '../services/group_service.dart';
 import 'active_call_screen.dart';
 import 'group_chat_screen.dart';
@@ -53,13 +54,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   /// Pre-connect to peer to establish connection before sending
-  void _preConnectToPeer() {
+  void _preConnectToPeer() async {
     final connectionProvider = ref.read(connectionNotifierProvider);
-    if (connectionProvider.initialized) {
-      // conversationId is the peer's node ID for 1:1 chats
-      connectionProvider.connect(widget.conversationId).then((result) {
-        debugPrint('Pre-connect to ${widget.conversationId}: $result');
-      });
+    if (!connectionProvider.initialized) return;
+
+    // Load conversation to get the actual peer ID (not the conversation DB id)
+    final conv = await ChatService.instance.getConversation(widget.conversationId);
+    final peerId = conv?.peerId;
+    if (peerId != null && peerId.isNotEmpty) {
+      final result = await connectionProvider.connect(peerId);
+      debugPrint('Pre-connect to peer $peerId: $result');
     }
   }
 

@@ -683,11 +683,32 @@ class CyxChatBindings {
     print('FFI: _handleConnProgress event=$event retry=$retryNum');
     if (onConnProgress == null) return;
 
-    // Convert peer ID to hex string - copy bytes immediately
-    final hexId = _ptrToHex(peerId, 32);
+    // Convert peer ID to node ID format (UUID if applicable)
+    // This must match the format used by conversations for progress lookup
+    final bytes = <int>[];
+    for (int i = 0; i < 32; i++) {
+      bytes.add(peerId[i]);
+    }
+    // Check if bytes 16-31 are all zeros (UUID-style node ID)
+    bool isUuid = true;
+    for (int i = 16; i < 32; i++) {
+      if (bytes[i] != 0) { isUuid = false; break; }
+    }
+    String nodeId;
+    if (isUuid) {
+      // Format first 16 bytes as UUID: 8-4-4-4-12
+      final hex = bytes.sublist(0, 16)
+          .map((b) => b.toRadixString(16).padLeft(2, '0'))
+          .join();
+      nodeId = '${hex.substring(0, 8)}-${hex.substring(8, 12)}-'
+          '${hex.substring(12, 16)}-${hex.substring(16, 20)}-'
+          '${hex.substring(20, 32)}';
+    } else {
+      nodeId = _ptrToHex(peerId, 32);
+    }
 
     // Invoke the Dart callback
-    onConnProgress!(hexId, event, retryNum, retryMax, failReason);
+    onConnProgress!(nodeId, event, retryNum, retryMax, failReason);
   }
 
   /// Setup presence query callback

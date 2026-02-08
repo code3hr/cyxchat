@@ -105,9 +105,14 @@ class ConnectionProvider extends ChangeNotifier {
   Stream<PeerConnectionProgress> get progressStream => _progressStream.stream;
 
   /// Get current progress for a specific peer
-  /// Normalizes peer ID by removing dashes to match callback format
+  /// Normalizes peer ID by removing dashes and padding to 64 chars
+  /// to match the 32-byte node ID format used by the C callback
   PeerConnectionProgress? getProgress(String peerIdHex) {
-    final normalized = peerIdHex.replaceAll('-', '').toLowerCase();
+    var normalized = peerIdHex.replaceAll('-', '').toLowerCase();
+    // Pad UUID-style IDs (32 hex chars) to full node ID length (64 hex chars)
+    if (normalized.length < 64) {
+      normalized = normalized.padRight(64, '0');
+    }
     return _progress[normalized];
   }
 
@@ -235,7 +240,11 @@ class ConnectionProvider extends ChangeNotifier {
     );
 
     // Normalize peer ID to ensure consistent key format
-    final normalizedId = peerId.replaceAll('-', '').toLowerCase();
+    // Pad to 64 chars to match the lookup normalization
+    var normalizedId = peerId.replaceAll('-', '').toLowerCase();
+    if (normalizedId.length < 64) {
+      normalizedId = normalizedId.padRight(64, '0');
+    }
     _progress[normalizedId] = progress;
 
     // Wrap stream add in try-catch to handle closed stream gracefully
@@ -246,7 +255,10 @@ class ConnectionProvider extends ChangeNotifier {
       return;
     }
 
-    notifyListeners();
+    // Defer to microtask to avoid setState during build if callback fires
+    // during widget tree construction. Microtask triggers markNeedsBuild
+    // which schedules a new frame (unlike addPostFrameCallback which waits).
+    Future.microtask(() => notifyListeners());
 
     // Log significant events with detailed path info
     final log = LogService.instance;
@@ -385,13 +397,7 @@ class ConnectionProvider extends ChangeNotifier {
       for (int i = 0; i < 32 && i < peerId.length; i++) {
         peerIdPtr[i] = peerId[i];
       }
-      final relayed = _bindings.connIsRelayed(peerIdPtr);
-
-      // Log the relay status for debugging asymmetric connections
-      final shortId = peerIdHex.length > 16 ? peerIdHex.substring(0, 16) : peerIdHex;
-      debugPrint('CONN-STATUS: $shortId... isRelayed=$relayed');
-
-      return relayed;
+      return _bindings.connIsRelayed(peerIdPtr);
     } finally {
       calloc.free(peerIdPtr);
     }
