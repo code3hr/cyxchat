@@ -334,9 +334,14 @@ static void on_relay_data(cyxchat_relay_ctx_t *relay_ctx,
 
         /* Discovery sends ANNOUNCE_ACK via transport which fails for
          * relay-only peers (no direct address). Send our own ANNOUNCE
-         * back via relay so the peer gets our pubkey too. */
+         * back via relay so the peer gets our pubkey too.
+         * Only echo back if key exchange hasn't completed yet to
+         * avoid infinite ANNOUNCE ping-pong that rotates keys. */
         if (data[0] == 0x01 /* ANNOUNCE */ && ctx->onion) {
-            send_announce_to_peer(ctx, from);
+            cyxchat_peer_conn_t *ann_peer = find_peer_conn(ctx, from);
+            if (!ann_peer || !ann_peer->has_pubkey) {
+                send_announce_to_peer(ctx, from);
+            }
         }
     }
 
@@ -419,9 +424,14 @@ static void on_transport_recv(cyxwiz_transport_t *transport,
 
         /* Send ANNOUNCE back to complete bidirectional key exchange.
          * This is critical when ANNOUNCE arrives via transport-level relay
-         * (0xF8) which bypasses the application relay callback. */
+         * (0xF8) which bypasses the application relay callback.
+         * Only echo back if we haven't completed key exchange yet to
+         * avoid infinite ANNOUNCE ping-pong that rotates keys. */
         if (data[0] == CYXCHAT_DISC_ANNOUNCE && ctx->onion) {
-            send_announce_to_peer(ctx, from);
+            cyxchat_peer_conn_t *ann_peer = find_peer_conn(ctx, from);
+            if (!ann_peer || !ann_peer->has_pubkey) {
+                send_announce_to_peer(ctx, from);
+            }
         }
         /* Don't return - also process below for connection state updates */
     }
@@ -627,6 +637,11 @@ static void on_peer_key_received(const cyxwiz_node_id_t *peer_id,
             conn->state = CYXCHAT_CONN_DISCONNECTED;
             conn->last_key_exchange = 0;
         }
+    }
+
+    /* Skip if key exchange already completed - don't rotate keys */
+    if (conn && conn->has_pubkey) {
+        return;
     }
 
     /* Throttle key exchange processing */
