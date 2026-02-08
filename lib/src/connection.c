@@ -50,11 +50,33 @@ typedef struct {
     cyxchat_conn_complete_callback_t callback;
     void *user_data;
     uint64_t start_time;
+    uint64_t last_punch_time;       /* When last punch was sent */
     uint8_t punch_attempts;
     int active;
+    int has_peer_addr;              /* 1 if transport knows peer address */
     uint8_t pubkey[32];             /* Peer's X25519 public key */
     int has_pubkey;                 /* 1 if pubkey is valid */
 } cyxchat_pending_conn_t;
+
+/* Internal UDP punch packet type */
+#define CYXWIZ_UDP_PUNCH 0xF4
+
+/* UDP punch packet structure (matches udp.c - packed for network) */
+#ifdef _MSC_VER
+#pragma pack(push, 1)
+#endif
+typedef struct {
+    uint8_t type;
+    cyxwiz_node_id_t sender_id;
+    uint32_t punch_id;
+}
+#ifdef __GNUC__
+__attribute__((packed))
+#endif
+cyxchat_punch_packet_t;
+#ifdef _MSC_VER
+#pragma pack(pop)
+#endif
 
 /* Throttle interval for sending ANNOUNCEs to same peer */
 #define CYXCHAT_ANNOUNCE_THROTTLE_MS 10000
@@ -460,6 +482,25 @@ static void on_transport_recv(cyxwiz_transport_t *transport,
     }
 }
 
+/* Send UDP hole punch packet to peer via transport */
+static void send_punch_to_peer(cyxchat_conn_ctx_t *ctx,
+                                const cyxwiz_node_id_t *peer_id)
+{
+    if (!ctx || !ctx->transport || !peer_id) return;
+
+    cyxchat_punch_packet_t punch;
+    memset(&punch, 0, sizeof(punch));
+    punch.type = CYXWIZ_UDP_PUNCH;
+    memcpy(&punch.sender_id, &ctx->local_id, sizeof(cyxwiz_node_id_t));
+    punch.punch_id = (uint32_t)(get_time_ms() & 0xFFFFFFFF);
+
+    cyxwiz_error_t err = ctx->transport->ops->send(ctx->transport, peer_id,
+                                                    (uint8_t*)&punch, sizeof(punch));
+    if (err == CYXWIZ_OK) {
+        CYXWIZ_DEBUG("Sent hole punch packet to peer");
+    }
+}
+
 static void on_peer_discovered(cyxwiz_transport_t *transport,
                                const cyxwiz_peer_info_t *peer,
                                void *user_data)
@@ -479,6 +520,12 @@ static void on_peer_discovered(cyxwiz_transport_t *transport,
             /* Fire progress event: peer found */
             fire_progress_event(ctx, &peer->id, CYXCHAT_CONN_EVENT_PEER_FOUND,
                                 0, CYXCHAT_ANNOUNCE_MAX_RETRIES, CYXCHAT_CONN_FAIL_NONE);
+
+            /* Start hole punching - send first punch immediately */
+            pending->has_peer_addr = 1;
+            send_punch_to_peer(ctx, &peer->id);
+            pending->punch_attempts = 1;
+            pending->last_punch_time = get_time_ms();
         }
     }
 
@@ -1039,6 +1086,17 @@ int cyxchat_conn_poll(cyxchat_conn_ctx_t *ctx, uint64_t now_ms)
         if (!pending->active) continue;
 
         uint64_t elapsed = now_ms - pending->start_time;
+
+        /* Send hole punch packets at intervals */
+        if (pending->has_peer_addr &&
+            pending->punch_attempts < CYXCHAT_HOLE_PUNCH_ATTEMPTS) {
+            uint64_t since_punch = now_ms - pending->last_punch_time;
+            if (since_punch >= CYXCHAT_HOLE_PUNCH_INTERVAL_MS) {
+                send_punch_to_peer(ctx, &pending->peer_id);
+                pending->punch_attempts++;
+                pending->last_punch_time = now_ms;
+            }
+        }
 
         if (elapsed >= CYXCHAT_HOLE_PUNCH_TIMEOUT_MS) {
             /* Hole punch timed out, try relay */
@@ -1867,9 +1925,6 @@ int cyxchat_conn_dht_is_ready(cyxchat_conn_ctx_t *ctx)
  * Manual Peer Addition
  * ============================================================ */
 
-/* Internal UDP punch packet type */
-#define CYXWIZ_UDP_PUNCH 0xF4
-
 /* Socket error code macro */
 #ifdef _WIN32
 #define CONN_SOCKET_ERROR WSAGetLastError()
@@ -1877,24 +1932,8 @@ int cyxchat_conn_dht_is_ready(cyxchat_conn_ctx_t *ctx)
 #define CONN_SOCKET_ERROR errno
 #endif
 
-/* UDP punch packet structure (matches udp.c - packed for network) */
-#ifdef _MSC_VER
-#pragma pack(push, 1)
-#endif
-typedef struct {
-    uint8_t type;
-    cyxwiz_node_id_t sender_id;
-    uint32_t punch_id;
-}
-#ifdef __GNUC__
-__attribute__((packed))
-#endif
-cyxchat_punch_packet_t;
-#ifdef _MSC_VER
-#pragma pack(pop)
-#endif
-
-/* Note: cyxchat_udp_state_view_t is defined earlier in this file */
+/* Note: CYXWIZ_UDP_PUNCH, cyxchat_punch_packet_t, and
+ * cyxchat_udp_state_view_t are defined earlier in this file */
 
 cyxchat_error_t cyxchat_conn_add_peer_addr(cyxchat_conn_ctx_t *ctx,
                                             const cyxwiz_node_id_t *node_id,
