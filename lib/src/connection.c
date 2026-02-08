@@ -991,11 +991,8 @@ int cyxchat_conn_poll(cyxchat_conn_ctx_t *ctx, uint64_t now_ms)
 
     int events = 0;
 
-    /* Poll transport */
-    if (ctx->transport) {
-        ctx->transport->ops->poll(ctx->transport, 10);
-        events++;
-    }
+    /* NOTE: Transport is polled via discovery_poll below - don't poll twice
+     * as it causes duplicate packet processing and logging */
 
     /* Poll relay */
     if (ctx->relay) {
