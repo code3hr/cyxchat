@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/contact.dart';
 import '../services/database_service.dart';
+import '../utils/node_id_utils.dart';
 import 'connection_provider.dart';
 import 'conversation_provider.dart';
 import 'network_provider.dart';
@@ -134,16 +135,30 @@ class ContactService {
     String? statusText,
   }) async {
     final db = await DatabaseService.instance.database;
-    await db.update(
+    final values = {
+      'presence': presence.index,
+      'last_seen': DateTime.now().millisecondsSinceEpoch,
+      if (statusText != null) 'status_text': statusText,
+    };
+
+    final updated = await db.update(
       'contacts',
-      {
-        'presence': presence.index,
-        'last_seen': DateTime.now().millisecondsSinceEpoch,
-        if (statusText != null) 'status_text': statusText,
-      },
+      values,
       where: 'node_id = ?',
       whereArgs: [nodeId],
     );
+
+    if (updated == 0) {
+      final displayId = NodeIdUtils.toDisplayFormat(nodeId);
+      if (displayId != nodeId) {
+        await db.update(
+          'contacts',
+          values,
+          where: 'node_id = ?',
+          whereArgs: [displayId],
+        );
+      }
+    }
   }
 }
 
@@ -237,10 +252,17 @@ final presenceSyncProvider = Provider<PresenceSync>((ref) {
 class PresenceSync {
   final Ref _ref;
   StreamSubscription? _subscription;
+  Timer? _refreshTimer;
   bool _enabled = true;
+  final Map<String, DateTime> _lastWarmConnectAttempt = {};
+
+  /// Refresh interval for periodic presence queries (30 seconds)
+  static const Duration _refreshInterval = Duration(seconds: 30);
+  static const Duration _warmConnectCooldown = Duration(minutes: 2);
 
   PresenceSync(this._ref) {
     _setupListener();
+    _startPeriodicRefresh();
   }
 
   void _setupListener() {
@@ -249,32 +271,103 @@ class PresenceSync {
     debugPrint('PresenceSync: Listening for presence updates');
   }
 
+  void _startPeriodicRefresh() {
+    _refreshTimer?.cancel();
+    _refreshTimer = Timer.periodic(_refreshInterval, (_) {
+      if (_enabled) {
+        _queryAllPresence();
+      }
+    });
+    debugPrint(
+        'PresenceSync: Started periodic refresh (every ${_refreshInterval.inSeconds}s)');
+  }
+
+  Future<void> _queryAllPresence() async {
+    try {
+      final contacts = await ContactService.instance.getContacts();
+      if (contacts.isEmpty) return;
+
+      final connProvider = _ref.read(connectionNotifierProvider);
+      debugPrint(
+          'PresenceSync: Refreshing presence for ${contacts.length} contacts');
+
+      for (final contact in contacts) {
+        connProvider.queryPresence(contact.nodeId);
+        // Small delay to avoid flooding the server
+        await Future.delayed(const Duration(milliseconds: 100));
+      }
+    } catch (e) {
+      debugPrint('PresenceSync: Error querying presence: $e');
+    }
+  }
+
   void _handlePresenceUpdate(MapEntry<String, bool> update) async {
     if (!_enabled) return;
 
     final peerId = update.key;
     final online = update.value;
-    
-    debugPrint('PresenceSync: Received presence for ${peerId.substring(0, 16)}... online=$online');
+
+    debugPrint(
+        'PresenceSync: Received presence for ${peerId.substring(0, 16)}... online=$online');
 
     // Update contact in database
     final presence = online ? PresenceStatus.online : PresenceStatus.offline;
     await ContactService.instance.updatePresence(peerId, presence);
-    
+
     // Invalidate provider to refresh UI
     _ref.invalidate(contactsProvider);
+
+    if (online) {
+      unawaited(_warmConnect(peerId));
+    }
+  }
+
+  Future<void> _warmConnect(String peerId) async {
+    final connProvider = _ref.read(connectionNotifierProvider);
+    if (!connProvider.isOnline) return;
+    if (connProvider.hasPeerKey(peerId)) return;
+
+    final progress = connProvider.getProgress(peerId);
+    if (progress != null && progress.isConnecting) return;
+
+    final now = DateTime.now();
+    final lastAttempt = _lastWarmConnectAttempt[peerId];
+    if (lastAttempt != null &&
+        now.difference(lastAttempt) < _warmConnectCooldown) {
+      return;
+    }
+
+    _lastWarmConnectAttempt[peerId] = now;
+    final result = await connProvider.connect(peerId);
+    debugPrint(
+        'PresenceSync: Warm connect to ${peerId.substring(0, 16)}... result=$result');
   }
 
   /// Enable or disable presence sync
   set enabled(bool value) {
     _enabled = value;
     debugPrint('PresenceSync: enabled=$value');
+    if (value) {
+      _startPeriodicRefresh();
+    } else {
+      _refreshTimer?.cancel();
+      _refreshTimer = null;
+    }
   }
 
   bool get enabled => _enabled;
 
+  /// Manually trigger a presence refresh
+  Future<void> refresh() async {
+    if (_enabled) {
+      await _queryAllPresence();
+    }
+  }
+
   void dispose() {
     _subscription?.cancel();
     _subscription = null;
+    _refreshTimer?.cancel();
+    _refreshTimer = null;
   }
 }

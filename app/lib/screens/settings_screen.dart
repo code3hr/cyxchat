@@ -1299,13 +1299,16 @@ class _NetworkStatusTile extends ConsumerWidget {
     final peerCount = networkStatus.activeConnections;
     final directCount = networkStatus.directConnections;
     final relayCount = networkStatus.relayConnections;
-    final isConnected = connection.initialized;
+    final isInitialized = connection.initialized;
+    final isOnline = connection.isOnline;
 
     String subtitle;
-    if (!isConnected) {
+    if (!isInitialized) {
       subtitle = 'Not connected';
+    } else if (!isOnline) {
+      subtitle = 'Connecting to bootstrap...';
     } else if (peerCount == 0) {
-      subtitle = 'Waiting for peers...';
+      subtitle = 'Online, waiting for peers...';
     } else {
       subtitle = directCount > 0 && relayCount > 0
           ? '$directCount direct, $relayCount relay'
@@ -1319,8 +1322,10 @@ class _NetworkStatusTile extends ConsumerWidget {
       title: 'P2P Network',
       subtitle: subtitle,
       trailing: _StatusChip(
-        label: peerCount > 0 ? '$peerCount Peer${peerCount > 1 ? 's' : ''}' : 'Offline',
-        isActive: peerCount > 0,
+        label: peerCount > 0
+            ? '$peerCount Peer${peerCount > 1 ? 's' : ''}'
+            : (isOnline ? 'Online' : (isInitialized ? 'Connecting' : 'Offline')),
+        isActive: isOnline,
       ),
       onTap: () {
         // Show network details dialog
@@ -1419,7 +1424,8 @@ class _ServerConfigTileState extends ConsumerState<_ServerConfigTile> {
     final settings = ref.watch(settingsProvider);
     final connection = ref.watch(connectionNotifierProvider);
     final hasServer = settings.bootstrapServer.isNotEmpty;
-    final isConnected = connection.initialized;
+    final isInitialized = connection.initialized;
+    final isOnline = connection.isOnline;
 
     return Column(
       children: [
@@ -1428,8 +1434,10 @@ class _ServerConfigTileState extends ConsumerState<_ServerConfigTile> {
           title: 'Bootstrap Server',
           subtitle: hasServer ? settings.bootstrapServer : 'Not configured',
           trailing: _StatusChip(
-            label: isConnected ? 'Connected' : (hasServer ? 'Offline' : 'Not set'),
-            isActive: isConnected,
+            label: isOnline
+                ? 'Connected'
+                : (isInitialized ? 'Connecting' : (hasServer ? 'Offline' : 'Not set')),
+            isActive: isOnline,
           ),
           onTap: () => _showServerDialog(context),
         ),
@@ -1454,17 +1462,17 @@ class _ServerConfigTileState extends ConsumerState<_ServerConfigTile> {
                       ),
                     )
                   : ElevatedButton.icon(
-                      onPressed: () => isConnected ? _disconnect() : _connect(),
+                      onPressed: () => isInitialized ? _disconnect() : _connect(),
                       icon: Icon(
-                        isConnected ? Icons.link_off_rounded : Icons.link_rounded,
+                        isInitialized ? Icons.link_off_rounded : Icons.link_rounded,
                         size: 18,
                       ),
-                      label: Text(isConnected ? 'Disconnect' : 'Connect'),
+                      label: Text(isInitialized ? 'Disconnect' : 'Connect'),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: isConnected
+                        backgroundColor: isInitialized
                             ? Theme.of(context).colorScheme.surfaceContainerHighest
                             : Theme.of(context).colorScheme.secondary,
-                        foregroundColor: isConnected
+                        foregroundColor: isInitialized
                             ? Theme.of(context).colorScheme.onSurface
                             : Colors.black,
                         padding: const EdgeInsets.symmetric(vertical: 12),
@@ -1473,7 +1481,7 @@ class _ServerConfigTileState extends ConsumerState<_ServerConfigTile> {
             ),
           ),
         // Network info when connected
-        if (isConnected && connection.networkStatus.publicAddress != null)
+        if (isInitialized && connection.networkStatus.publicAddress != null)
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
             child: Container(
@@ -1504,7 +1512,7 @@ class _ServerConfigTileState extends ConsumerState<_ServerConfigTile> {
             ),
           ),
         // Server registry status
-        if (isConnected)
+        if (isInitialized)
           _ServerRegistryStatus(),
       ],
     );
@@ -1938,7 +1946,7 @@ class _FastFileTransferTile extends ConsumerWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      'Bypass onion for file transfers',
+                      'Use direct P2P after recipient accepts',
                       style: TextStyle(
                         fontSize: 13,
                         color: Theme.of(context).colorScheme.onSurface.withAlpha(110),
@@ -1985,7 +1993,7 @@ class _FastFileTransferTile extends ConsumerWidget {
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
-                      'Direct P2P - peer can see your IP during file transfers',
+                      'Direct P2P starts only after the recipient accepts. The peer can see your IP during fast transfers.',
                       style: TextStyle(
                         fontSize: 12,
                         color: Theme.of(context).colorScheme.onSurface.withAlpha(153).withOpacity(0.8),

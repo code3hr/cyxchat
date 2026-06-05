@@ -89,6 +89,7 @@ class FileProvider extends ChangeNotifier {
   /// Callback when a file is fully received
   /// Parameters: fromPeerId, filename, fileSize (formatted), fileId
   void Function(String fromPeerId, String filename, String fileSize, String fileId)? onFileReceived;
+  void Function(FileRequest request)? onFileRequest;
 
   // Stream controllers for events
   final _requestController = StreamController<FileRequest>.broadcast();
@@ -167,6 +168,7 @@ class FileProvider extends ChangeNotifier {
         fromPeerId: fromPeerId,
         receivedAt: DateTime.now(),
       );
+      _pendingRequests.removeWhere((r) => r.fileId == fileId);
       _pendingRequests.add(request);
       _pendingRequestsById[fileId] = request;  // Also store by ID for lookup
       _requestController.add(request);
@@ -190,32 +192,7 @@ class FileProvider extends ChangeNotifier {
         startedAt: DateTime.now(),
       );
 
-      // Auto-accept based on mode
-      // In direct mode: accept files up to 100MB automatically
-      // In onion mode: accept files up to 64KB automatically
-      final autoAcceptLimit = isDirectMode
-          ? 100 * 1024 * 1024  // 100MB in direct mode
-          : CyxChatFileConst.maxFileSize;
-
-      if (size <= autoAcceptLimit) {
-        debugPrint('FileProvider: Auto-accepting file $filename');
-        _bindings.fileAccept(fileId);
-        // Update state to receiving
-        final transfer = _transfers[fileId]!;
-        _transfers[fileId] = FileTransferInfo(
-          fileId: transfer.fileId,
-          filename: transfer.filename,
-          mimeType: transfer.mimeType,
-          size: transfer.size,
-          state: CyxChatFileState.receiving,
-          chunksDone: transfer.chunksDone,
-          chunksTotal: transfer.chunksTotal,
-          peerId: transfer.peerId,
-          isOutgoing: transfer.isOutgoing,
-          startedAt: transfer.startedAt,
-        );
-      }
-
+      onFileRequest?.call(request);
       notifyListeners();
     };
 
@@ -273,7 +250,11 @@ class FileProvider extends ChangeNotifier {
           filename: transfer.filename,
           mimeType: transfer.mimeType,
           size: transfer.size,
-          state: transfer.state,
+          state: transfer.state == CyxChatFileState.pending
+              ? (transfer.isOutgoing
+                  ? CyxChatFileState.sending
+                  : CyxChatFileState.receiving)
+              : transfer.state,
           chunksDone: chunksDone,
           chunksTotal: chunksTotal,
           peerId: transfer.peerId,
@@ -318,6 +299,7 @@ class FileProvider extends ChangeNotifier {
     _bindings.onFileComplete = null;
     _bindings.onFileProgress = null;
     _bindings.onFileError = null;
+    onFileRequest = null;
     _bindings.fileCtxDestroy();
     _initialized = false;
     _transfers.clear();
@@ -448,6 +430,22 @@ class FileProvider extends ChangeNotifier {
     if (result == 0) {
       debugPrint('FileProvider: Accepted file $fileId');
       _pendingRequests.removeWhere((r) => r.fileId == fileId);
+      _pendingRequestsById.remove(fileId);
+      final transfer = _transfers[fileId];
+      if (transfer != null) {
+        _transfers[fileId] = FileTransferInfo(
+          fileId: transfer.fileId,
+          filename: transfer.filename,
+          mimeType: transfer.mimeType,
+          size: transfer.size,
+          state: CyxChatFileState.receiving,
+          chunksDone: transfer.chunksDone,
+          chunksTotal: transfer.chunksTotal,
+          peerId: transfer.peerId,
+          isOutgoing: transfer.isOutgoing,
+          startedAt: transfer.startedAt,
+        );
+      }
       notifyListeners();
       return true;
     }
@@ -463,6 +461,22 @@ class FileProvider extends ChangeNotifier {
     if (result == 0) {
       debugPrint('FileProvider: Rejected file $fileId');
       _pendingRequests.removeWhere((r) => r.fileId == fileId);
+      _pendingRequestsById.remove(fileId);
+      final transfer = _transfers[fileId];
+      if (transfer != null) {
+        _transfers[fileId] = FileTransferInfo(
+          fileId: transfer.fileId,
+          filename: transfer.filename,
+          mimeType: transfer.mimeType,
+          size: transfer.size,
+          state: CyxChatFileState.failed,
+          chunksDone: transfer.chunksDone,
+          chunksTotal: transfer.chunksTotal,
+          peerId: transfer.peerId,
+          isOutgoing: transfer.isOutgoing,
+          startedAt: transfer.startedAt,
+        );
+      }
       notifyListeners();
       return true;
     }

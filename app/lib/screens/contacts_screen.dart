@@ -289,7 +289,7 @@ class _PresenceIndicator extends ConsumerWidget {
     }
 
     Color indicatorColor;
-    if (progress?.isConnected == true || isReachable) {
+    if (contact.isOnline) {
       switch (contact.presence) {
         case PresenceStatus.away:
           indicatorColor = Colors.blue;
@@ -298,7 +298,9 @@ class _PresenceIndicator extends ConsumerWidget {
           indicatorColor = Colors.orange;
           break;
         default:
-          indicatorColor = Colors.green;
+          indicatorColor = isReachable || progress?.isConnected == true
+              ? Colors.green
+              : Colors.green.withOpacity(0.65);
       }
     } else if (progress?.phase == ConnectionPhase.failed) {
       indicatorColor = Colors.red;

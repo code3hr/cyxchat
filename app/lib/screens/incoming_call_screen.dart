@@ -4,7 +4,7 @@ import '../providers/call_provider.dart';
 import 'active_call_screen.dart';
 
 /// Full-screen incoming call overlay
-class IncomingCallScreen extends ConsumerWidget {
+class IncomingCallScreen extends ConsumerStatefulWidget {
   final String peerId;
   final String? peerName;
   final bool isVideo;
@@ -17,7 +17,28 @@ class IncomingCallScreen extends ConsumerWidget {
   });
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<IncomingCallScreen> createState() => _IncomingCallScreenState();
+}
+
+class _IncomingCallScreenState extends ConsumerState<IncomingCallScreen> {
+  @override
+  void initState() {
+    super.initState();
+    ref.listen<CallState>(
+      callNotifierProvider.select((p) => p.state),
+      (previous, next) {
+        if (!mounted) return;
+        if (next.status == CallStatus.ended ||
+            next.status == CallStatus.failed ||
+            next.status == CallStatus.idle) {
+          Navigator.of(context).pop();
+        }
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
 
     return Scaffold(
@@ -59,22 +80,22 @@ class IncomingCallScreen extends ConsumerWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               decoration: BoxDecoration(
-                color: isVideo ? Colors.blue.withOpacity(0.2) : Colors.green.withOpacity(0.2),
+                color: widget.isVideo ? Colors.blue.withOpacity(0.2) : Colors.green.withOpacity(0.2),
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Icon(
-                    isVideo ? Icons.videocam : Icons.phone,
-                    color: isVideo ? Colors.blue : Colors.green,
+                    widget.isVideo ? Icons.videocam : Icons.phone,
+                    color: widget.isVideo ? Colors.blue : Colors.green,
                     size: 18,
                   ),
                   const SizedBox(width: 8),
                   Text(
-                    isVideo ? 'Incoming Video Call' : 'Incoming Voice Call',
+                    widget.isVideo ? 'Incoming Video Call' : 'Incoming Voice Call',
                     style: TextStyle(
-                      color: isVideo ? Colors.blue.shade100 : Colors.green.shade100,
+                      color: widget.isVideo ? Colors.blue.shade100 : Colors.green.shade100,
                       fontWeight: FontWeight.w500,
                     ),
                   ),
@@ -98,7 +119,7 @@ class IncomingCallScreen extends ConsumerWidget {
               ),
               child: Center(
                 child: Text(
-                  _getInitials(peerName ?? peerId),
+                  _getInitials(widget.peerName ?? widget.peerId),
                   style: TextStyle(
                     fontSize: 40,
                     fontWeight: FontWeight.bold,
@@ -112,7 +133,7 @@ class IncomingCallScreen extends ConsumerWidget {
 
             // Caller name
             Text(
-              peerName ?? 'Unknown Caller',
+              widget.peerName ?? 'Unknown Caller',
               style: const TextStyle(
                 fontSize: 28,
                 fontWeight: FontWeight.bold,
@@ -124,7 +145,7 @@ class IncomingCallScreen extends ConsumerWidget {
 
             // Caller ID (truncated)
             Text(
-              _truncatePeerId(peerId),
+              _truncatePeerId(widget.peerId),
               style: TextStyle(
                 fontSize: 14,
                 color: Colors.white.withOpacity(0.5),
@@ -157,7 +178,7 @@ class IncomingCallScreen extends ConsumerWidget {
                   ),
 
                   // Accept video button (only for video calls)
-                  if (isVideo)
+                  if (widget.isVideo)
                     _CallActionButton(
                       icon: Icons.videocam,
                       color: Colors.blue,
@@ -194,8 +215,8 @@ class IncomingCallScreen extends ConsumerWidget {
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
           builder: (context) => ActiveCallScreen(
-            peerId: peerId,
-            peerName: peerName,
+            peerId: widget.peerId,
+            peerName: widget.peerName,
             isVideo: video,
           ),
         ),

@@ -9,6 +9,7 @@
 #include "cyxchat/connection.h"
 #include "cyxchat/relay.h"
 #include "cyxchat/file.h"
+#include "cyxchat/server_registry.h"
 #include <cyxwiz/memory.h>
 #include <cyxwiz/log.h>
 #include <cyxwiz/routing.h>
@@ -244,6 +245,24 @@ static void set_peer_state(cyxchat_conn_ctx_t *ctx, cyxchat_peer_conn_t *peer,
     }
 }
 
+/* Promote an established relay-backed peer to direct P2P once direct traffic
+ * is observed. The relay is only torn down after direct traffic is confirmed. */
+static void promote_peer_to_direct(cyxchat_conn_ctx_t *ctx,
+                                   cyxchat_peer_conn_t *peer,
+                                   const cyxwiz_node_id_t *peer_id)
+{
+    if (!ctx || !peer || !peer_id) return;
+
+    if (peer->is_relayed && ctx->relay && cyxchat_relay_is_connected(ctx->relay, peer_id)) {
+        cyxchat_relay_disconnect(ctx->relay, peer_id);
+    }
+
+    peer->is_relayed = 0;
+    set_peer_state(ctx, peer, CYXCHAT_CONN_CONNECTED);
+    fire_progress_event(ctx, peer_id, CYXCHAT_CONN_EVENT_CONNECTED_P2P,
+                        0, CYXCHAT_ANNOUNCE_MAX_RETRIES, CYXCHAT_CONN_FAIL_NONE);
+}
+
 /* Fire progress event for real-time UI feedback */
 static void fire_progress_event(cyxchat_conn_ctx_t *ctx,
                                  const cyxwiz_node_id_t *peer_id,
@@ -292,6 +311,7 @@ static void on_relay_data(cyxchat_relay_ctx_t *relay_ctx,
 
     /* Update peer connection state */
     cyxchat_peer_conn_t *peer = find_peer_conn(ctx, from);
+    int was_connecting = peer && peer->state == CYXCHAT_CONN_CONNECTING;
     if (peer) {
         peer->last_activity = get_time_ms();
         peer->bytes_received += (uint32_t)len;
@@ -302,40 +322,52 @@ static void on_relay_data(cyxchat_relay_ctx_t *relay_ctx,
             set_peer_state(ctx, peer, CYXCHAT_CONN_RELAYING);
         }
 
-        /* Complete pending connection if still waiting */
-        if (peer->state == CYXCHAT_CONN_CONNECTING) {
-            set_peer_state(ctx, peer, CYXCHAT_CONN_RELAYING);
-            peer->is_relayed = 1;
+    }
 
-            cyxchat_pending_conn_t *pending = find_pending(ctx, from);
-            if (pending && pending->callback) {
-                pending->callback(ctx, from, CYXCHAT_CONN_RELAYING, CYXCHAT_OK,
-                                 pending->user_data);
-            }
-            if (pending) {
-                free_pending(ctx, pending);
-            }
+    /* Complete pending connection if relay traffic arrived while connecting. */
+    if (peer && was_connecting) {
+        cyxchat_pending_conn_t *pending = find_pending(ctx, from);
+        if (pending && pending->callback) {
+            pending->callback(ctx, from, CYXCHAT_CONN_RELAYING, CYXCHAT_OK,
+                             pending->user_data);
+        }
+        if (pending) {
+            free_pending(ctx, pending);
         }
     }
 
     /* Route discovery messages through discovery handler for key exchange */
     if (len > 0 && ctx->discovery && is_discovery_message(data[0])) {
-        cyxwiz_discovery_handle_message(ctx->discovery, from, data, len);
-
-        /* Discovery sends ANNOUNCE_ACK via transport which fails for
-         * relay-only peers (no direct address). Send our own ANNOUNCE
-         * back via relay so the peer gets our pubkey too.
-         * IMPORTANT: Only respond if we don't have peer's key yet AND
-         * enough time has passed to prevent ping-pong flooding. */
+        /* CRITICAL: Check if we need to respond BEFORE processing the message.
+         * The discovery handler triggers on_peer_key_received which sets
+         * has_pubkey=1. We must decide whether to respond first. */
+        int should_respond_relay = 0;
         if (data[0] == 0x01 /* ANNOUNCE */ && ctx->onion) {
+            char hex_id[17];
+            for (int i = 0; i < 8; i++) {
+                snprintf(hex_id + i*2, 3, "%02x", from->bytes[i]);
+            }
             cyxchat_peer_conn_t *conn = find_peer_conn(ctx, from);
             uint64_t now = get_time_ms();
             int need_key = !conn || !conn->has_pubkey;
             int throttle_ok = !conn || (now - conn->last_announce_sent >= CYXCHAT_ANNOUNCE_THROTTLE_MS);
-            if (need_key && throttle_ok) {
-                send_announce_to_peer(ctx, from);
-                if (conn) conn->last_announce_sent = now;
+            should_respond_relay = need_key && throttle_ok;
+            CYXWIZ_INFO("RELAY ANNOUNCE from %.16s: conn=%p has_pk=%d need=%d throttle=%d respond=%d",
+                        hex_id, (void*)conn, conn ? conn->has_pubkey : -1, need_key, throttle_ok, should_respond_relay);
+            if (should_respond_relay && conn) conn->last_announce_sent = now;
+        }
+
+        cyxwiz_discovery_handle_message(ctx->discovery, from, data, len);
+
+        /* Send ANNOUNCE back via relay so the peer gets our pubkey too. */
+        if (should_respond_relay) {
+            CYXWIZ_INFO("Sending ANNOUNCE response via relay for bidirectional key exchange");
+            /* Ensure relay connection exists before sending response */
+            if (ctx->relay && !cyxchat_relay_is_connected(ctx->relay, from)) {
+                CYXWIZ_INFO("Creating reverse relay connection to peer for ANNOUNCE response");
+                cyxchat_relay_connect(ctx->relay, from);  /* server_index=0 */
             }
+            send_announce_to_peer(ctx, from);
         }
     }
 
@@ -357,9 +389,28 @@ static void on_router_data(const cyxwiz_node_id_t *from,
 
     /* Update peer connection state */
     cyxchat_peer_conn_t *peer = find_peer_conn(ctx, from);
+    int was_relayed = peer && peer->is_relayed;
+    int was_connecting = peer && peer->state == CYXCHAT_CONN_CONNECTING;
     if (peer) {
         peer->last_activity = get_time_ms();
         peer->bytes_received += (uint32_t)len;
+
+        if (was_relayed) {
+            promote_peer_to_direct(ctx, peer, from);
+        } else if (peer->state == CYXCHAT_CONN_CONNECTING) {
+            set_peer_state(ctx, peer, CYXCHAT_CONN_CONNECTED);
+        }
+    }
+
+    if (peer && was_connecting) {
+        cyxchat_pending_conn_t *pending = find_pending(ctx, from);
+        if (pending && pending->callback) {
+            pending->callback(ctx, from, CYXCHAT_CONN_CONNECTED, CYXCHAT_OK,
+                             pending->user_data);
+        }
+        if (pending) {
+            free_pending(ctx, pending);
+        }
     }
 
     /* Forward to application callback (same as relay/onion data) */
@@ -415,22 +466,39 @@ static void on_transport_recv(cyxwiz_transport_t *transport,
             }
             (void)has_pk;  /* Used for debugging */
         }
-        cyxwiz_discovery_handle_message(ctx->discovery, from, data, len);
 
-        /* Send ANNOUNCE back to complete bidirectional key exchange.
-         * This is critical when ANNOUNCE arrives via transport-level relay
-         * (0xF8) which bypasses the application relay callback.
-         * IMPORTANT: Only respond if we don't have peer's key yet AND
-         * enough time has passed to prevent ping-pong flooding. */
+        /* CRITICAL: Check if we need to respond BEFORE processing the message.
+         * The discovery handler triggers on_peer_key_received which sets
+         * has_pubkey=1. We must decide whether to respond first. */
+        int should_respond = 0;
         if (data[0] == CYXCHAT_DISC_ANNOUNCE && ctx->onion) {
+            char hex_id[17];
+            for (int i = 0; i < 8; i++) {
+                snprintf(hex_id + i*2, 3, "%02x", from->bytes[i]);
+            }
             cyxchat_peer_conn_t *conn = find_peer_conn(ctx, from);
             uint64_t now = get_time_ms();
             int need_key = !conn || !conn->has_pubkey;
             int throttle_ok = !conn || (now - conn->last_announce_sent >= CYXCHAT_ANNOUNCE_THROTTLE_MS);
-            if (need_key && throttle_ok) {
-                send_announce_to_peer(ctx, from);
-                if (conn) conn->last_announce_sent = now;
+            should_respond = need_key && throttle_ok;
+            CYXWIZ_INFO("TRANSPORT ANNOUNCE from %.16s: conn=%p has_pk=%d need=%d throttle=%d respond=%d",
+                        hex_id, (void*)conn, conn ? conn->has_pubkey : -1, need_key, throttle_ok, should_respond);
+            /* Update timestamp immediately to prevent rapid re-sends */
+            if (should_respond && conn) conn->last_announce_sent = now;
+        }
+
+        cyxwiz_discovery_handle_message(ctx->discovery, from, data, len);
+
+        /* Send ANNOUNCE back AFTER processing, using pre-computed decision.
+         * This completes bidirectional key exchange. */
+        if (should_respond) {
+            CYXWIZ_INFO("Sending ANNOUNCE response for bidirectional key exchange");
+            /* Ensure relay connection exists in case direct send fails */
+            if (ctx->relay && !cyxchat_relay_is_connected(ctx->relay, from)) {
+                CYXWIZ_INFO("Creating relay connection to peer for ANNOUNCE response");
+                cyxchat_relay_connect(ctx->relay, from);  /* server_index=0 */
             }
+            send_announce_to_peer(ctx, from);
         }
         /* Don't return - also process below for connection state updates */
     }
@@ -1061,10 +1129,9 @@ int cyxchat_conn_poll(cyxchat_conn_ctx_t *ctx, uint64_t now_ms)
         }
     }
 
-    /* Update bootstrap connection status from transport */
-    if (!ctx->bootstrap_connected) {
-        ctx->bootstrap_connected = cyxwiz_transport_is_bootstrap_connected(ctx->transport) ? 1 : 0;
-    }
+    /* Update bootstrap connection status from transport every poll so the UI
+     * reflects loss and recovery instead of keeping the first successful ACK. */
+    ctx->bootstrap_connected = cyxwiz_transport_is_bootstrap_connected(ctx->transport) ? 1 : 0;
 
     /* Check pending connections for timeout */
     for (size_t i = 0; i < CYXCHAT_MAX_PEER_CONNECTIONS; i++) {
@@ -1339,6 +1406,11 @@ cyxchat_error_t cyxchat_conn_send(cyxchat_conn_ctx_t *ctx,
     cyxchat_peer_conn_t *peer = find_peer_conn(ctx, peer_id);
     if (!peer) {
         return CYXCHAT_ERR_NOT_FOUND;
+    }
+
+    /* Require a completed key exchange before application data is sent. */
+    if (!peer->has_pubkey) {
+        return CYXCHAT_ERR_NO_KEY;
     }
 
     cyxchat_error_t result;
@@ -1696,9 +1768,45 @@ cyxchat_error_t cyxchat_conn_query_presence(cyxchat_conn_ctx_t *ctx,
         return CYXCHAT_ERR_NULL;
     }
 
-    if (!ctx->transport) {
+    if (!ctx->transport || !ctx->server_registry) {
         return CYXCHAT_ERR_INVALID;
     }
+
+    /* Get best server to send to */
+    cyxchat_server_info_t server;
+    cyxchat_error_t srv_err = cyxchat_server_registry_get_best(ctx->server_registry, &server);
+    if (srv_err != CYXCHAT_OK) {
+        CYXWIZ_WARN("Presence query: no server available");
+        return CYXCHAT_ERR_NETWORK;
+    }
+
+    /* Parse server address "ip:port" */
+    char addr_copy[64];
+    strncpy(addr_copy, server.addr, sizeof(addr_copy) - 1);
+    addr_copy[sizeof(addr_copy) - 1] = '\0';
+
+    char *colon = strchr(addr_copy, ':');
+    if (!colon) {
+        CYXWIZ_WARN("Presence query: invalid server address %s", server.addr);
+        return CYXCHAT_ERR_INVALID;
+    }
+    *colon = '\0';
+    uint16_t port = (uint16_t)atoi(colon + 1);
+
+    /* Convert IP to network byte order */
+    uint32_t ip_nbo;
+    if (inet_pton(AF_INET, addr_copy, &ip_nbo) != 1) {
+        CYXWIZ_WARN("Presence query: cannot parse IP %s", addr_copy);
+        return CYXCHAT_ERR_INVALID;
+    }
+    uint16_t port_nbo = htons(port);
+
+    /* Build node ID with IP:port and 0xFF marker */
+    cyxwiz_node_id_t srv_id;
+    memset(&srv_id, 0, sizeof(srv_id));
+    memcpy(srv_id.bytes, &ip_nbo, 4);
+    memcpy(srv_id.bytes + 4, &port_nbo, 2);
+    srv_id.bytes[6] = 0xFF;  /* Server address marker */
 
     /* Build presence query message */
     uint8_t msg[1 + 32 + 32];  /* type + requester_id + peer_id */
@@ -1706,9 +1814,9 @@ cyxchat_error_t cyxchat_conn_query_presence(cyxchat_conn_ctx_t *ctx,
     memcpy(&msg[1], &ctx->local_id, 32);
     memcpy(&msg[33], peer_id, 32);
 
-    /* Send to bootstrap server via transport */
+    /* Send to server */
     cyxwiz_error_t err = ctx->transport->ops->send(
-        ctx->transport, NULL, msg, sizeof(msg)
+        ctx->transport, &srv_id, msg, sizeof(msg)
     );
 
     if (err != CYXWIZ_OK) {

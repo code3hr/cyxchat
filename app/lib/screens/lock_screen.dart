@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:local_auth/local_auth.dart';
-import '../providers/settings_provider.dart';
 import '../services/identity_service.dart';
 
 /// App Lock Screen
@@ -22,8 +21,10 @@ class LockScreen extends ConsumerStatefulWidget {
 class _LockScreenState extends ConsumerState<LockScreen> {
   final _auth = LocalAuthentication();
   String _pin = '';
+  String? _pendingSetupPin;
   bool _isAuthenticating = false;
   bool _showPinInput = false;
+  bool _isSettingUpPin = false;
   String? _error;
   bool _canUseBiometrics = false;
 
@@ -35,6 +36,18 @@ class _LockScreenState extends ConsumerState<LockScreen> {
 
   Future<void> _checkBiometrics() async {
     try {
+      final hasPin = await IdentityService.instance.hasPinSet();
+      if (!hasPin) {
+        if (mounted) {
+          setState(() {
+            _isSettingUpPin = true;
+            _showPinInput = true;
+            _canUseBiometrics = false;
+          });
+        }
+        return;
+      }
+
       final canCheck = await _auth.canCheckBiometrics;
       final isDeviceSupported = await _auth.isDeviceSupported();
 
@@ -117,20 +130,35 @@ class _LockScreenState extends ConsumerState<LockScreen> {
   }
 
   Future<void> _verifyPin() async {
-    if (_pin.length < 4) {
+    if (_pin.length < 6) {
       setState(() {
-        _error = 'PIN must be at least 4 digits';
+        _error = 'PIN must be 6 digits';
         _pin = '';
       });
       return;
     }
 
-    // Check if PIN is set
-    final hasPin = await IdentityService.instance.hasPinSet();
-    if (!hasPin) {
-      // No PIN set yet - this is first unlock, save this PIN
-      await IdentityService.instance.savePinHash(_pin);
-      widget.onUnlocked();
+    if (_isSettingUpPin) {
+      if (_pendingSetupPin == null) {
+        setState(() {
+          _pendingSetupPin = _pin;
+          _pin = '';
+          _error = null;
+        });
+        return;
+      }
+
+      if (_pendingSetupPin == _pin) {
+        await IdentityService.instance.savePinHash(_pin);
+        widget.onUnlocked();
+        return;
+      }
+
+      setState(() {
+        _pendingSetupPin = null;
+        _pin = '';
+        _error = 'PINs did not match';
+      });
       return;
     }
 
@@ -184,7 +212,7 @@ class _LockScreenState extends ConsumerState<LockScreen> {
             ),
             const SizedBox(height: 24),
             Text(
-              'CyxChat is locked',
+              _isSettingUpPin ? 'Create app PIN' : 'CyxChat is locked',
               style: TextStyle(
                 fontSize: 24,
                 fontWeight: FontWeight.bold,
@@ -193,7 +221,7 @@ class _LockScreenState extends ConsumerState<LockScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              _showPinInput ? 'Enter your PIN to unlock' : 'Authenticate to continue',
+              _lockPromptText,
               style: TextStyle(
                 fontSize: 14,
                 color: colorScheme.onSurface.withAlpha(153),
@@ -296,6 +324,17 @@ class _LockScreenState extends ConsumerState<LockScreen> {
         ),
       ),
     );
+  }
+
+  String get _lockPromptText {
+    if (_isSettingUpPin) {
+      return _pendingSetupPin == null
+          ? 'Enter a 6 digit PIN'
+          : 'Re-enter your PIN to confirm';
+    }
+    return _showPinInput
+        ? 'Enter your PIN to unlock'
+        : 'Authenticate to continue';
   }
 }
 

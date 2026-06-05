@@ -58,7 +58,9 @@ class NetworkStatus {
   });
 
   String get natTypeName => CyxChatNatType.name(natType);
-  int get directConnections => activeConnections - relayConnections;
+  int get directConnections => activeConnections > relayConnections
+      ? activeConnections - relayConnections
+      : 0;
 
   String get upnpStatusText {
     if (upnpMappingActive) {
@@ -98,6 +100,9 @@ class ConnectionProvider extends ChangeNotifier {
 
   // Getters
   bool get initialized => _initialized;
+  bool get isOnline => _initialized && _networkStatus.bootstrapConnected;
+  bool get isConnectingToBootstrap =>
+      _initialized && !_networkStatus.bootstrapConnected;
   NetworkStatus get networkStatus => _networkStatus;
   Map<String, PeerConnectionState> get peerStates => Map.unmodifiable(_peerStates);
 
@@ -301,6 +306,8 @@ class ConnectionProvider extends ChangeNotifier {
 
   /// Shutdown connection manager
   void shutdown() {
+    if (!_initialized) return;
+
     _stopPolling();
 
     // CRITICAL: Disable callbacks BEFORE closing streams to prevent
@@ -308,10 +315,6 @@ class ConnectionProvider extends ChangeNotifier {
     _bindings.onConnProgress = null;
     _bindings.onPresence = null;
     _initialized = false;  // Guard against callbacks in flight
-
-    // Now safe to close the streams
-    _progressStream.close();
-    _presenceStream.close();
 
     _bindings.connDestroy();
     _peerStates.clear();
@@ -571,6 +574,8 @@ class ConnectionProvider extends ChangeNotifier {
   @override
   void dispose() {
     shutdown();
+    _progressStream.close();
+    _presenceStream.close();
     super.dispose();
   }
 }

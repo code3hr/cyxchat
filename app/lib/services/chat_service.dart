@@ -4,10 +4,12 @@ import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 import '../models/models.dart';
 import '../providers/chat_provider.dart';
+import '../providers/file_provider.dart';
 import '../utils/node_id_utils.dart';
 import 'database_service.dart';
 import 'identity_service.dart';
 import 'queue_service.dart';
+import 'notification_service.dart';
 
 /// Service for chat operations
 class ChatService {
@@ -67,7 +69,8 @@ class ChatService {
     try {
       final deleted = await DatabaseService.instance.deleteExpiredMessages();
       if (deleted > 0) {
-        debugPrint('ChatService: Deleted $deleted expired disappearing messages');
+        debugPrint(
+            'ChatService: Deleted $deleted expired disappearing messages');
       }
     } catch (e) {
       debugPrint('ChatService: Error cleaning up expired messages: $e');
@@ -87,7 +90,8 @@ class ChatService {
     _editSubscription?.cancel();
 
     // Subscribe to incoming messages
-    _messageSubscription = provider.messageStream.listen(_handleIncomingMessage);
+    _messageSubscription =
+        provider.messageStream.listen(_handleIncomingMessage);
     _ackSubscription = provider.ackStream.listen(_handleAck);
     _typingSubscription = provider.typingStream.listen(_handleTyping);
     _reactionSubscription = provider.reactionStream.listen(_handleReaction);
@@ -170,7 +174,8 @@ class ChatService {
           where: 'node_id = ?',
           whereArgs: [peerId],
         );
-        if (contactRows.isNotEmpty && contactRows.first['display_name'] != null) {
+        if (contactRows.isNotEmpty &&
+            contactRows.first['display_name'] != null) {
           final displayName = contactRows.first['display_name'] as String;
           // Update the conversation with the contact's display name
           await db.update(
@@ -287,7 +292,9 @@ class ChatService {
 
     // Try to send via native chat (only for text messages - files use FileProvider)
     Message resultMessage;
-    if (_chatProvider != null && conversation.peerId != null && type == MessageType.text) {
+    if (_chatProvider != null &&
+        conversation.peerId != null &&
+        type == MessageType.text) {
       // Get native reply-to ID if replying
       String? nativeReplyToId;
       if (replyToId != null) {
@@ -329,7 +336,8 @@ class ChatService {
           recipientId: conversation.peerId!,
           data: utf8.encode(content),
         );
-        debugPrint('ChatService: Send failed, queued for retry: ${result.error}');
+        debugPrint(
+            'ChatService: Send failed, queued for retry: ${result.error}');
       }
     } else {
       if (type == MessageType.file) {
@@ -352,7 +360,8 @@ class ChatService {
           recipientId: conversation.peerId!,
           data: utf8.encode(content),
         );
-        debugPrint('ChatService: No native chat available, message queued for retry');
+        debugPrint(
+            'ChatService: No native chat available, message queued for retry');
       } else {
         // No peer ID - mark as pending (group messages, etc.)
         resultMessage = message.copyWith(status: MessageStatus.pending);
@@ -370,59 +379,39 @@ class ChatService {
     return resultMessage;
   }
 
-  /// Handle received file (creates file message in conversation)
-  Future<void> handleReceivedFile({
-    required String fromPeerId,
-    required String filename,
-    required String fileSize,
-    required String fileId,
-  }) async {
+  /// Handle incoming file offer (creates a pending file message in conversation)
+  Future<void> handleFileRequest(FileRequest request) async {
     final db = await DatabaseService.instance.database;
-
-    // Normalize peer ID format (convert 64-char hex with trailing zeros to UUID)
-    final normalizedPeerId = _normalizePeerId(fromPeerId);
-    debugPrint('ChatService: Normalized peer ID: $fromPeerId -> $normalizedPeerId');
-
-    // Get or create conversation with sender
+    final normalizedPeerId = _normalizePeerId(request.fromPeerId);
     final conversation = await getOrCreateDirectConversation(normalizedPeerId);
+    final fileSize = request.formattedSize;
+    final content = jsonEncode({
+      'fileId': request.fileId,
+      'filename': request.filename,
+      'size': fileSize,
+      'pending': true,
+    });
 
-    // Detect if this is a voice message (check filename pattern and extension)
-    final isVoiceMessage = filename.startsWith('voice_') &&
-        (filename.endsWith('.m4a') || filename.endsWith('.aac') || filename.endsWith('.opus'));
-
-    // Create message content based on type
-    final String fileContent;
-    final MessageType messageType;
-
-    if (isVoiceMessage) {
-      // Voice message - extract duration from size estimate (rough: 8kbps = 1KB/s)
-      final sizeBytes = _parseSizeToBytes(fileSize);
-      final estimatedDuration = (sizeBytes / 8000).round(); // Rough estimate
-      fileContent = '{"fileId":"$fileId","duration":$estimatedDuration,"filename":"$filename"}';
-      messageType = MessageType.audio;
-      debugPrint('ChatService: Received voice message: $filename ($fileSize)');
-    } else {
-      // Regular file
-      fileContent = '{"fileId":"$fileId","filename":"$filename","size":"$fileSize"}';
-      messageType = MessageType.file;
-      debugPrint('ChatService: Received file: $filename ($fileSize)');
-    }
+    final existing = await db.query(
+      'messages',
+      where: 'conversation_id = ? AND is_outgoing = 0 AND content LIKE ?',
+      whereArgs: [conversation.id, '%${request.fileId}%'],
+      limit: 1,
+    );
+    if (existing.isNotEmpty) return;
 
     final message = Message(
       id: _uuid.v4(),
       conversationId: conversation.id,
-      senderId: fromPeerId,
-      type: messageType,
-      content: fileContent,
+      senderId: normalizedPeerId,
+      type: MessageType.file,
+      content: content,
       timestamp: DateTime.now(),
-      status: MessageStatus.delivered,
+      status: MessageStatus.pending,
       isOutgoing: false,
     );
 
-    // Save to database
     await db.insert('messages', message.toMap());
-
-    // Update conversation
     await db.update(
       'conversations',
       {
@@ -433,8 +422,121 @@ class ChatService {
       whereArgs: [conversation.id],
     );
 
+    _messageController.add(message);
+    await _showMessageNotification(
+      conversationId: conversation.id,
+      senderNodeId: normalizedPeerId,
+      messageContent: 'File request: ${request.filename}',
+    );
+  }
+
+  /// Handle received file (creates or updates file message in conversation)
+  Future<void> handleReceivedFile({
+    required String fromPeerId,
+    required String filename,
+    required String fileSize,
+    required String fileId,
+  }) async {
+    final db = await DatabaseService.instance.database;
+
+    // Normalize peer ID format (convert 64-char hex with trailing zeros to UUID)
+    final normalizedPeerId = _normalizePeerId(fromPeerId);
+    debugPrint(
+        'ChatService: Normalized peer ID: $fromPeerId -> $normalizedPeerId');
+
+    // Get or create conversation with sender
+    final conversation = await getOrCreateDirectConversation(normalizedPeerId);
+
+    // Detect if this is a voice message (check filename pattern and extension)
+    final isVoiceMessage = filename.startsWith('voice_') &&
+        (filename.endsWith('.m4a') ||
+            filename.endsWith('.aac') ||
+            filename.endsWith('.opus'));
+
+    // Create message content based on type
+    final String fileContent;
+    final MessageType messageType;
+
+    if (isVoiceMessage) {
+      // Voice message - extract duration from size estimate (rough: 8kbps = 1KB/s)
+      final sizeBytes = _parseSizeToBytes(fileSize);
+      final estimatedDuration = (sizeBytes / 8000).round(); // Rough estimate
+      fileContent = jsonEncode({
+        'fileId': fileId,
+        'duration': estimatedDuration,
+        'filename': filename,
+      });
+      messageType = MessageType.audio;
+      debugPrint('ChatService: Received voice message: $filename ($fileSize)');
+    } else {
+      // Regular file
+      fileContent = jsonEncode({
+        'fileId': fileId,
+        'filename': filename,
+        'size': fileSize,
+      });
+      messageType = MessageType.file;
+      debugPrint('ChatService: Received file: $filename ($fileSize)');
+    }
+
+    final existingRows = await db.query(
+      'messages',
+      where: 'conversation_id = ? AND is_outgoing = 0 AND content LIKE ?',
+      whereArgs: [conversation.id, '%$fileId%'],
+      limit: 1,
+    );
+    final Message message;
+    final bool insertedNewMessage;
+
+    if (existingRows.isNotEmpty) {
+      message = Message.fromMap(existingRows.first).copyWith(
+        type: messageType,
+        content: fileContent,
+        status: MessageStatus.delivered,
+      );
+      insertedNewMessage = false;
+      await db.update(
+        'messages',
+        message.toMap(),
+        where: 'id = ?',
+        whereArgs: [message.id],
+      );
+    } else {
+      message = Message(
+        id: _uuid.v4(),
+        conversationId: conversation.id,
+        senderId: normalizedPeerId,
+        type: messageType,
+        content: fileContent,
+        timestamp: DateTime.now(),
+        status: MessageStatus.delivered,
+        isOutgoing: false,
+      );
+      insertedNewMessage = true;
+      await db.insert('messages', message.toMap());
+    }
+
+    // Update conversation
+    await db.update(
+      'conversations',
+      {
+        'last_activity_at': message.timestamp.millisecondsSinceEpoch,
+        'unread_count': insertedNewMessage
+            ? conversation.unreadCount + 1
+            : conversation.unreadCount,
+      },
+      where: 'id = ?',
+      whereArgs: [conversation.id],
+    );
+
     // Emit to stream
     _messageController.add(message);
+
+    await _showMessageNotification(
+      conversationId: conversation.id,
+      senderNodeId: normalizedPeerId,
+      messageContent: isVoiceMessage ? 'Voice message' : 'File: $filename',
+    );
 
     debugPrint('ChatService: Received file "$filename" from $fromPeerId');
   }
@@ -463,12 +565,14 @@ class ChatService {
     final db = await DatabaseService.instance.database;
 
     // Get message info to find peer
-    final msgRows = await db.query('messages', where: 'id = ?', whereArgs: [messageId]);
+    final msgRows =
+        await db.query('messages', where: 'id = ?', whereArgs: [messageId]);
     if (msgRows.isEmpty) return;
     final msg = Message.fromMap(msgRows.first);
 
     // Get conversation to find peer ID
-    final convRows = await db.query('conversations', where: 'id = ?', whereArgs: [msg.conversationId]);
+    final convRows = await db.query('conversations',
+        where: 'id = ?', whereArgs: [msg.conversationId]);
     if (convRows.isEmpty) return;
     final conv = Conversation.fromMap(convRows.first);
 
@@ -496,12 +600,14 @@ class ChatService {
     final db = await DatabaseService.instance.database;
 
     // Get message info to find peer
-    final msgRows = await db.query('messages', where: 'id = ?', whereArgs: [messageId]);
+    final msgRows =
+        await db.query('messages', where: 'id = ?', whereArgs: [messageId]);
     if (msgRows.isEmpty) return;
     final msg = Message.fromMap(msgRows.first);
 
     // Get conversation to find peer ID
-    final convRows = await db.query('conversations', where: 'id = ?', whereArgs: [msg.conversationId]);
+    final convRows = await db.query('conversations',
+        where: 'id = ?', whereArgs: [msg.conversationId]);
     if (convRows.isEmpty) return;
     final conv = Conversation.fromMap(convRows.first);
 
@@ -591,7 +697,8 @@ class ChatService {
   }
 
   /// Update conversation display name (alias)
-  Future<void> updateConversationDisplayName(String conversationId, String displayName) async {
+  Future<void> updateConversationDisplayName(
+      String conversationId, String displayName) async {
     final db = await DatabaseService.instance.database;
 
     await db.update(
@@ -620,21 +727,24 @@ class ChatService {
     final previous = _recentlyReceived[dedupKey];
     if (previous != null &&
         now.difference(previous).inMilliseconds < _dedupWindowMs) {
-      debugPrint('ChatService: Duplicate message suppressed from ${received.fromNodeId}');
+      debugPrint(
+          'ChatService: Duplicate message suppressed from ${received.fromNodeId}');
       return;
     }
     _recentlyReceived[dedupKey] = now;
 
     // Prune old dedup entries periodically
     if (_recentlyReceived.length > 128) {
-      _recentlyReceived.removeWhere((_, ts) =>
-          now.difference(ts).inMilliseconds > _dedupWindowMs);
+      _recentlyReceived.removeWhere(
+          (_, ts) => now.difference(ts).inMilliseconds > _dedupWindowMs);
     }
 
     // Filter out messages from blocked contacts
-    final isBlocked = await DatabaseService.instance.isContactBlocked(received.fromNodeId);
+    final isBlocked =
+        await DatabaseService.instance.isContactBlocked(received.fromNodeId);
     if (isBlocked) {
-      debugPrint('ChatService: Message from blocked contact ${received.fromNodeId} ignored');
+      debugPrint(
+          'ChatService: Message from blocked contact ${received.fromNodeId} ignored');
       return;
     }
 
@@ -642,7 +752,8 @@ class ChatService {
       final db = await DatabaseService.instance.database;
 
       // Get or create conversation with sender
-      final conversation = await getOrCreateDirectConversation(received.fromNodeId);
+      final conversation =
+          await getOrCreateDirectConversation(received.fromNodeId);
 
       // Create message
       final message = Message(
@@ -660,12 +771,14 @@ class ChatService {
 
       // Get disappearing messages setting for this conversation
       final disappearingSeconds = await DatabaseService.instance
-          .getConversationDisappearingTimer(conversation.id) ?? _defaultDisappearingSeconds;
+              .getConversationDisappearingTimer(conversation.id) ??
+          _defaultDisappearingSeconds;
 
       // Calculate disappears_at if disappearing is enabled
       int? disappearsAt;
       if (disappearingSeconds != null && disappearingSeconds > 0) {
-        disappearsAt = DateTime.now().millisecondsSinceEpoch + (disappearingSeconds * 1000);
+        disappearsAt = DateTime.now().millisecondsSinceEpoch +
+            (disappearingSeconds * 1000);
       }
 
       // Save to database (transaction ensures atomicity)
@@ -690,12 +803,20 @@ class ChatService {
       // Emit to stream
       _messageController.add(message);
 
+      // Show notification for incoming message
+      await _showMessageNotification(
+        conversationId: conversation.id,
+        senderNodeId: received.fromNodeId,
+        messageContent: parsed.text,
+      );
+
       // Update sender's presence to online (they're actively messaging)
       await _updateSenderPresence(received.fromNodeId);
 
       // Send ACK back to sender
       if (_chatProvider != null) {
-        debugPrint('ChatService: Received message from ${received.fromNodeId}: ${parsed.text}');
+        debugPrint(
+            'ChatService: Received message from ${received.fromNodeId}: ${parsed.text}');
       }
     } catch (e) {
       debugPrint('ChatService: Error handling incoming message: $e');
@@ -714,6 +835,44 @@ class ChatService {
       where: 'node_id = ?',
       whereArgs: [nodeId],
     );
+  }
+
+  /// Show notification for incoming message
+  Future<void> _showMessageNotification({
+    required String conversationId,
+    required String senderNodeId,
+    required String messageContent,
+  }) async {
+    try {
+      // Get sender display name from contacts
+      final db = await DatabaseService.instance.database;
+      final contacts = await db.query(
+        'contacts',
+        columns: ['display_name'],
+        where: 'node_id = ?',
+        whereArgs: [senderNodeId],
+        limit: 1,
+      );
+
+      String senderName;
+      if (contacts.isNotEmpty && contacts.first['display_name'] != null) {
+        senderName = contacts.first['display_name'] as String;
+      } else {
+        // Fallback to short node ID
+        senderName = senderNodeId.length > 12
+            ? '${senderNodeId.substring(0, 12)}...'
+            : senderNodeId;
+      }
+
+      // Show notification
+      await NotificationService.instance.showMessageNotification(
+        conversationId: conversationId,
+        senderName: senderName,
+        messageContent: messageContent,
+      );
+    } catch (e) {
+      debugPrint('ChatService: Failed to show notification: $e');
+    }
   }
 
   /// Handle ACK (delivery/read receipt)
@@ -739,7 +898,8 @@ class ChatService {
 
   /// Handle typing indicator
   void _handleTyping(TypingStatus status) {
-    debugPrint('ChatService: ${status.peerId} is ${status.isTyping ? "typing" : "not typing"}');
+    debugPrint(
+        'ChatService: ${status.peerId} is ${status.isTyping ? "typing" : "not typing"}');
     // Typing status is managed by ChatProvider
     // UI can listen to chatProvider.typingStatuses
   }
@@ -755,11 +915,13 @@ class ChatService {
     final db = await DatabaseService.instance.database;
 
     // Get current reactions
-    final rows = await db.query('messages', where: 'id = ?', whereArgs: [localId]);
+    final rows =
+        await db.query('messages', where: 'id = ?', whereArgs: [localId]);
     if (rows.isEmpty) return;
 
     // For now, just log - proper reaction storage would need a separate table
-    debugPrint('ChatService: Reaction ${reaction.reaction} ${reaction.remove ? "removed from" : "added to"} $localId');
+    debugPrint(
+        'ChatService: Reaction ${reaction.reaction} ${reaction.remove ? "removed from" : "added to"} $localId');
   }
 
   /// Handle delete request
@@ -820,8 +982,10 @@ class ChatService {
     final message = Message.fromMap(rows.first);
 
     // Only retry failed or pending messages
-    if (message.status != MessageStatus.failed && message.status != MessageStatus.pending) {
-      debugPrint('ChatService: Message status is ${message.status}, not retrying');
+    if (message.status != MessageStatus.failed &&
+        message.status != MessageStatus.pending) {
+      debugPrint(
+          'ChatService: Message status is ${message.status}, not retrying');
       return false;
     }
 
@@ -907,7 +1071,8 @@ class ChatService {
       }
     } else {
       // For non-text messages (file, audio), mark as failed - they need special handling
-      debugPrint('ChatService: Cannot retry non-text message type: ${message.type}');
+      debugPrint(
+          'ChatService: Cannot retry non-text message type: ${message.type}');
       await db.update(
         'messages',
         {'status': MessageStatus.failed.index},
@@ -919,7 +1084,8 @@ class ChatService {
   }
 
   /// Update message status
-  Future<void> updateMessageStatus(String messageId, MessageStatus status) async {
+  Future<void> updateMessageStatus(
+      String messageId, MessageStatus status) async {
     final db = await DatabaseService.instance.database;
     await db.update(
       'messages',
@@ -958,7 +1124,8 @@ class ChatService {
     // Look up previous native msg_id to reuse on retry (prevents duplicates)
     final previousNativeMsgId = _localIdToNativeMsgId[messageId];
     if (previousNativeMsgId != null) {
-      debugPrint('ChatService: Queue retry with same msg_id: $previousNativeMsgId');
+      debugPrint(
+          'ChatService: Queue retry with same msg_id: $previousNativeMsgId');
     }
 
     // Try to send via native chat
@@ -1050,4 +1217,3 @@ class ChatService {
     _messageController.close();
   }
 }
-

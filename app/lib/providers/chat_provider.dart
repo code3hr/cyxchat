@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:ffi';
+import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:ffi/ffi.dart';
@@ -190,8 +191,12 @@ class SendResult {
   final String? nativeMsgId;
   final String? error;
 
-  SendResult.success(this.nativeMsgId) : success = true, error = null;
-  SendResult.failure(this.error) : success = false, nativeMsgId = null;
+  SendResult.success(this.nativeMsgId)
+      : success = true,
+        error = null;
+  SendResult.failure(this.error)
+      : success = false,
+        nativeMsgId = null;
 }
 
 /// Tracks a sent message awaiting ACK
@@ -235,6 +240,7 @@ class ChatProvider extends ChangeNotifier {
   // State
   bool _initialized = false;
   String? _localNodeId;
+  List<int> _localIdBytes = const [];
 
   // Polling timer — must stay fast since chatPoll() drives the transport layer
   // (hole punching, key exchange, peer discovery), not just chat messages.
@@ -243,6 +249,7 @@ class ChatProvider extends ChangeNotifier {
 
   // Stream controllers
   final _messageController = StreamController<ReceivedMessage>.broadcast();
+  final _callSignalController = StreamController<ReceivedMessage>.broadcast();
   final _ackController = StreamController<AckData>.broadcast();
   final _typingController = StreamController<TypingStatus>.broadcast();
   final _reactionController = StreamController<ReactionData>.broadcast();
@@ -266,6 +273,9 @@ class ChatProvider extends ChangeNotifier {
 
   /// Stream of incoming text messages
   Stream<ReceivedMessage> get messageStream => _messageController.stream;
+
+  /// Stream of call signaling messages
+  Stream<ReceivedMessage> get callSignalStream => _callSignalController.stream;
 
   /// Stream of ACKs (delivery/read receipts)
   Stream<AckData> get ackStream => _ackController.stream;
@@ -300,6 +310,7 @@ class ChatProvider extends ChangeNotifier {
 
     // Store local node ID (convert 32-byte array to UUID/hex string)
     _localNodeId = NodeIdUtils.bytesToNodeId(localId, localId.length);
+    _localIdBytes = List<int>.from(localId);
 
     // Convert local ID to native pointer
     final localIdPtr = calloc<Uint8>(32);
@@ -310,7 +321,8 @@ class ChatProvider extends ChangeNotifier {
     try {
       final result = _bindings.chatCreate(localIdPtr);
       if (result != CyxChatError.ok) {
-        debugPrint('Failed to create chat context: ${_bindings.errorString(result)}');
+        debugPrint(
+            'Failed to create chat context: ${_bindings.errorString(result)}');
         return false;
       }
 
@@ -356,7 +368,8 @@ class ChatProvider extends ChangeNotifier {
         await IdentityService.instance.saveOnionSecret(secret);
         debugPrint('[ChatProvider] Saved onion secret for future sessions');
       } else {
-        debugPrint('[ChatProvider] WARNING: Could not get onion secret to save');
+        debugPrint(
+            '[ChatProvider] WARNING: Could not get onion secret to save');
       }
     } catch (e) {
       debugPrint('[ChatProvider] Error saving onion secret: $e');
@@ -372,6 +385,7 @@ class ChatProvider extends ChangeNotifier {
       _bindings.chatDestroy();
       _initialized = false;
       _localNodeId = null;
+      _localIdBytes = const [];
       _typingStatuses.clear();
       _pendingAcks.clear();
       notifyListeners();
@@ -387,7 +401,7 @@ class ChatProvider extends ChangeNotifier {
     required String text,
     String? replyToMsgId,
     String? localMsgId,
-    String? nativeMsgIdHex,  // For retries - reuse original msg_id
+    String? nativeMsgIdHex, // For retries - reuse original msg_id
   }) async {
     final log = LogService.instance;
     if (!_initialized) {
@@ -397,7 +411,8 @@ class ChatProvider extends ChangeNotifier {
 
     final peerIdBytes = NodeIdUtils.toBytesAsList(toPeerId);
     final peerIdPtr = calloc<Uint8>(32);
-    final shortPeerId = toPeerId.length > 8 ? toPeerId.substring(0, 8) : toPeerId;
+    final shortPeerId =
+        toPeerId.length > 8 ? toPeerId.substring(0, 8) : toPeerId;
 
     try {
       for (int i = 0; i < 32 && i < peerIdBytes.length; i++) {
@@ -406,7 +421,8 @@ class ChatProvider extends ChangeNotifier {
 
       // Set msg_id override for retries (must be called immediately before send)
       if (nativeMsgIdHex != null) {
-        log.debug('Retry: setting msg_id override to $nativeMsgIdHex', source: 'Chat');
+        log.debug('Retry: setting msg_id override to $nativeMsgIdHex',
+            source: 'Chat');
         _bindings.chatSetNextMsgId(nativeMsgIdHex);
       }
 
@@ -417,7 +433,8 @@ class ChatProvider extends ChangeNotifier {
       );
 
       if (msgIdHex != null) {
-        log.info('Message sent to $shortPeerId... (${text.length} chars)', source: 'Chat');
+        log.info('Message sent to $shortPeerId... (${text.length} chars)',
+            source: 'Chat');
 
         // Track for ACK timeout if localMsgId provided
         if (localMsgId != null) {
@@ -588,7 +605,114 @@ class ChatProvider extends ChangeNotifier {
     }
   }
 
+  /// Send call signaling payload (uses raw wire format)
+  Future<bool> sendCallSignal({
+    required String toPeerId,
+    required int type,
+    required String payload,
+  }) async {
+    if (!_initialized) return false;
+
+    final peerIdBytes = NodeIdUtils.toBytesAsList(toPeerId);
+    final peerIdPtr = calloc<Uint8>(32);
+    try {
+      for (int i = 0; i < 32 && i < peerIdBytes.length; i++) {
+        peerIdPtr[i] = peerIdBytes[i];
+      }
+
+      final payloadBytes = utf8.encode(payload);
+
+      if (payloadBytes.length <= _callSignalMaxUnfragmentedBytes) {
+        return _sendRawCallPacket(peerIdPtr, type, payloadBytes);
+      }
+
+      final callId = _bindings.chatGenerateMsgId();
+      if (callId == null || callId.length != 8) {
+        debugPrint('ChatProvider: Failed to generate call_id for call signal');
+        return false;
+      }
+
+      final totalFragments =
+          (payloadBytes.length / _callSignalFragmentChunkSize).ceil();
+      if (totalFragments > 255) {
+        debugPrint(
+          'ChatProvider: Call signal too large to fragment: ${payloadBytes.length} bytes',
+        );
+        return false;
+      }
+
+      for (int index = 0; index < totalFragments; index++) {
+        final start = index * _callSignalFragmentChunkSize;
+        final end = (start + _callSignalFragmentChunkSize < payloadBytes.length)
+            ? start + _callSignalFragmentChunkSize
+            : payloadBytes.length;
+        final chunkLen = end - start;
+        final fragment = Uint8List(_callSignalFragmentHeaderSize + chunkLen);
+        fragment[0] = _callSignalFragmentMagic;
+        fragment[1] = _callSignalFragmentVersion;
+        fragment[2] = index;
+        fragment[3] = totalFragments;
+        fragment.setAll(4, callId);
+        fragment.setRange(_callSignalFragmentHeaderSize, fragment.length,
+            payloadBytes, start);
+
+        final sent = _sendRawCallPacket(peerIdPtr, type, fragment);
+        if (!sent) return false;
+      }
+
+      return true;
+    } finally {
+      calloc.free(peerIdPtr);
+    }
+  }
+
   // Private methods
+
+  static const int _callSignalMaxUnfragmentedBytes = 80;
+  static const int _callSignalFragmentMagic = 0xC7;
+  static const int _callSignalFragmentVersion = 1;
+  static const int _callSignalFragmentHeaderSize = 12;
+  static const int _callSignalFragmentChunkSize = 72;
+
+  bool _sendRawCallPacket(
+      Pointer<Uint8> peerIdPtr, int type, List<int> payload) {
+    final msgId = _bindings.chatGenerateMsgId();
+    if (msgId == null || msgId.length != 8) {
+      debugPrint('ChatProvider: Failed to generate msg_id for call signal');
+      return false;
+    }
+
+    final header = _buildWireHeader(type, msgId, _localIdBytes);
+    final data = Uint8List(header.length + payload.length);
+    data.setAll(0, header);
+    if (payload.isNotEmpty) {
+      data.setAll(header.length, payload);
+    }
+
+    final result = _bindings.chatSendRaw(peerIdPtr, data);
+    return result == CyxChatError.ok;
+  }
+
+  Uint8List _buildWireHeader(
+    int type,
+    List<int> msgId,
+    List<int> senderId, {
+    int flags = 0,
+  }) {
+    final header = Uint8List(42);
+    header[0] = type & 0xFF;
+    header[1] = flags & 0xFF;
+
+    for (int i = 0; i < 8; i++) {
+      header[2 + i] = i < msgId.length ? msgId[i] : 0;
+    }
+
+    for (int i = 0; i < 32; i++) {
+      header[10 + i] = i < senderId.length ? senderId[i] : 0;
+    }
+
+    return header;
+  }
 
   void _startPolling() {
     _pollTimer?.cancel();
@@ -622,7 +746,8 @@ class ChatProvider extends ChangeNotifier {
     final data = msg['data'] as List<int>;
 
     final fromNodeId = NodeIdUtils.bytesToNodeId(fromBytes, fromBytes.length);
-    final shortFromId = fromNodeId.length > 8 ? fromNodeId.substring(0, 8) : fromNodeId;
+    final shortFromId =
+        fromNodeId.length > 8 ? fromNodeId.substring(0, 8) : fromNodeId;
 
     final received = ReceivedMessage(
       fromNodeId: fromNodeId,
@@ -637,7 +762,8 @@ class ChatProvider extends ChangeNotifier {
         final preview = textLen > 20
             ? '${textData?.text.substring(0, 20)}...'
             : textData?.text ?? '';
-        log.info('Message received from $shortFromId... "$preview"', source: 'Chat');
+        log.info('Message received from $shortFromId... "$preview"',
+            source: 'Chat');
         _messageController.add(received);
         break;
 
@@ -688,9 +814,19 @@ class ChatProvider extends ChangeNotifier {
         }
         break;
 
+      case CyxChatMsgType.callOffer:
+      case CyxChatMsgType.callAnswer:
+      case CyxChatMsgType.callIce:
+      case CyxChatMsgType.callEnd:
+      case CyxChatMsgType.callReject:
+      case CyxChatMsgType.callBusy:
+        _callSignalController.add(received);
+        break;
+
       default:
         // Unknown message type - could be group message, etc.
-        debugPrint('ChatProvider: Unknown message type 0x${type.toRadixString(16)}');
+        debugPrint(
+            'ChatProvider: Unknown message type 0x${type.toRadixString(16)}');
         break;
     }
   }
@@ -733,8 +869,7 @@ class ChatProvider extends ChangeNotifier {
       final pending = entry.value;
       _pendingAcks.remove(entry.key);
 
-      debugPrint(
-          'ChatProvider: ACK timeout for message ${pending.localMsgId}');
+      debugPrint('ChatProvider: ACK timeout for message ${pending.localMsgId}');
 
       // Emit timeout event so queue provider can handle it
       _ackTimeoutController.add(AckTimeoutData(
@@ -752,6 +887,7 @@ class ChatProvider extends ChangeNotifier {
   void dispose() {
     shutdown();
     _messageController.close();
+    _callSignalController.close();
     _ackController.close();
     _ackTimeoutController.close();
     _typingController.close();
@@ -783,10 +919,10 @@ class ChatActions {
     String? replyToMsgId,
   }) {
     return _ref.read(chatNotifierProvider).sendText(
-      toPeerId: toPeerId,
-      text: text,
-      replyToMsgId: replyToMsgId,
-    );
+          toPeerId: toPeerId,
+          text: text,
+          replyToMsgId: replyToMsgId,
+        );
   }
 
   /// Send ACK
@@ -796,10 +932,10 @@ class ChatActions {
     int status = 1,
   }) {
     return _ref.read(chatNotifierProvider).sendAck(
-      toPeerId: toPeerId,
-      msgId: msgId,
-      status: status,
-    );
+          toPeerId: toPeerId,
+          msgId: msgId,
+          status: status,
+        );
   }
 
   /// Send read receipt (respects privacy settings)
@@ -813,9 +949,9 @@ class ChatActions {
       return Future.value(true); // Silently succeed without sending
     }
     return _ref.read(chatNotifierProvider).sendReadReceipt(
-      toPeerId: toPeerId,
-      msgId: msgId,
-    );
+          toPeerId: toPeerId,
+          msgId: msgId,
+        );
   }
 
   /// Send typing indicator (respects privacy settings)
@@ -829,9 +965,9 @@ class ChatActions {
       return Future.value(true); // Silently succeed without sending
     }
     return _ref.read(chatNotifierProvider).sendTyping(
-      toPeerId: toPeerId,
-      isTyping: isTyping,
-    );
+          toPeerId: toPeerId,
+          isTyping: isTyping,
+        );
   }
 
   /// Send reaction
@@ -842,11 +978,11 @@ class ChatActions {
     bool remove = false,
   }) {
     return _ref.read(chatNotifierProvider).sendReaction(
-      toPeerId: toPeerId,
-      msgId: msgId,
-      reaction: reaction,
-      remove: remove,
-    );
+          toPeerId: toPeerId,
+          msgId: msgId,
+          reaction: reaction,
+          remove: remove,
+        );
   }
 
   /// Send delete request
@@ -855,9 +991,9 @@ class ChatActions {
     required String msgId,
   }) {
     return _ref.read(chatNotifierProvider).sendDelete(
-      toPeerId: toPeerId,
-      msgId: msgId,
-    );
+          toPeerId: toPeerId,
+          msgId: msgId,
+        );
   }
 
   /// Send edit
@@ -867,10 +1003,10 @@ class ChatActions {
     required String newText,
   }) {
     return _ref.read(chatNotifierProvider).sendEdit(
-      toPeerId: toPeerId,
-      msgId: msgId,
-      newText: newText,
-    );
+          toPeerId: toPeerId,
+          msgId: msgId,
+          newText: newText,
+        );
   }
 
   /// Set preferred onion routing hop count (1-8, or 0 for auto)

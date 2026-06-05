@@ -7,12 +7,15 @@ typedef VoiceRecordingCallback = void Function(
   int durationMs,
 );
 
+typedef VoiceRecordingStartCallback = Future<bool> Function();
+
 /// Widget for recording voice messages
 /// Shows a record button that can be pressed and held to record
 class VoiceRecorder extends StatefulWidget {
   final VoiceRecordingCallback onRecordingComplete;
-  final VoidCallback? onRecordingStart;
+  final VoiceRecordingStartCallback? onRecordingStart;
   final VoidCallback? onRecordingCancel;
+  final ValueChanged<bool>? onRecordingStateChanged;
   final int maxDurationMs;
   final Color? activeColor;
   final Color? inactiveColor;
@@ -22,6 +25,7 @@ class VoiceRecorder extends StatefulWidget {
     required this.onRecordingComplete,
     this.onRecordingStart,
     this.onRecordingCancel,
+    this.onRecordingStateChanged,
     this.maxDurationMs = 60000, // 60 seconds default
     this.activeColor,
     this.inactiveColor,
@@ -180,17 +184,28 @@ class _VoiceRecorderState extends State<VoiceRecorder>
     );
   }
 
-  void _startRecording() async {
-    setState(() {
-      _isRecording = true;
-      _recordingDurationMs = 0;
-      _dragOffset = Offset.zero;
-    });
+  Future<void> _startRecording() async {
+    if (_isRecording) return;
+    bool canStart = true;
+    if (widget.onRecordingStart != null) {
+      try {
+        canStart = await widget.onRecordingStart!.call();
+      } catch (_) {
+        canStart = false;
+      }
+    }
+    if (!canStart || !mounted) return;
+
+    _setRecordingState(true);
+    _recordingDurationMs = 0;
+    _dragOffset = Offset.zero;
 
     _pulseController.repeat(reverse: true);
 
     // Start duration timer
+    _durationTimer?.cancel();
     _durationTimer = Timer.periodic(const Duration(milliseconds: 100), (timer) {
+      if (!mounted) return;
       setState(() {
         _recordingDurationMs += 100;
       });
@@ -200,11 +215,6 @@ class _VoiceRecorderState extends State<VoiceRecorder>
         _stopRecording();
       }
     });
-
-    widget.onRecordingStart?.call();
-
-    // TODO: Start actual audio recording using record package
-    // For now, this is a UI-only implementation
   }
 
   void _stopRecording() {
@@ -221,13 +231,22 @@ class _VoiceRecorderState extends State<VoiceRecorder>
       // TODO: Get actual audio data from recorder
       // For now, return empty data with the duration
       widget.onRecordingComplete([], _recordingDurationMs);
+    } else {
+      // Short recording - still notify completion so callers can stop recording
+      widget.onRecordingComplete([], _recordingDurationMs);
     }
 
+    _setRecordingState(false);
+    _recordingDurationMs = 0;
+    _dragOffset = Offset.zero;
+  }
+
+  void _setRecordingState(bool isRecording) {
+    if (!mounted) return;
     setState(() {
-      _isRecording = false;
-      _recordingDurationMs = 0;
-      _dragOffset = Offset.zero;
+      _isRecording = isRecording;
     });
+    widget.onRecordingStateChanged?.call(isRecording);
   }
 
   String _formatDuration(int ms) {

@@ -22,6 +22,7 @@ import '../ffi/bindings.dart' show CyxChatFileState, CyxChatFileConst;
 import '../models/models.dart';
 import '../services/chat_service.dart';
 import '../services/group_service.dart';
+import '../widgets/voice_recorder.dart';
 import 'active_call_screen.dart';
 import 'group_chat_screen.dart';
 
@@ -38,6 +39,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   final _textController = TextEditingController();
   final _scrollController = ScrollController();
   String? _replyToId;
+  bool _hasPreConnected = false;
 
   @override
   void initState() {
@@ -48,13 +50,16 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       // while the chat screen was not active
       ref.invalidate(messagesProvider(widget.conversationId));
       ref.read(chatActionsProvider).markAsRead(widget.conversationId);
-      // Pre-connect to peer for faster first message
-      _preConnectToPeer();
+      // Pre-connect triggered when conversation loads (see build)
+      // _preConnectToPeer() called from build when peerId available
     });
   }
 
   /// Pre-connect to peer to establish connection before sending
   void _preConnectToPeer() async {
+    if (_hasPreConnected) return;
+    _hasPreConnected = true;
+
     final connectionProvider = ref.read(connectionNotifierProvider);
     if (!connectionProvider.initialized) return;
 
@@ -62,8 +67,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final conv = await ChatService.instance.getConversation(widget.conversationId);
     final peerId = conv?.peerId;
     if (peerId != null && peerId.isNotEmpty) {
+      final progress = connectionProvider.getProgress(peerId);
+      if (connectionProvider.hasPeerKey(peerId) ||
+          (progress != null && progress.isConnecting)) {
+        return;
+      }
       final result = await connectionProvider.connect(peerId);
-      debugPrint('Pre-connect to peer $peerId: $result');
+      final shortId = peerId.length > 16 ? peerId.substring(0, 16) : peerId;
+      debugPrint('Pre-connect to $shortId...: $result');
     }
   }
 
@@ -105,6 +116,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           data: (conv) {
             // Use the actual peer ID from the conversation, not the conversation ID
             final peerId = conv?.peerId;
+
+            // Pre-connect to peer (loads conversation internally)
+            _preConnectToPeer();
 
             // Get connection progress for real-time feedback
             final progress = peerId != null && connectionProvider.initialized
@@ -300,8 +314,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final peerId = conversation?.peerId ?? widget.conversationId;
 
     if (connectionProvider.initialized) {
-      debugPrint('ChatScreen: Ensuring connection to peer before sending...');
-      await connectionProvider.connect(peerId);
+      if (!connectionProvider.hasPeerKey(peerId)) {
+        final progress = connectionProvider.getProgress(peerId);
+        if (progress == null || !progress.isConnecting) {
+          debugPrint('ChatScreen: Ensuring connection to peer before sending...');
+          await connectionProvider.connect(peerId);
+        } else {
+          debugPrint('ChatScreen: Waiting for existing peer connection...');
+        }
+      }
 
       // Wait for key exchange to complete (up to 5 seconds)
       // Uses increasing delays to avoid blocking UI thread with tight polling
@@ -1465,6 +1486,9 @@ class _FileMessageContent extends ConsumerWidget {
     final isPaused = transfer?.state == CyxChatFileState.paused;
     final isFailed = transfer?.state == CyxChatFileState.failed;
     final isCompleted = hasFileData || transfer?.state == CyxChatFileState.completed;
+    final isPendingIncoming = !isOutgoing &&
+        transfer != null &&
+        transfer.state == CyxChatFileState.pending;
 
     return InkWell(
       onTap: hasFileData && !isTransferring && !isPaused
@@ -1533,6 +1557,10 @@ class _FileMessageContent extends ConsumerWidget {
               fileId: fileId,
               isPaused: isPaused,
             ),
+          ],
+          if (isPendingIncoming && fileId != null) ...[
+            const SizedBox(height: 8),
+            _buildAcceptSection(context, ref, fileId, filename),
           ],
         ],
       ),
@@ -1610,6 +1638,12 @@ class _FileMessageContent extends ConsumerWidget {
             ? (isOutgoing ? colorScheme.onPrimary.withOpacity(0.6) : colorScheme.primary)
             : Colors.green;
         break;
+      case CyxChatFileState.pending:
+        statusText = isOutgoing
+            ? 'Waiting for recipient to accept'
+            : 'Waiting for you to accept';
+        statusColor = Colors.orange;
+        break;
       default:
         statusText = transfer.stateName;
         statusColor = isOutgoing
@@ -1620,6 +1654,44 @@ class _FileMessageContent extends ConsumerWidget {
     return Text(
       statusText,
       style: TextStyle(fontSize: 11, color: statusColor),
+    );
+  }
+
+  Widget _buildAcceptSection(
+    BuildContext context,
+    WidgetRef ref,
+    String fileId,
+    String filename,
+  ) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        FilledButton.icon(
+          onPressed: () async {
+            final accepted = await ref.read(fileActionsProvider).acceptFile(fileId);
+            if (!accepted && context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('Could not accept "$filename"')),
+              );
+            }
+          },
+          icon: const Icon(Icons.download_rounded, size: 16),
+          label: const Text('Accept'),
+        ),
+        const SizedBox(width: 8),
+        OutlinedButton.icon(
+          onPressed: () async {
+            final rejected = await ref.read(fileActionsProvider).rejectFile(fileId);
+            if (!rejected && context.mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('Could not decline "$filename"')),
+              );
+            }
+          },
+          icon: const Icon(Icons.close_rounded, size: 16),
+          label: const Text('Decline'),
+        ),
+      ],
     );
   }
 
@@ -2150,8 +2222,7 @@ class _MessageInput extends ConsumerStatefulWidget {
 class _MessageInputState extends ConsumerState<_MessageInput> {
   bool _isSendingFile = false;
   bool _hasText = false;
-  double _dragOffset = 0;
-  static const _cancelThreshold = -100.0;
+  bool _isRecordingUi = false;
 
   @override
   void initState() {
@@ -2286,7 +2357,7 @@ class _MessageInputState extends ConsumerState<_MessageInput> {
     }
   }
 
-  Future<void> _startRecording() async {
+  Future<bool> _startRecording() async {
     debugPrint('VoiceMessage: Starting recording...');
     final recorder = ref.read(voiceRecorderProvider);
     final started = await recorder.startRecording();
@@ -2297,7 +2368,9 @@ class _MessageInputState extends ConsumerState<_MessageInput> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(error)),
       );
+      return false;
     }
+    return started;
   }
 
   Future<void> _stopRecordingAndSend() async {
@@ -2367,128 +2440,28 @@ class _MessageInputState extends ConsumerState<_MessageInput> {
 
   void _cancelRecording() {
     ref.read(voiceRecorderProvider).cancelRecording();
-    setState(() => _dragOffset = 0);
   }
 
   @override
   Widget build(BuildContext context) {
-    final recorder = ref.watch(voiceRecorderProvider);
-    final isRecording = recorder.isRecording;
     final colorScheme = Theme.of(context).colorScheme;
 
-    // Recording UI
-    if (isRecording) {
-      return Container(
-        padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(
-          color: colorScheme.surface,
-          border: Border(
-            top: BorderSide(color: Theme.of(context).dividerColor),
-          ),
-        ),
-        child: SafeArea(
-          child: Row(
-            children: [
-              // Cancel indicator
-              AnimatedOpacity(
-                opacity: _dragOffset < _cancelThreshold ? 1.0 : 0.5,
-                duration: const Duration(milliseconds: 100),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      Icons.arrow_back,
-                      size: 16,
-                      color: _dragOffset < _cancelThreshold
-                          ? Colors.red
-                          : colorScheme.onSurface.withOpacity(0.5),
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      'Slide to cancel',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: _dragOffset < _cancelThreshold
-                            ? Colors.red
-                            : colorScheme.onSurface.withOpacity(0.5),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+    final recorderControl = VoiceRecorder(
+      key: const ValueKey('voice_recorder'),
+      onRecordingStart: _startRecording,
+      onRecordingComplete: (_, __) => _stopRecordingAndSend(),
+      onRecordingCancel: _cancelRecording,
+      onRecordingStateChanged: (isRecording) {
+        if (mounted) {
+          setState(() => _isRecordingUi = isRecording);
+        }
+      },
+      activeColor: colorScheme.primary,
+      inactiveColor: colorScheme.primary,
+    );
 
-              const Spacer(),
-
-              // Recording indicator
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: Colors.red.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      width: 8,
-                      height: 8,
-                      decoration: const BoxDecoration(
-                        color: Colors.red,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      VoiceRecorderProvider.formatDuration(recorder.recordingDuration),
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w500,
-                        color: Colors.red,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-              const SizedBox(width: 8),
-
-              // Mic button (draggable to cancel)
-              GestureDetector(
-                onHorizontalDragUpdate: (details) {
-                  setState(() {
-                    _dragOffset += details.delta.dx;
-                    if (_dragOffset > 0) _dragOffset = 0;
-                  });
-                },
-                onHorizontalDragEnd: (details) {
-                  if (_dragOffset < _cancelThreshold) {
-                    _cancelRecording();
-                  }
-                  setState(() => _dragOffset = 0);
-                },
-                onTapUp: (_) => _stopRecordingAndSend(),
-                child: Transform.translate(
-                  offset: Offset(_dragOffset.clamp(-150.0, 0.0), 0),
-                  child: Container(
-                    width: 48,
-                    height: 48,
-                    decoration: BoxDecoration(
-                      color: _dragOffset < _cancelThreshold
-                          ? Colors.red
-                          : colorScheme.primary,
-                      shape: BoxShape.circle,
-                    ),
-                    child: Icon(
-                      _dragOffset < _cancelThreshold ? Icons.close : Icons.mic,
-                      color: colorScheme.onPrimary,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
+    final showRecorder = _isRecordingUi || !_hasText;
+    final showSend = !_isRecordingUi && _hasText;
 
     // Normal input UI
     return Container(
@@ -2504,78 +2477,50 @@ class _MessageInputState extends ConsumerState<_MessageInput> {
       child: SafeArea(
         child: Row(
           children: [
-            _isSendingFile
-                ? const Padding(
-                    padding: EdgeInsets.all(12),
-                    child: SizedBox(
-                      width: 24,
-                      height: 24,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                  )
-                : IconButton(
-                    icon: const Icon(Icons.attach_file),
-                    onPressed: () => _pickFile(context),
-                  ),
-            Expanded(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxHeight: 120),
-                child: Builder(
-                  builder: (context) {
-                    final settings = ref.watch(settingsProvider);
-                    return TextField(
-                      controller: widget.controller,
-                      decoration: const InputDecoration(
-                        hintText: 'Message',
-                        border: InputBorder.none,
+            if (!_isRecordingUi)
+              _isSendingFile
+                  ? const Padding(
+                      padding: EdgeInsets.all(12),
+                      child: SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: CircularProgressIndicator(strokeWidth: 2),
                       ),
-                      textCapitalization: TextCapitalization.sentences,
-                      maxLines: null,
-                      onSubmitted: (_) => widget.onSend(),
-                      // Incognito keyboard - request keyboard to not learn from typing
-                      enableIMEPersonalizedLearning: !settings.incognitoKeyboard,
-                    );
-                  },
+                    )
+                  : IconButton(
+                      icon: const Icon(Icons.attach_file),
+                      onPressed: () => _pickFile(context),
+                    ),
+            if (!_isRecordingUi)
+              Expanded(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 120),
+                  child: Builder(
+                    builder: (context) {
+                      final settings = ref.watch(settingsProvider);
+                      return TextField(
+                        controller: widget.controller,
+                        decoration: const InputDecoration(
+                          hintText: 'Message',
+                          border: InputBorder.none,
+                        ),
+                        textCapitalization: TextCapitalization.sentences,
+                        maxLines: null,
+                        onSubmitted: (_) => widget.onSend(),
+                        // Incognito keyboard - request keyboard to not learn from typing
+                        enableIMEPersonalizedLearning: !settings.incognitoKeyboard,
+                      );
+                    },
+                  ),
                 ),
               ),
-            ),
-            // Send button when text, mic button when empty
-            _hasText
-                ? IconButton(
-                    icon: const Icon(Icons.send),
-                    onPressed: widget.onSend,
-                  )
-                : Tooltip(
-                    message: 'Hold to record voice message',
-                    child: GestureDetector(
-                      onTap: () {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Hold the mic button to record'),
-                            duration: Duration(seconds: 2),
-                          ),
-                        );
-                      },
-                      onLongPressStart: (_) => _startRecording(),
-                      onLongPressEnd: (_) {
-                        if (ref.read(voiceRecorderProvider).isRecording) {
-                          _stopRecordingAndSend();
-                        }
-                      },
-                      child: Container(
-                        width: 48,
-                        height: 48,
-                        decoration: BoxDecoration(
-                          color: colorScheme.primary.withOpacity(0.1),
-                          shape: BoxShape.circle,
-                        ),
-                        child: Icon(
-                          Icons.mic,
-                          color: colorScheme.primary,
-                        ),
-                      ),
-                    ),
-                  ),
+            if (showSend)
+              IconButton(
+                icon: const Icon(Icons.send),
+                onPressed: widget.onSend,
+              ),
+            if (showRecorder)
+              recorderControl,
           ],
         ),
       ),

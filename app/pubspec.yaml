@@ -67,6 +67,10 @@ dependencies:
 
   # Fonts
   google_fonts: ^6.1.0
+  connectivity_plus: ^7.0.0
+  # Local notifications
+  flutter_local_notifications: ^18.0.0
+
 
 dev_dependencies:
   flutter_test:

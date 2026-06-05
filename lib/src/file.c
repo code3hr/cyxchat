@@ -846,44 +846,12 @@ cyxchat_error_t cyxchat_file_send(
     }
     CYXWIZ_INFO("cyxchat_file_send: FILE_META sent successfully");
 
-    slot->transfer.state = CYXCHAT_FILE_SENDING;
-
-    /* For small files (<= 1 chunk), send the data immediately after metadata */
-    if (chunk_count == 1) {
-        /* Single chunk - send immediately */
-        uint8_t chunk_buf[250];
-        size_t chunk_wire_len = 0;
-
-        chunk_buf[chunk_wire_len++] = CYXCHAT_MSG_FILE_CHUNK;
-        /* Add sender_id for onion routing */
-        memcpy(chunk_buf + chunk_wire_len, ctx->local_id.bytes, 32);
-        chunk_wire_len += 32;
-        memcpy(chunk_buf + chunk_wire_len, slot->transfer.meta.file_id.bytes, CYXCHAT_FILE_ID_SIZE);
-        chunk_wire_len += CYXCHAT_FILE_ID_SIZE;
-
-        /* Chunk index (2 bytes) */
-        chunk_buf[chunk_wire_len++] = 0;
-        chunk_buf[chunk_wire_len++] = 0;
-
-        /* Chunk length (2 bytes) */
-        uint16_t chunk_len = (uint16_t)data_len;
-        chunk_buf[chunk_wire_len++] = (uint8_t)(chunk_len & 0xFF);
-        chunk_buf[chunk_wire_len++] = (uint8_t)((chunk_len >> 8) & 0xFF);
-
-        /* Chunk data */
-        if (chunk_wire_len + data_len <= sizeof(chunk_buf)) {
-            memcpy(chunk_buf + chunk_wire_len, data, data_len);
-            chunk_wire_len += data_len;
-
-            cyxchat_send_raw(ctx->chat_ctx, to, chunk_buf, chunk_wire_len);
-            slot->transfer.chunks_done = 1;
-        }
-    } else {
-        /* Multi-chunk: let cyxchat_file_poll() send chunks with proper delays */
-        slot->transfer.chunks_done = 0;
-        slot->last_chunk_sent_ms = 0;  /* Poll will send first chunk immediately */
-        CYXWIZ_INFO("cyxchat_file_send: multi-chunk transfer (%u chunks), polling will send", chunk_count);
-    }
+    /* Keep outgoing transfer pending until the recipient sends FILE_ACCEPT.
+     * cyxchat_file_poll() starts chunk delivery after handle_file_accept()
+     * moves the state to CYXCHAT_FILE_SENDING. */
+    slot->transfer.chunks_done = 0;
+    slot->last_chunk_sent_ms = 0;
+    CYXWIZ_INFO("cyxchat_file_send: waiting for FILE_ACCEPT before sending %u chunks", chunk_count);
 
     if (file_id_out) {
         memcpy(file_id_out, &slot->transfer.meta.file_id, sizeof(cyxchat_file_id_t));
@@ -1458,13 +1426,6 @@ static cyxchat_error_t handle_file_meta(
         return CYXCHAT_ERR_FILE_TOO_LARGE;
     }
 
-    /* Pre-allocate receive buffer for auto-accept */
-    slot->data = calloc(1, size);
-    if (slot->data) {
-        slot->data_capacity = size;
-        slot->transfer.state = CYXCHAT_FILE_RECEIVING;
-    }
-
     CYXWIZ_INFO("handle_file_meta: file '%s', size=%u, chunks=%u, chunk_size=%zu",
                 filename, size, chunk_count, slot->chunk_size);
 
@@ -1525,19 +1486,8 @@ static cyxchat_error_t handle_file_chunk(
     }
 
     /* Check state */
-    if (slot->transfer.state != CYXCHAT_FILE_RECEIVING &&
-        slot->transfer.state != CYXCHAT_FILE_PENDING) {
+    if (slot->transfer.state != CYXCHAT_FILE_RECEIVING) {
         return CYXCHAT_ERR_INVALID;
-    }
-
-    /* If still pending, switch to receiving */
-    if (slot->transfer.state == CYXCHAT_FILE_PENDING) {
-        if (!slot->data) {
-            slot->data = calloc(1, slot->transfer.meta.size);
-            if (!slot->data) return CYXCHAT_ERR_MEMORY;
-            slot->data_capacity = slot->transfer.meta.size;
-        }
-        slot->transfer.state = CYXCHAT_FILE_RECEIVING;
     }
 
     /* Validate chunk index */

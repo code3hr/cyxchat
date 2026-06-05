@@ -420,6 +420,37 @@ class CyxChatBindings {
     }
   }
 
+  /// Generate a random message ID (8 bytes)
+  Uint8List? chatGenerateMsgId() {
+    if (_chatCtx == null) return null;
+    final msgIdPtr = calloc<Uint8>(8);
+    try {
+      _native.cyxchat_generate_msg_id(msgIdPtr);
+      final msgId = Uint8List(8);
+      for (int i = 0; i < 8; i++) {
+        msgId[i] = msgIdPtr[i];
+      }
+      return msgId;
+    } finally {
+      calloc.free(msgIdPtr);
+    }
+  }
+
+  /// Send raw message bytes (must include wire header)
+  int chatSendRaw(Pointer<Uint8> to, Uint8List data) {
+    if (_chatCtx == null) return CyxChatError.errNull;
+    if (data.isEmpty) return CyxChatError.errInvalid;
+    final dataPtr = calloc<Uint8>(data.length);
+    try {
+      for (int i = 0; i < data.length; i++) {
+        dataPtr[i] = data[i];
+      }
+      return _native.cyxchat_send_raw(_chatCtx!, to, dataPtr, data.length);
+    } finally {
+      calloc.free(dataPtr);
+    }
+  }
+
   /// Send text message
   /// Returns message ID hex string on success, null on failure
   String? chatSendText(
@@ -4151,6 +4182,11 @@ late final cyxchat_conn_get_peer_pubkey = _lib.lookupFunction<      Int32 Functi
       int Function(Pointer<Void>, Pointer<Uint8>, Pointer<Int8>, int,
           Pointer<Uint8>, Pointer<Uint8>)>('cyxchat_send_text');
 
+  late final cyxchat_send_raw = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>, Size),
+      int Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>, int)>(
+      'cyxchat_send_raw');
+
   late final cyxchat_set_next_msg_id = _lib.lookupFunction<
       Void Function(Pointer<Void>, Pointer<Uint8>),
       void Function(Pointer<Void>, Pointer<Uint8>)>('cyxchat_set_next_msg_id');
@@ -4830,6 +4866,13 @@ class CyxChatMsgType {
   static const fileComplete = 0x43;
   static const fileCancel = 0x44;
   static const fileDhtReady = 0x45;
+  // Call signaling
+  static const callOffer = 0x50;
+  static const callAnswer = 0x51;
+  static const callIce = 0x52;
+  static const callEnd = 0x53;
+  static const callReject = 0x54;
+  static const callBusy = 0x55;
 }
 
 // File transfer states

@@ -1,10 +1,13 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'connection_provider.dart';
 import 'dns_provider.dart';
 import 'chat_provider.dart';
+import 'call_provider.dart';
+import 'contact_provider.dart';
 import 'dht_provider.dart';
 import 'file_provider.dart';
 import 'group_ffi_provider.dart';
@@ -14,6 +17,7 @@ import '../services/identity_service.dart';
 import '../services/chat_service.dart';
 import '../services/group_service.dart';
 import '../services/log_service.dart';
+import '../services/network_monitor_service.dart';
 import '../utils/node_id_utils.dart';
 import '../ffi/bindings.dart';
 
@@ -61,13 +65,41 @@ class RetryState {
   }
 }
 
+class _CallSignalFragmentBuffer {
+  final int total;
+  final DateTime createdAt;
+  final List<List<int>?> chunks;
+
+  _CallSignalFragmentBuffer(this.total)
+      : createdAt = DateTime.now(),
+        chunks = List<List<int>?>.filled(total, null);
+
+  bool add(int index, List<int> data) {
+    if (index < 0 || index >= total) return false;
+    chunks[index] = List<int>.from(data);
+    return true;
+  }
+
+  bool get isComplete => chunks.every((chunk) => chunk != null);
+
+  List<int> assemble() {
+    final out = <int>[];
+    for (final chunk in chunks) {
+      out.addAll(chunk!);
+    }
+    return out;
+  }
+}
+
 /// Global connection provider instance
-final connectionNotifierProvider = ChangeNotifierProvider<ConnectionProvider>((ref) {
+final connectionNotifierProvider =
+    ChangeNotifierProvider<ConnectionProvider>((ref) {
   return ConnectionProvider();
 });
 
 /// Retry state provider
-final retryStateProvider = StateProvider<RetryState>((ref) => const RetryState());
+final retryStateProvider =
+    StateProvider<RetryState>((ref) => const RetryState());
 
 /// Provider for connection actions
 final connectionActionsProvider = Provider((ref) => ConnectionActions(ref));
@@ -77,7 +109,15 @@ class ConnectionActions {
   final Ref _ref;
   Timer? _retryTimer;
   StreamSubscription? _ackTimeoutSubscription;
+  StreamSubscription? _callSignalSubscription;
+  final Map<String, _CallSignalFragmentBuffer> _callSignalFragments = {};
   static const RetryConfig _defaultConfig = RetryConfig();
+  static const int _callSignalFragmentMagic = 0xC7;
+  static const int _callSignalFragmentVersion = 1;
+  static const int _callSignalFragmentHeaderSize = 12;
+  static const Duration _callSignalFragmentTtl = Duration(seconds: 60);
+  final NetworkMonitorService _networkMonitor = NetworkMonitorService.instance;
+  bool _autoReconnectEnabled = false;
 
   ConnectionActions(this._ref);
 
@@ -156,7 +196,8 @@ class ConnectionActions {
       return false;
     }
     final settings = _ref.read(settingsProvider);
-    final bootstrap = bootstrapServer ?? (settings.bootstrapServer.isNotEmpty ? settings.bootstrapServer : '');
+    final bootstrap = bootstrapServer ??
+        (settings.bootstrapServer.isNotEmpty ? settings.bootstrapServer : '');
     final nodeIdBytes = NodeIdUtils.toBytesAsList(identity.nodeId);
 
     log.info('Connecting to network...', source: 'Network');
@@ -176,7 +217,8 @@ class ConnectionActions {
       log.error('Connection initialization failed', source: 'Network');
       return false;
     }
-    log.info('Connection initialized - STUN discovery starting', source: 'Network');
+    log.info('Connection initialized - STUN discovery starting',
+        source: 'Network');
 
     // Configure relay server (same as bootstrap) for NAT fallback
     if (bootstrap.isNotEmpty) {
@@ -196,7 +238,8 @@ class ConnectionActions {
     );
 
     if (!dnsResult) {
-      log.warning('DNS initialization failed (usernames unavailable)', source: 'Network');
+      log.warning('DNS initialization failed (usernames unavailable)',
+          source: 'Network');
       // Don't fail - DNS is optional for basic messaging
     } else {
       log.info('DNS initialized for username resolution', source: 'Network');
@@ -213,6 +256,19 @@ class ConnectionActions {
       // Connect ChatService to ChatProvider for message handling
       ChatService.instance.connectProvider(chatProvider);
       log.info('Chat service ready for messaging', source: 'Network');
+
+      // Wire call signaling to chat layer
+      final callProvider = _ref.read(callNotifierProvider);
+      callProvider.onSendSignal = (peerId, type, payload) {
+        chatProvider.sendCallSignal(
+          toPeerId: peerId,
+          type: type,
+          payload: payload,
+        );
+      };
+      _callSignalSubscription?.cancel();
+      _callSignalSubscription =
+          chatProvider.callSignalStream.listen(_handleCallSignal);
 
       // Initialize offline message queue
       final queueProvider = _ref.read(queueNotifierProvider);
@@ -289,6 +345,9 @@ class ConnectionActions {
     } else {
       log.info('File transfer ready', source: 'Network');
       // Wire up file receive callback to create messages
+      fileProvider.onFileRequest = (request) {
+        ChatService.instance.handleFileRequest(request);
+      };
       fileProvider.onFileReceived = (fromPeerId, filename, fileSize, fileId) {
         ChatService.instance.handleReceivedFile(
           fromPeerId: fromPeerId,
@@ -319,22 +378,282 @@ class ConnectionActions {
       CyxChatBindings.instance.fileSetConnCtx();
     }
 
+    // Initialize presence sync if enabled
+    if (settings.presenceSyncEnabled) {
+      try {
+        // Initialize presence sync provider (sets up callback)
+        final presenceSync = _ref.read(presenceSyncProvider);
+        log.info('Presence sync initialized', source: 'Network');
+
+        // Wait for server to be ready before querying presence
+        // Server verification takes ~3-5 seconds
+        _queryPresenceWhenServerReady();
+      } catch (e) {
+        log.warning('Presence sync failed: $e', source: 'Network');
+      }
+    }
+
     log.info('Network connection complete', source: 'Network');
+
+    // Start network monitoring for auto-reconnect
+    _setupNetworkMonitor();
+
     return true;
   }
 
+  void _handleCallSignal(ReceivedMessage msg) {
+    final log = LogService.instance;
+    final callProvider = _ref.read(callNotifierProvider);
+    final payload = _decodeOrBufferCallSignal(msg, log);
+    if (payload == null) return;
+
+    Map<String, dynamic>? data;
+
+    switch (msg.type) {
+      case CyxChatMsgType.callOffer:
+        data = _decodeCallPayload(payload, log, msg.type);
+        if (data == null) return;
+        final sdp = data['sdp'] as String?;
+        final type = data['type'] as String?;
+        final video = data['video'] == true;
+        final peerName = data['peerName'] as String?;
+        if (sdp == null || type == null) {
+          log.warning('Call offer missing SDP/type', source: 'Call');
+          return;
+        }
+        callProvider.handleOffer(
+          peerId: msg.fromNodeId,
+          peerName: peerName,
+          sdp: sdp,
+          type: type,
+          video: video,
+        );
+        break;
+
+      case CyxChatMsgType.callAnswer:
+        data = _decodeCallPayload(payload, log, msg.type);
+        if (data == null) return;
+        final sdp = data['sdp'] as String?;
+        final type = data['type'] as String?;
+        if (sdp == null || type == null) {
+          log.warning('Call answer missing SDP/type', source: 'Call');
+          return;
+        }
+        callProvider.handleAnswer(
+          peerId: msg.fromNodeId,
+          sdp: sdp,
+          type: type,
+        );
+        break;
+
+      case CyxChatMsgType.callIce:
+        data = _decodeCallPayload(payload, log, msg.type);
+        if (data == null) return;
+        final candidate = data['candidate'] as String?;
+        final sdpMid = data['sdpMid'] as String?;
+        final mLine = data['sdpMLineIndex'];
+        final sdpMLineIndex =
+            mLine is int ? mLine : (mLine is num ? mLine.toInt() : null);
+        if (candidate == null || sdpMid == null || sdpMLineIndex == null) {
+          log.warning('ICE signal missing fields', source: 'Call');
+          return;
+        }
+        callProvider.handleIceCandidate(
+          peerId: msg.fromNodeId,
+          candidate: candidate,
+          sdpMid: sdpMid,
+          sdpMLineIndex: sdpMLineIndex,
+        );
+        break;
+
+      case CyxChatMsgType.callEnd:
+        callProvider.handleCallEnd(peerId: msg.fromNodeId);
+        break;
+
+      case CyxChatMsgType.callReject:
+        callProvider.handleReject(peerId: msg.fromNodeId);
+        break;
+
+      case CyxChatMsgType.callBusy:
+        callProvider.handleBusy(peerId: msg.fromNodeId);
+        break;
+
+      default:
+        break;
+    }
+  }
+
+  Map<String, dynamic>? _decodeCallPayload(
+      String payload, LogService log, int type) {
+    if (payload.isEmpty) {
+      log.warning(
+          'Call signal payload empty (type 0x${type.toRadixString(16)})',
+          source: 'Call');
+      return null;
+    }
+    try {
+      final decoded = jsonDecode(payload);
+      if (decoded is Map<String, dynamic>) {
+        return decoded;
+      }
+      log.warning('Call signal payload not a JSON object', source: 'Call');
+    } catch (e) {
+      log.warning('Call signal JSON decode failed: $e', source: 'Call');
+    }
+    return null;
+  }
+
+  String? _decodeOrBufferCallSignal(ReceivedMessage msg, LogService log) {
+    final raw = msg.rawData;
+    if (raw.isEmpty || raw[0] != _callSignalFragmentMagic) {
+      return raw.isNotEmpty ? utf8.decode(raw, allowMalformed: true) : '';
+    }
+
+    if (raw.length < _callSignalFragmentHeaderSize) {
+      log.warning('Call signal fragment too short', source: 'Call');
+      return null;
+    }
+
+    final version = raw[1];
+    final index = raw[2];
+    final total = raw[3];
+    if (version != _callSignalFragmentVersion || total == 0 || index >= total) {
+      log.warning('Invalid call signal fragment header', source: 'Call');
+      return null;
+    }
+
+    _expireCallSignalFragments();
+
+    final callId = _hex(raw.sublist(4, 12));
+    final key = '${msg.fromNodeId}:${msg.type}:$callId';
+    final buffer = _callSignalFragments.putIfAbsent(
+      key,
+      () => _CallSignalFragmentBuffer(total),
+    );
+
+    if (buffer.total != total) {
+      log.warning('Call signal fragment total changed for $key',
+          source: 'Call');
+      _callSignalFragments.remove(key);
+      return null;
+    }
+
+    buffer.add(index, raw.sublist(_callSignalFragmentHeaderSize));
+    log.debug('Buffered call signal fragment ${index + 1}/$total',
+        source: 'Call');
+
+    if (!buffer.isComplete) return null;
+
+    _callSignalFragments.remove(key);
+    final assembled = buffer.assemble();
+    return utf8.decode(assembled, allowMalformed: true);
+  }
+
+  void _expireCallSignalFragments() {
+    final now = DateTime.now();
+    _callSignalFragments.removeWhere(
+      (_, buffer) => now.difference(buffer.createdAt) > _callSignalFragmentTtl,
+    );
+  }
+
+  String _hex(List<int> bytes) {
+    final buffer = StringBuffer();
+    for (final byte in bytes) {
+      buffer.write(byte.toRadixString(16).padLeft(2, '0'));
+    }
+    return buffer.toString();
+  }
+
+  /// Query presence for all contacts once server is ready
+  void _queryPresenceWhenServerReady() async {
+    final log = LogService.instance;
+    final connectionProvider = _ref.read(connectionNotifierProvider);
+
+    // Wait up to 10 seconds for server to become available
+    for (int i = 0; i < 20; i++) {
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      // Check if we have at least one healthy/verified server
+      final serverCount = connectionProvider.serverCount;
+      final healthyCount = connectionProvider.healthyServerCount;
+
+      if (healthyCount > 0) {
+        log.info(
+            'Server ready ($healthyCount/$serverCount healthy), querying presence',
+            source: 'Network');
+        await _ref.read(contactActionsProvider).queryAllPresence();
+        log.info('Queried presence for all contacts', source: 'Network');
+        return;
+      }
+
+      // Also check if server is at least responding (even if not fully verified)
+      if (i == 10 && serverCount > 0) {
+        log.warning('Server verification slow, querying presence anyway',
+            source: 'Network');
+        await _ref.read(contactActionsProvider).queryAllPresence();
+        return;
+      }
+    }
+
+    log.warning('No server available for presence queries after 10s',
+        source: 'Network');
+  }
+
+  /// Setup network monitor for auto-reconnect on network restoration
+  void _setupNetworkMonitor() {
+    if (_autoReconnectEnabled) return;
+    _autoReconnectEnabled = true;
+
+    final log = LogService.instance;
+
+    _networkMonitor.onNetworkRestored = () {
+      final connectionProvider = _ref.read(connectionNotifierProvider);
+      if (!connectionProvider.initialized) {
+        log.info('Network restored - triggering reconnection',
+            source: 'Network');
+        // Use retry logic for robust reconnection
+        connectWithRetry();
+      } else if (!connectionProvider.networkStatus.bootstrapConnected) {
+        log.info('Network restored - re-registering with bootstrap',
+            source: 'Network');
+        // Already initialized but lost bootstrap connection
+        connectWithRetry();
+      } else {
+        log.debug('Network restored but already connected', source: 'Network');
+      }
+    };
+
+    _networkMonitor.startMonitoring();
+    log.info('Network monitor enabled for auto-reconnect', source: 'Network');
+  }
+
+  /// Stop network monitoring
+  void _stopNetworkMonitor() {
+    _networkMonitor.onNetworkRestored = null;
+    _networkMonitor.stopMonitoring();
+    _autoReconnectEnabled = false;
+  }
+
   void disconnect() {
+    // Stop network monitor
+    _stopNetworkMonitor();
+
     // Notify queue we're disconnecting
     _ref.read(queueNotifierProvider).onDisconnected();
 
     // Cancel ACK timeout subscription
     _ackTimeoutSubscription?.cancel();
     _ackTimeoutSubscription = null;
+    _callSignalSubscription?.cancel();
+    _callSignalSubscription = null;
+    _callSignalFragments.clear();
+    _ref.read(callNotifierProvider).onSendSignal = null;
 
     ChatService.instance.disconnectProvider();
     GroupService.instance.disconnectProvider();
     final fileProvider = _ref.read(fileNotifierProvider);
-    fileProvider.onFileReceived = null;  // Clear callback before shutdown
+    fileProvider.onFileReceived = null; // Clear callback before shutdown
+    fileProvider.onFileRequest = null;
     fileProvider.shutdown();
     _ref.read(groupFFINotifierProvider).shutdown();
     _ref.read(chatNotifierProvider).shutdown();

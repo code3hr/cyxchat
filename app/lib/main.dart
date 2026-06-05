@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -5,14 +6,21 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:cyxchat/screens/home_screen.dart';
+import 'package:cyxchat/screens/chat_screen.dart';
+import 'package:cyxchat/screens/group_chat_screen.dart';
 import 'package:cyxchat/screens/onboarding_screen.dart';
+import 'package:cyxchat/screens/incoming_call_screen.dart';
+import 'package:cyxchat/services/chat_service.dart';
 import 'package:cyxchat/services/identity_service.dart';
 import 'package:cyxchat/services/log_service.dart';
 import 'package:cyxchat/providers/identity_provider.dart';
 import 'package:cyxchat/providers/settings_provider.dart';
+import 'package:cyxchat/providers/call_provider.dart';
 import 'package:cyxchat/theme/app_themes.dart';
 import 'package:cyxchat/widgets/app_lock_wrapper.dart';
 import 'package:cyxchat/services/screen_security_service.dart';
+import 'package:cyxchat/services/notification_service.dart';
+import 'package:cyxchat/widgets/notification_wrapper.dart';
 
 // App colors
 class AppColors {
@@ -49,6 +57,32 @@ class AppColors {
   static const info = Color(0xFF00D9FF);
 }
 
+final GlobalKey<NavigatorState> appNavigatorKey = GlobalKey<NavigatorState>();
+String? _pendingNotificationConversationId;
+
+Future<void> _openConversationFromNotification(String conversationId) async {
+  final navigator = appNavigatorKey.currentState;
+  if (navigator == null) return;
+
+  _pendingNotificationConversationId = null;
+  final conversation = await ChatService.instance.getConversation(conversationId);
+  final targetId = conversation?.groupId ?? conversationId;
+
+  if (conversation?.isGroup == true) {
+    navigator.push(
+      MaterialPageRoute(
+        builder: (_) => GroupChatScreen(groupId: targetId),
+      ),
+    );
+  } else {
+    navigator.push(
+      MaterialPageRoute(
+        builder: (_) => ChatScreen(conversationId: conversationId),
+      ),
+    );
+  }
+}
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -69,6 +103,11 @@ void main() async {
 
   // Initialize services
   await IdentityService.instance.initialize();
+  await NotificationService.instance.initialize();
+  NotificationService.instance.onNotificationTap = (conversationId) {
+    _pendingNotificationConversationId = conversationId;
+    unawaited(_openConversationFromNotification(conversationId));
+  };
 
   runApp(
     const ProviderScope(
@@ -84,11 +123,15 @@ class CyxChatApp extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final identityAsync = ref.watch(identityProvider);
     final settings = ref.watch(settingsProvider);
+    NotificationService.instance.setPreviewLevel(settings.notificationPreview);
 
     // Apply screen security setting (Android only)
     ref.listen<AppSettings>(settingsProvider, (previous, next) {
       if (previous?.screenSecurityEnabled != next.screenSecurityEnabled) {
         ScreenSecurityService.instance.setSecureFlag(next.screenSecurityEnabled);
+      }
+      if (previous?.notificationPreview != next.notificationPreview) {
+        NotificationService.instance.setPreviewLevel(next.notificationPreview);
       }
     });
 
@@ -106,7 +149,9 @@ class CyxChatApp extends ConsumerWidget {
     // Determine if using light theme for system UI style
     final isLightTheme = settings.theme == AppTheme.light;
 
-    return MaterialApp(
+    return NotificationWrapper(
+      child: MaterialApp(
+      navigatorKey: appNavigatorKey,
       title: 'CyxChat',
       debugShowCheckedModeBanner: false,
       theme: themeData,
@@ -124,6 +169,18 @@ class CyxChatApp extends ConsumerWidget {
       },
       home: Builder(
         builder: (context) {
+          if (_pendingNotificationConversationId != null) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (_pendingNotificationConversationId != null) {
+                unawaited(
+                  _openConversationFromNotification(
+                    _pendingNotificationConversationId!,
+                  ),
+                );
+              }
+            });
+          }
+
           // Update system UI style based on theme
           SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
             statusBarColor: Colors.transparent,
@@ -134,14 +191,75 @@ class CyxChatApp extends ConsumerWidget {
 
           return identityAsync.when(
             data: (identity) => identity != null
-                ? const AppLockWrapper(child: HomeScreen())
+                ? const _CallOverlay(child: AppLockWrapper(child: HomeScreen()))
                 : const OnboardingScreen(),
             loading: () => _SplashScreen(themeData: themeData),
             error: (error, stack) => _ErrorScreen(error: error.toString(), themeData: themeData),
           );
         },
       ),
+    ),
     );
+  }
+}
+
+class _CallOverlay extends ConsumerStatefulWidget {
+  final Widget child;
+
+  const _CallOverlay({required this.child});
+
+  @override
+  ConsumerState<_CallOverlay> createState() => _CallOverlayState();
+}
+
+class _CallOverlayState extends ConsumerState<_CallOverlay> {
+  bool _incomingVisible = false;
+
+  @override
+  void initState() {
+    super.initState();
+    ref.listen<CallState>(
+      callNotifierProvider.select((p) => p.state),
+      (previous, next) {
+        if (!mounted) return;
+        if (next.status == CallStatus.incoming) {
+          _showIncoming(next);
+        }
+      },
+    );
+  }
+
+  void _showIncoming(CallState state) {
+    if (_incomingVisible) return;
+    final peerId = state.peerId;
+    if (peerId == null || peerId.isEmpty) return;
+    _incomingVisible = true;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      Navigator.of(context)
+          .push(
+            MaterialPageRoute(
+              builder: (context) => IncomingCallScreen(
+                peerId: peerId,
+                peerName: state.peerName,
+                isVideo: state.isVideo,
+              ),
+            ),
+          )
+          .whenComplete(() {
+        if (mounted) {
+          setState(() => _incomingVisible = false);
+        } else {
+          _incomingVisible = false;
+        }
+      });
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return widget.child;
   }
 }
 
