@@ -17,6 +17,7 @@ This file tracks the core chat-app readiness work. Keep each fix small, auditabl
 - [x] Direct chat metadata safety: file/audio metadata is JSON-encoded instead of hand-built strings.
 - [x] Direct chat duplicate handling: removed content-hash dedup that could suppress legitimate repeated messages.
 - [x] Direct chat live updates: ACK/edit/delete DB updates now emit changed messages to the UI stream.
+- [x] Network bootstrap: FileProvider transfer completion/error callbacks are wired to ChatService status updates.
 - [x] Calls: outgoing unanswered calls timeout with `noAnswer`.
 - [x] Calls: incoming unanswered calls expire.
 - [x] Calls: permission-denied accept path rejects the caller instead of leaving them waiting.
@@ -28,7 +29,6 @@ This file tracks the core chat-app readiness work. Keep each fix small, auditabl
    - Add a repeatable command note once the working command is found.
 
 2. Media persistence
-   - Wire FileProvider transfer completion/error callbacks from the network bootstrap without mixing unrelated network-provider changes.
    - Store sent and received file/voice bytes under app storage instead of memory-only maps.
    - Save local paths in message metadata.
    - Keep playback/download working after app restart.

@@ -356,6 +356,12 @@ class ConnectionActions {
           fileId: fileId,
         );
       };
+      fileProvider.onTransferComplete = (fileId) {
+        ChatService.instance.handleFileTransferCompleted(fileId);
+      };
+      fileProvider.onTransferError = (fileId) {
+        ChatService.instance.handleFileTransferFailed(fileId);
+      };
       // Apply direct file transfer setting
       fileProvider.setDirectMode(settings.directFileTransfer);
 
@@ -654,6 +660,8 @@ class ConnectionActions {
     final fileProvider = _ref.read(fileNotifierProvider);
     fileProvider.onFileReceived = null; // Clear callback before shutdown
     fileProvider.onFileRequest = null;
+    fileProvider.onTransferComplete = null;
+    fileProvider.onTransferError = null;
     fileProvider.shutdown();
     _ref.read(groupFFINotifierProvider).shutdown();
     _ref.read(chatNotifierProvider).shutdown();
