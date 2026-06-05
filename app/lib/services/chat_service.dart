@@ -107,7 +107,30 @@ class ChatService {
     _deleteSubscription = provider.deleteStream.listen(_handleDelete);
     _editSubscription = provider.editStream.listen(_handleEdit);
 
+    unawaited(_restoreNativeMessageMappings());
+
     debugPrint('ChatService: Connected to ChatProvider');
+  }
+
+  Future<void> _restoreNativeMessageMappings() async {
+    try {
+      final db = await DatabaseService.instance.database;
+      final rows = await db.query(
+        'messages',
+        columns: ['id', 'native_msg_id'],
+        where: 'native_msg_id IS NOT NULL',
+      );
+
+      for (final row in rows) {
+        final localId = row['id'] as String;
+        final nativeMsgId = row['native_msg_id'] as String;
+        _nativeMsgIdToLocalId[nativeMsgId] = localId;
+        _localIdToNativeMsgId[localId] = nativeMsgId;
+      }
+      debugPrint('ChatService: Restored ${rows.length} native message IDs');
+    } catch (e) {
+      debugPrint('ChatService: Failed to restore native message IDs: $e');
+    }
   }
 
   /// Disconnect from ChatProvider
@@ -338,7 +361,10 @@ class ChatService {
         resultMessage = message.copyWith(status: MessageStatus.sent);
         await db.update(
           'messages',
-          {'status': MessageStatus.sent.index},
+          {
+            'status': MessageStatus.sent.index,
+            'native_msg_id': result.nativeMsgId!,
+          },
           where: 'id = ?',
           whereArgs: [message.id],
         );
@@ -895,6 +921,7 @@ class ChatService {
 
       // Save to database (transaction ensures atomicity)
       final messageMap = message.toMap();
+      messageMap['native_msg_id'] = received.msgId;
       if (disappearsAt != null) {
         messageMap['disappears_at'] = disappearsAt;
       }
@@ -1169,7 +1196,10 @@ class ChatService {
 
         await db.update(
           'messages',
-          {'status': MessageStatus.sent.index},
+          {
+            'status': MessageStatus.sent.index,
+            'native_msg_id': result.nativeMsgId!,
+          },
           where: 'id = ?',
           whereArgs: [messageId],
         );
@@ -1359,7 +1389,10 @@ class ChatService {
       // Update status to sent
       await db.update(
         'messages',
-        {'status': MessageStatus.sent.index},
+        {
+          'status': MessageStatus.sent.index,
+          'native_msg_id': result.nativeMsgId!,
+        },
         where: 'id = ?',
         whereArgs: [messageId],
       );

@@ -27,7 +27,7 @@ class DatabaseService {
 
     return await openDatabase(
       path,
-      version: 12,
+      version: 13,
       onCreate: _createDatabase,
       onUpgrade: _upgradeDatabase,
     );
@@ -90,6 +90,7 @@ class DatabaseService {
         content TEXT NOT NULL,
         timestamp INTEGER NOT NULL,
         status INTEGER DEFAULT 0,
+        native_msg_id TEXT,
         reply_to_id TEXT,
         is_outgoing INTEGER NOT NULL,
         is_edited INTEGER DEFAULT 0,
@@ -110,6 +111,9 @@ class DatabaseService {
     // Create indexes
     await db.execute(
       'CREATE INDEX idx_messages_conversation ON messages(conversation_id, timestamp DESC)',
+    );
+    await db.execute(
+      'CREATE INDEX idx_messages_native_msg_id ON messages(native_msg_id) WHERE native_msg_id IS NOT NULL',
     );
     await db.execute(
       'CREATE INDEX idx_conversations_activity ON conversations(last_activity_at DESC)',
@@ -504,6 +508,14 @@ class DatabaseService {
           FOREIGN KEY (group_id) REFERENCES groups(id)
         )
       ''');
+    }
+
+    if (oldVersion < 13) {
+      // Version 13: Persist native direct-message IDs for ACK/read/edit/delete mapping.
+      await db.execute('ALTER TABLE messages ADD COLUMN native_msg_id TEXT');
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_messages_native_msg_id ON messages(native_msg_id) WHERE native_msg_id IS NOT NULL'
+      );
     }
   }
 

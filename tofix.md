@@ -24,6 +24,7 @@ This file tracks the core chat-app readiness work. Keep each fix small, auditabl
 - [x] Media persistence: sent/received file and voice bytes are stored in app support storage, message metadata saves `localPath`, and playback/save can recover after restart.
 - [x] Non-text retry: failed file/voice messages retry from persisted local media, start a replacement transfer, and update the existing message with the new transfer ID.
 - [x] Read receipts: marking a direct conversation read sends privacy-aware read receipts for unread inbound messages with known native IDs.
+- [x] Native message ID persistence: direct text native IDs are stored with messages and restored on chat service connect for ACK/read/edit/delete/reply mapping.
 
 ## Next Fixes
 
@@ -38,11 +39,10 @@ This file tracks the core chat-app readiness work. Keep each fix small, auditabl
    - Consider a clearer UI label for media retries while the replacement transfer is still in progress.
 
 4. Read receipts
-   - Persist inbound native IDs so read receipts still work after app restart.
+   - Add retry/backoff if sending a read receipt fails while the peer is temporarily unreachable.
 
 5. Native message ID persistence
-   - Persist native message IDs with local messages.
-   - Restore ACK/edit/delete/reply mapping after app restart.
+   - Audit native ID persistence for direct media and group messages once their native ACK paths are surfaced.
 
 6. Call signaling hardening
    - Buffer early ICE candidates until the peer connection and remote description are ready.
