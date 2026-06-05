@@ -25,6 +25,7 @@ This file tracks the core chat-app readiness work. Keep each fix small, auditabl
 - [x] Non-text retry: failed file/voice messages retry from persisted local media, start a replacement transfer, and update the existing message with the new transfer ID.
 - [x] Read receipts: marking a direct conversation read sends privacy-aware read receipts for unread inbound messages with known native IDs.
 - [x] Native message ID persistence: direct text native IDs are stored with messages and restored on chat service connect for ACK/read/edit/delete/reply mapping.
+- [x] Call signaling hardening: early remote ICE candidates are buffered until remote SDP is ready, and stale call signals are ignored unless they match the active peer/state.
 
 ## Next Fixes
 
@@ -44,19 +45,15 @@ This file tracks the core chat-app readiness work. Keep each fix small, auditabl
 5. Native message ID persistence
    - Audit native ID persistence for direct media and group messages once their native ACK paths are surfaced.
 
-6. Call signaling hardening
-   - Buffer early ICE candidates until the peer connection and remote description are ready.
-   - Add call state validation for stale signals after timeout/end.
-
-7. Group message status
+6. Group message status
    - Surface native group ACK state in Dart.
    - Update outgoing group message delivery status from group ACK callbacks.
 
-8. Group media and voice audit
+7. Group media and voice audit
    - Check whether group media has the same persistence/status/retry gaps as direct media.
    - Fix with shared helpers only if it reduces real duplication.
 
-9. Production verification
+8. Production verification
    - Run app-level analyzer/build.
    - Run C tests where native protocol behavior changed.
    - Add focused Dart tests for message status and media metadata when test harness is stable.

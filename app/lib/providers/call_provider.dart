@@ -105,6 +105,8 @@ class CallProvider extends ChangeNotifier {
   Timer? _durationTimer;
   Timer? _callTimeoutTimer;
   DateTime? _callStartTime;
+  final List<RTCIceCandidate> _pendingRemoteIceCandidates = [];
+  bool _remoteDescriptionSet = false;
 
   // Callbacks for signaling (set by network layer)
   void Function(String peerId, int type, String payload)? onSendSignal;
@@ -138,6 +140,7 @@ class CallProvider extends ChangeNotifier {
 
   static const Duration _outgoingCallTimeout = Duration(seconds: 45);
   static const Duration _incomingCallTimeout = Duration(seconds: 60);
+  static const int _maxPendingRemoteIceCandidates = 32;
 
   CallState get state => _state;
   MediaStream? get localStream => _localStream;
@@ -184,6 +187,7 @@ class CallProvider extends ChangeNotifier {
 
     debugPrint(
         'CallProvider: Starting ${video ? "video" : "audio"} call to $peerId');
+    _resetPendingSignaling();
 
     // Check permissions
     if (!await checkPermissions(video: video)) {
@@ -242,6 +246,11 @@ class CallProvider extends ChangeNotifier {
     required String type,
     required bool video,
   }) async {
+    if (_state.status == CallStatus.ended) {
+      debugPrint('CallProvider: Ignoring offer from $peerId after call end');
+      return;
+    }
+
     if (_state.isActive) {
       // Already in a call, send busy signal
       _sendSignal(peerId, CallSignalingType.busy, '');
@@ -250,6 +259,7 @@ class CallProvider extends ChangeNotifier {
 
     debugPrint(
         'CallProvider: Received ${video ? "video" : "audio"} call offer from $peerId');
+    _resetPendingSignaling();
 
     _state = CallState(
       status: CallStatus.incoming,
@@ -288,7 +298,7 @@ class CallProvider extends ChangeNotifier {
     if (!await checkPermissions(video: video)) {
       _cancelCallTimeout();
       _sendSignal(peerId, CallSignalingType.reject, '');
-      _pendingOffer = null;
+      _resetPendingSignaling();
       onCallEnded?.call();
       return false;
     }
@@ -306,7 +316,9 @@ class CallProvider extends ChangeNotifier {
 
       // Set remote description (the offer)
       await _peerConnection!.setRemoteDescription(_pendingOffer!);
+      _remoteDescriptionSet = true;
       _pendingOffer = null;
+      await _flushPendingRemoteIceCandidates();
 
       // Create and send answer
       final answer = await _peerConnection!.createAnswer();
@@ -346,7 +358,7 @@ class CallProvider extends ChangeNotifier {
 
     _sendSignal(peerId, CallSignalingType.reject, '');
 
-    _pendingOffer = null;
+    _resetPendingSignaling();
     _state = const CallState(status: CallStatus.idle);
     notifyListeners();
     onCallEnded?.call();
@@ -358,8 +370,7 @@ class CallProvider extends ChangeNotifier {
     required String sdp,
     required String type,
   }) async {
-    if (_state.status != CallStatus.outgoing || _state.peerId != peerId) {
-      debugPrint('CallProvider: Unexpected answer from $peerId');
+    if (!_isCurrentCallSignal(peerId, const [CallStatus.outgoing])) {
       return;
     }
 
@@ -370,9 +381,17 @@ class CallProvider extends ChangeNotifier {
       _state = _state.copyWith(status: CallStatus.connecting);
       notifyListeners();
 
+      if (_peerConnection == null) {
+        debugPrint('CallProvider: Missing peer connection for answer');
+        await endCall(reason: CallEndReason.error);
+        return;
+      }
+
       await _peerConnection!.setRemoteDescription(
         RTCSessionDescription(sdp, type),
       );
+      _remoteDescriptionSet = true;
+      await _flushPendingRemoteIceCandidates();
     } catch (e) {
       debugPrint('CallProvider: Failed to set remote description: $e');
       await endCall(reason: CallEndReason.error);
@@ -386,17 +405,29 @@ class CallProvider extends ChangeNotifier {
     required String sdpMid,
     required int sdpMLineIndex,
   }) async {
-    if (_peerConnection == null) {
-      debugPrint('CallProvider: No peer connection for ICE candidate');
+    if (!_isCurrentCallSignal(peerId, const [
+      CallStatus.incoming,
+      CallStatus.outgoing,
+      CallStatus.connecting,
+      CallStatus.connected,
+      CallStatus.reconnecting,
+    ])) {
+      return;
+    }
+
+    final iceCandidate = RTCIceCandidate(
+      candidate,
+      sdpMid,
+      sdpMLineIndex,
+    );
+
+    if (_peerConnection == null || !_remoteDescriptionSet) {
+      _bufferRemoteIceCandidate(iceCandidate);
       return;
     }
 
     try {
-      await _peerConnection!.addCandidate(RTCIceCandidate(
-        candidate,
-        sdpMid,
-        sdpMLineIndex,
-      ));
+      await _addRemoteIceCandidate(iceCandidate);
     } catch (e) {
       debugPrint('CallProvider: Failed to add ICE candidate: $e');
     }
@@ -405,7 +436,13 @@ class CallProvider extends ChangeNotifier {
   /// Handle call end from remote
   void handleCallEnd(
       {required String peerId, CallEndReason reason = CallEndReason.normal}) {
-    if (_state.peerId != peerId) {
+    if (!_isCurrentCallSignal(peerId, const [
+      CallStatus.incoming,
+      CallStatus.outgoing,
+      CallStatus.connecting,
+      CallStatus.connected,
+      CallStatus.reconnecting,
+    ])) {
       return;
     }
 
@@ -415,7 +452,7 @@ class CallProvider extends ChangeNotifier {
 
   /// Handle call rejection
   void handleReject({required String peerId}) {
-    if (_state.peerId != peerId || _state.status != CallStatus.outgoing) {
+    if (!_isCurrentCallSignal(peerId, const [CallStatus.outgoing])) {
       return;
     }
 
@@ -425,7 +462,7 @@ class CallProvider extends ChangeNotifier {
 
   /// Handle busy signal
   void handleBusy({required String peerId}) {
-    if (_state.peerId != peerId || _state.status != CallStatus.outgoing) {
+    if (!_isCurrentCallSignal(peerId, const [CallStatus.outgoing])) {
       return;
     }
 
@@ -560,6 +597,10 @@ class CallProvider extends ChangeNotifier {
     // Handle connection state
     _peerConnection!.onConnectionState = (state) {
       debugPrint('CallProvider: Connection state: $state');
+      if (!_state.isActive || _peerConnection == null) {
+        return;
+      }
+
       switch (state) {
         case RTCPeerConnectionState.RTCPeerConnectionStateConnected:
           _onConnected();
@@ -578,6 +619,10 @@ class CallProvider extends ChangeNotifier {
   }
 
   void _onConnected() {
+    if (!_state.isActive) {
+      return;
+    }
+
     debugPrint('CallProvider: Call connected');
     _cancelCallTimeout();
     _callStartTime = DateTime.now();
@@ -619,12 +664,61 @@ class CallProvider extends ChangeNotifier {
     _callTimeoutTimer = null;
   }
 
+  bool _isCurrentCallSignal(String peerId, List<CallStatus> allowedStatuses) {
+    if (_state.peerId == peerId && allowedStatuses.contains(_state.status)) {
+      return true;
+    }
+
+    debugPrint(
+      'CallProvider: Ignoring stale signal from $peerId while '
+      '${_state.status} with peer ${_state.peerId}',
+    );
+    return false;
+  }
+
+  void _bufferRemoteIceCandidate(RTCIceCandidate candidate) {
+    if (_pendingRemoteIceCandidates.length >= _maxPendingRemoteIceCandidates) {
+      _pendingRemoteIceCandidates.removeAt(0);
+    }
+
+    _pendingRemoteIceCandidates.add(candidate);
+    debugPrint(
+      'CallProvider: Buffered remote ICE candidate '
+      '(${_pendingRemoteIceCandidates.length} pending)',
+    );
+  }
+
+  Future<void> _flushPendingRemoteIceCandidates() async {
+    if (_peerConnection == null ||
+        !_remoteDescriptionSet ||
+        _pendingRemoteIceCandidates.isEmpty) {
+      return;
+    }
+
+    final pending = List<RTCIceCandidate>.from(_pendingRemoteIceCandidates);
+    _pendingRemoteIceCandidates.clear();
+    for (final candidate in pending) {
+      await _addRemoteIceCandidate(candidate);
+    }
+  }
+
+  Future<void> _addRemoteIceCandidate(RTCIceCandidate candidate) async {
+    await _peerConnection!.addCandidate(candidate);
+  }
+
+  void _resetPendingSignaling() {
+    _pendingOffer = null;
+    _pendingVideo = false;
+    _pendingRemoteIceCandidates.clear();
+    _remoteDescriptionSet = false;
+  }
+
   Future<void> _cleanup() async {
     _durationTimer?.cancel();
     _durationTimer = null;
     _cancelCallTimeout();
     _callStartTime = null;
-    _pendingOffer = null;
+    _resetPendingSignaling();
 
     if (_localStream != null) {
       for (final track in _localStream!.getTracks()) {
@@ -639,9 +733,10 @@ class CallProvider extends ChangeNotifier {
       _remoteStream = null;
     }
 
-    if (_peerConnection != null) {
-      await _peerConnection!.close();
-      _peerConnection = null;
+    final peerConnection = _peerConnection;
+    _peerConnection = null;
+    if (peerConnection != null) {
+      await peerConnection.close();
     }
   }
 
