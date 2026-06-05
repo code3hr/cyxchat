@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/models.dart';
 import '../services/chat_service.dart';
@@ -72,7 +74,8 @@ class ChatActions {
     _ref.invalidate(messagesProvider(conversationId));
   }
 
-  Future<void> editMessage(String messageId, String conversationId, String newContent) async {
+  Future<void> editMessage(
+      String messageId, String conversationId, String newContent) async {
     await ChatService.instance.editMessage(messageId, newContent);
     _ref.invalidate(messagesProvider(conversationId));
   }
@@ -84,10 +87,11 @@ class ChatActions {
     required String fileSize,
     String? fileId,
   }) async {
-    // Store file info as "filename|size|fileId" in content
-    final content = fileId != null
-        ? '$filename|$fileSize|$fileId'
-        : '$filename|$fileSize';
+    final content = jsonEncode({
+      'filename': filename,
+      'size': fileSize,
+      if (fileId != null) 'fileId': fileId,
+    });
     final message = await ChatService.instance.sendMessage(
       conversationId: conversationId,
       content: content,
@@ -105,8 +109,11 @@ class ChatActions {
     required int duration,
     required String filename,
   }) async {
-    // Store audio info as JSON: {"fileId":"xxx","duration":30,"filename":"voice.m4a"}
-    final content = '{"fileId":"$fileId","duration":$duration,"filename":"$filename"}';
+    final content = jsonEncode({
+      'fileId': fileId,
+      'duration': duration,
+      'filename': filename,
+    });
     final message = await ChatService.instance.sendMessage(
       conversationId: conversationId,
       content: content,
@@ -133,15 +140,18 @@ class ChatActions {
   }
 
   /// Update conversation display name (alias)
-  Future<void> updateConversationDisplayName(String conversationId, String displayName) async {
-    await ChatService.instance.updateConversationDisplayName(conversationId, displayName);
+  Future<void> updateConversationDisplayName(
+      String conversationId, String displayName) async {
+    await ChatService.instance
+        .updateConversationDisplayName(conversationId, displayName);
     _ref.invalidate(conversationProvider(conversationId));
     _ref.invalidate(conversationsProvider);
   }
 
   /// Retry sending a failed message
   Future<bool> retryMessage(String messageId, String conversationId) async {
-    final success = await ChatService.instance.retryMessage(messageId, conversationId);
+    final success =
+        await ChatService.instance.retryMessage(messageId, conversationId);
     _ref.invalidate(messagesProvider(conversationId));
     return success;
   }

@@ -88,8 +88,12 @@ class FileProvider extends ChangeNotifier {
 
   /// Callback when a file is fully received
   /// Parameters: fromPeerId, filename, fileSize (formatted), fileId
-  void Function(String fromPeerId, String filename, String fileSize, String fileId)? onFileReceived;
+  void Function(
+          String fromPeerId, String filename, String fileSize, String fileId)?
+      onFileReceived;
   void Function(FileRequest request)? onFileRequest;
+  void Function(String fileId)? onTransferComplete;
+  void Function(String fileId)? onTransferError;
 
   // Stream controllers for events
   final _requestController = StreamController<FileRequest>.broadcast();
@@ -141,7 +145,8 @@ class FileProvider extends ChangeNotifier {
 
     final result = _bindings.fileSetDirectMode(enabled ? 1 : 0);
     if (result == 0) {
-      debugPrint('FileProvider: Direct mode ${enabled ? "enabled" : "disabled"}');
+      debugPrint(
+          'FileProvider: Direct mode ${enabled ? "enabled" : "disabled"}');
     } else {
       debugPrint('FileProvider: Failed to set direct mode: $result');
     }
@@ -157,7 +162,8 @@ class FileProvider extends ChangeNotifier {
   void _setupCallbacks() {
     // Handle incoming file request
     _bindings.onFileRequest = (fromPeerId, fileId, filename, mimeType, size) {
-      debugPrint('FileProvider: Incoming file request from $fromPeerId: $filename ($size bytes)');
+      debugPrint(
+          'FileProvider: Incoming file request from $fromPeerId: $filename ($size bytes)');
 
       // Add to pending requests
       final request = FileRequest(
@@ -170,7 +176,7 @@ class FileProvider extends ChangeNotifier {
       );
       _pendingRequests.removeWhere((r) => r.fileId == fileId);
       _pendingRequests.add(request);
-      _pendingRequestsById[fileId] = request;  // Also store by ID for lookup
+      _pendingRequestsById[fileId] = request; // Also store by ID for lookup
       _requestController.add(request);
 
       // Calculate chunk size based on mode (for progress estimation)
@@ -188,7 +194,7 @@ class FileProvider extends ChangeNotifier {
         chunksDone: 0,
         chunksTotal: (size / chunkSize).ceil(),
         peerId: fromPeerId,
-        isOutgoing: false,  // Incoming file
+        isOutgoing: false, // Incoming file
         startedAt: DateTime.now(),
       );
 
@@ -198,11 +204,13 @@ class FileProvider extends ChangeNotifier {
 
     // Handle file transfer complete
     _bindings.onFileComplete = (fileId, data) {
-      debugPrint('FileProvider: File transfer complete: $fileId (${data.length} bytes)');
+      debugPrint(
+          'FileProvider: File transfer complete: $fileId (${data.length} bytes)');
 
       // Find the request (check both maps)
       FileRequest? request = _pendingRequestsById.remove(fileId);
-      final requestIndex = _pendingRequests.indexWhere((r) => r.fileId == fileId);
+      final requestIndex =
+          _pendingRequests.indexWhere((r) => r.fileId == fileId);
       if (requestIndex >= 0) {
         request ??= _pendingRequests[requestIndex];
         _pendingRequests.removeAt(requestIndex);
@@ -229,13 +237,16 @@ class FileProvider extends ChangeNotifier {
       }
 
       _completeController.add(fileId);
+      onTransferComplete?.call(fileId);
       notifyListeners();
 
       // Notify callback for incoming files
       if (request != null) {
-        debugPrint('FileProvider: Received file "${request.filename}" from ${request.fromPeerId}');
+        debugPrint(
+            'FileProvider: Received file "${request.filename}" from ${request.fromPeerId}');
         final formattedSize = _bindings.fileFormatSize(data.length);
-        onFileReceived?.call(request.fromPeerId, request.filename, formattedSize, fileId);
+        onFileReceived?.call(
+            request.fromPeerId, request.filename, formattedSize, fileId);
       }
     };
 
@@ -287,6 +298,7 @@ class FileProvider extends ChangeNotifier {
       }
 
       _errorController.add(fileId);
+      onTransferError?.call(fileId);
       notifyListeners();
     };
   }
@@ -300,6 +312,8 @@ class FileProvider extends ChangeNotifier {
     _bindings.onFileProgress = null;
     _bindings.onFileError = null;
     onFileRequest = null;
+    onTransferComplete = null;
+    onTransferError = null;
     _bindings.fileCtxDestroy();
     _initialized = false;
     _transfers.clear();
@@ -341,7 +355,8 @@ class FileProvider extends ChangeNotifier {
     String? mimeType,
   }) async {
     if (!_initialized) {
-      return FileSendResult(success: false, error: 'File provider not initialized');
+      return FileSendResult(
+          success: false, error: 'File provider not initialized');
     }
 
     // Check file size limit based on mode
@@ -353,12 +368,14 @@ class FileProvider extends ChangeNotifier {
       if (isDirectMode) {
         return FileSendResult(
           success: false,
-          error: 'File too large. Maximum size is ${maxSize ~/ (1024 * 1024)} GB',
+          error:
+              'File too large. Maximum size is ${maxSize ~/ (1024 * 1024)} GB',
         );
       } else {
         return FileSendResult(
           success: false,
-          error: 'File too large. Maximum size is ${maxSize ~/ 1024} KB. Enable "Fast File Transfer" in settings for larger files.',
+          error:
+              'File too large. Maximum size is ${maxSize ~/ 1024} KB. Enable "Fast File Transfer" in settings for larger files.',
         );
       }
     }
@@ -387,7 +404,8 @@ class FileProvider extends ChangeNotifier {
       );
 
       if (fileId != null) {
-        debugPrint('FileProvider: Sending file $filename (${data.length} bytes) to $toPeerId, direct=$isDirectMode');
+        debugPrint(
+            'FileProvider: Sending file $filename (${data.length} bytes) to $toPeerId, direct=$isDirectMode');
 
         // Calculate chunk count based on mode
         final chunkSize = isDirectMode
@@ -540,7 +558,9 @@ class FileProvider extends ChangeNotifier {
           filename: transfer.filename,
           mimeType: transfer.mimeType,
           size: transfer.size,
-          state: transfer.isOutgoing ? CyxChatFileState.sending : CyxChatFileState.receiving,
+          state: transfer.isOutgoing
+              ? CyxChatFileState.sending
+              : CyxChatFileState.receiving,
           chunksDone: transfer.chunksDone,
           chunksTotal: transfer.chunksTotal,
           peerId: transfer.peerId,
@@ -605,11 +625,11 @@ class FileActions {
     String? mimeType,
   }) {
     return _ref.read(fileNotifierProvider).sendFile(
-      toPeerId: toPeerId,
-      filename: filename,
-      data: data,
-      mimeType: mimeType,
-    );
+          toPeerId: toPeerId,
+          filename: filename,
+          data: data,
+          mimeType: mimeType,
+        );
   }
 
   /// Accept incoming file

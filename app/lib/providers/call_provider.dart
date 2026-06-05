@@ -8,23 +8,23 @@ import 'package:permission_handler/permission_handler.dart';
 /// Call status states
 enum CallStatus {
   idle,
-  outgoing,     // Calling, waiting for answer
-  incoming,     // Receiving call
-  connecting,   // Setting up WebRTC
-  connected,    // Call active
+  outgoing, // Calling, waiting for answer
+  incoming, // Receiving call
+  connecting, // Setting up WebRTC
+  connected, // Call active
   reconnecting, // Reconnecting after disconnect
-  ended,        // Call ended normally
-  failed,       // Call failed
+  ended, // Call ended normally
+  failed, // Call failed
 }
 
 /// Call end reason
 enum CallEndReason {
-  normal,       // Normal hangup
-  rejected,     // Callee rejected
-  busy,         // Callee busy
-  noAnswer,     // No answer (timeout)
+  normal, // Normal hangup
+  rejected, // Callee rejected
+  busy, // Callee busy
+  noAnswer, // No answer (timeout)
   networkError, // Network issue
-  error,        // Other error
+  error, // Other error
 }
 
 /// Call state
@@ -79,7 +79,8 @@ class CallState {
     );
   }
 
-  bool get isActive => status == CallStatus.connected ||
+  bool get isActive =>
+      status == CallStatus.connected ||
       status == CallStatus.connecting ||
       status == CallStatus.outgoing ||
       status == CallStatus.incoming;
@@ -102,7 +103,7 @@ class CallProvider extends ChangeNotifier {
   MediaStream? _localStream;
   MediaStream? _remoteStream;
   Timer? _durationTimer;
-  Timer? _ringtoneTimer;
+  Timer? _callTimeoutTimer;
   DateTime? _callStartTime;
 
   // Callbacks for signaling (set by network layer)
@@ -134,6 +135,9 @@ class CallProvider extends ChangeNotifier {
     'audio': true,
     'video': false,
   };
+
+  static const Duration _outgoingCallTimeout = Duration(seconds: 45);
+  static const Duration _incomingCallTimeout = Duration(seconds: 60);
 
   CallState get state => _state;
   MediaStream? get localStream => _localStream;
@@ -178,7 +182,8 @@ class CallProvider extends ChangeNotifier {
       return false;
     }
 
-    debugPrint('CallProvider: Starting ${video ? "video" : "audio"} call to $peerId');
+    debugPrint(
+        'CallProvider: Starting ${video ? "video" : "audio"} call to $peerId');
 
     // Check permissions
     if (!await checkPermissions(video: video)) {
@@ -205,11 +210,15 @@ class CallProvider extends ChangeNotifier {
       await _peerConnection!.setLocalDescription(offer);
 
       // Send offer via signaling
-      _sendSignal(peerId, CallSignalingType.offer, jsonEncode({
-        'sdp': offer.sdp,
-        'type': offer.type,
-        'video': video,
-      }));
+      _sendSignal(
+          peerId,
+          CallSignalingType.offer,
+          jsonEncode({
+            'sdp': offer.sdp,
+            'type': offer.type,
+            'video': video,
+          }));
+      _startCallTimeout(_outgoingCallTimeout, CallEndReason.noAnswer);
 
       debugPrint('CallProvider: Sent offer to $peerId');
       return true;
@@ -239,7 +248,8 @@ class CallProvider extends ChangeNotifier {
       return;
     }
 
-    debugPrint('CallProvider: Received ${video ? "video" : "audio"} call offer from $peerId');
+    debugPrint(
+        'CallProvider: Received ${video ? "video" : "audio"} call offer from $peerId');
 
     _state = CallState(
       status: CallStatus.incoming,
@@ -252,6 +262,7 @@ class CallProvider extends ChangeNotifier {
     // Store offer for later use when call is accepted
     _pendingOffer = RTCSessionDescription(sdp, type);
     _pendingVideo = video;
+    _startCallTimeout(_incomingCallTimeout, CallEndReason.noAnswer);
 
     // Notify UI of incoming call
     onIncomingCall?.call();
@@ -270,14 +281,19 @@ class CallProvider extends ChangeNotifier {
     final peerId = _state.peerId!;
     final video = _pendingVideo;
 
-    debugPrint('CallProvider: Accepting ${video ? "video" : "audio"} call from $peerId');
+    debugPrint(
+        'CallProvider: Accepting ${video ? "video" : "audio"} call from $peerId');
 
     // Check permissions
     if (!await checkPermissions(video: video)) {
-      await rejectCall();
+      _cancelCallTimeout();
+      _sendSignal(peerId, CallSignalingType.reject, '');
+      _pendingOffer = null;
+      onCallEnded?.call();
       return false;
     }
 
+    _cancelCallTimeout();
     _state = _state.copyWith(status: CallStatus.connecting);
     notifyListeners();
 
@@ -296,10 +312,13 @@ class CallProvider extends ChangeNotifier {
       final answer = await _peerConnection!.createAnswer();
       await _peerConnection!.setLocalDescription(answer);
 
-      _sendSignal(peerId, CallSignalingType.answer, jsonEncode({
-        'sdp': answer.sdp,
-        'type': answer.type,
-      }));
+      _sendSignal(
+          peerId,
+          CallSignalingType.answer,
+          jsonEncode({
+            'sdp': answer.sdp,
+            'type': answer.type,
+          }));
 
       debugPrint('CallProvider: Sent answer to $peerId');
       return true;
@@ -323,6 +342,7 @@ class CallProvider extends ChangeNotifier {
 
     final peerId = _state.peerId!;
     debugPrint('CallProvider: Rejecting call from $peerId');
+    _cancelCallTimeout();
 
     _sendSignal(peerId, CallSignalingType.reject, '');
 
@@ -346,6 +366,10 @@ class CallProvider extends ChangeNotifier {
     debugPrint('CallProvider: Received answer from $peerId');
 
     try {
+      _cancelCallTimeout();
+      _state = _state.copyWith(status: CallStatus.connecting);
+      notifyListeners();
+
       await _peerConnection!.setRemoteDescription(
         RTCSessionDescription(sdp, type),
       );
@@ -379,7 +403,8 @@ class CallProvider extends ChangeNotifier {
   }
 
   /// Handle call end from remote
-  void handleCallEnd({required String peerId, CallEndReason reason = CallEndReason.normal}) {
+  void handleCallEnd(
+      {required String peerId, CallEndReason reason = CallEndReason.normal}) {
     if (_state.peerId != peerId) {
       return;
     }
@@ -495,7 +520,8 @@ class CallProvider extends ChangeNotifier {
   Future<void> _createLocalStream(bool video) async {
     final constraints = video ? _mediaConstraints : _audioOnlyConstraints;
     _localStream = await navigator.mediaDevices.getUserMedia(constraints);
-    debugPrint('CallProvider: Created local stream with ${_localStream!.getTracks().length} tracks');
+    debugPrint(
+        'CallProvider: Created local stream with ${_localStream!.getTracks().length} tracks');
   }
 
   Future<void> _createPeerConnection() async {
@@ -520,11 +546,14 @@ class CallProvider extends ChangeNotifier {
     // Handle ICE candidates
     _peerConnection!.onIceCandidate = (candidate) {
       if (_state.peerId != null && candidate.candidate != null) {
-        _sendSignal(_state.peerId!, CallSignalingType.ice, jsonEncode({
-          'candidate': candidate.candidate,
-          'sdpMid': candidate.sdpMid,
-          'sdpMLineIndex': candidate.sdpMLineIndex,
-        }));
+        _sendSignal(
+            _state.peerId!,
+            CallSignalingType.ice,
+            jsonEncode({
+              'candidate': candidate.candidate,
+              'sdpMid': candidate.sdpMid,
+              'sdpMLineIndex': candidate.sdpMLineIndex,
+            }));
       }
     };
 
@@ -550,6 +579,7 @@ class CallProvider extends ChangeNotifier {
 
   void _onConnected() {
     debugPrint('CallProvider: Call connected');
+    _cancelCallTimeout();
     _callStartTime = DateTime.now();
     _state = _state.copyWith(status: CallStatus.connected);
     notifyListeners();
@@ -572,11 +602,27 @@ class CallProvider extends ChangeNotifier {
     onSendSignal?.call(peerId, type, payload);
   }
 
+  void _startCallTimeout(Duration timeout, CallEndReason reason) {
+    _callTimeoutTimer?.cancel();
+    _callTimeoutTimer = Timer(timeout, () {
+      if (!_state.isActive || _state.status == CallStatus.connected) return;
+      debugPrint('CallProvider: Call timed out: $reason');
+      if (_state.status == CallStatus.outgoing && _state.peerId != null) {
+        _sendSignal(_state.peerId!, CallSignalingType.end, '');
+      }
+      _endCallInternal(reason);
+    });
+  }
+
+  void _cancelCallTimeout() {
+    _callTimeoutTimer?.cancel();
+    _callTimeoutTimer = null;
+  }
+
   Future<void> _cleanup() async {
     _durationTimer?.cancel();
     _durationTimer = null;
-    _ringtoneTimer?.cancel();
-    _ringtoneTimer = null;
+    _cancelCallTimeout();
     _callStartTime = null;
     _pendingOffer = null;
 
@@ -627,7 +673,8 @@ class CallActions {
     String? peerName,
     bool video = false,
   }) {
-    return _provider.startCall(peerId: peerId, peerName: peerName, video: video);
+    return _provider.startCall(
+        peerId: peerId, peerName: peerName, video: video);
   }
 
   /// Accept incoming call

@@ -22,11 +22,6 @@ class ChatService {
   final Map<String, String> _nativeMsgIdToLocalId = {};
   final Map<String, String> _localIdToNativeMsgId = {};
 
-  // Deduplication: track recently received messages to prevent duplicates
-  // Key: "fromNodeId:contentHash", Value: timestamp of first receipt
-  final Map<String, DateTime> _recentlyReceived = {};
-  static const _dedupWindowMs = 30000; // 30 second dedup window
-
   // ChatProvider reference (set after initialization)
   ChatProvider? _chatProvider;
 
@@ -118,6 +113,19 @@ class ChatService {
   /// Emit a message to the stream (for other services to use)
   void emitMessage(Message message) {
     _messageController.add(message);
+  }
+
+  Future<void> _emitMessageById(String messageId) async {
+    final db = await DatabaseService.instance.database;
+    final rows = await db.query(
+      'messages',
+      where: 'id = ?',
+      whereArgs: [messageId],
+      limit: 1,
+    );
+    if (rows.isNotEmpty) {
+      _messageController.add(Message.fromMap(rows.first));
+    }
   }
 
   /// Get all conversations
@@ -340,10 +348,11 @@ class ChatService {
             'ChatService: Send failed, queued for retry: ${result.error}');
       }
     } else {
-      if (type == MessageType.file) {
-        // File messages are sent via FileProvider - mark as sending
+      if (type.isMedia) {
+        // Media/file messages are transferred by FileProvider. The chat row is
+        // local metadata and is completed by file transfer callbacks.
         resultMessage = message.copyWith(status: MessageStatus.sending);
-        debugPrint('ChatService: File message saved, transfer in progress');
+        debugPrint('ChatService: Media message saved, transfer in progress');
       } else if (conversation.peerId != null) {
         // No native chat available for text - mark as failed and enqueue
         resultMessage = message.copyWith(status: MessageStatus.failed);
@@ -541,6 +550,50 @@ class ChatService {
     debugPrint('ChatService: Received file "$filename" from $fromPeerId');
   }
 
+  /// Mark an outgoing file/media message complete once FileProvider finishes.
+  Future<void> handleFileTransferCompleted(String fileId) async {
+    final db = await DatabaseService.instance.database;
+    final rows = await db.query(
+      'messages',
+      where: 'is_outgoing = 1 AND content LIKE ?',
+      whereArgs: ['%$fileId%'],
+      limit: 1,
+    );
+    if (rows.isEmpty) return;
+
+    final message =
+        Message.fromMap(rows.first).copyWith(status: MessageStatus.delivered);
+    await db.update(
+      'messages',
+      {'status': MessageStatus.delivered.index},
+      where: 'id = ?',
+      whereArgs: [message.id],
+    );
+    _messageController.add(message);
+  }
+
+  /// Mark an outgoing file/media message failed when FileProvider reports error.
+  Future<void> handleFileTransferFailed(String fileId) async {
+    final db = await DatabaseService.instance.database;
+    final rows = await db.query(
+      'messages',
+      where: 'is_outgoing = 1 AND content LIKE ?',
+      whereArgs: ['%$fileId%'],
+      limit: 1,
+    );
+    if (rows.isEmpty) return;
+
+    final message =
+        Message.fromMap(rows.first).copyWith(status: MessageStatus.failed);
+    await db.update(
+      'messages',
+      {'status': MessageStatus.failed.index},
+      where: 'id = ?',
+      whereArgs: [message.id],
+    );
+    _messageController.add(message);
+  }
+
   /// Mark messages as read
   Future<void> markAsRead(String conversationId) async {
     final db = await DatabaseService.instance.database;
@@ -582,6 +635,7 @@ class ChatService {
       where: 'id = ?',
       whereArgs: [messageId],
     );
+    await _emitMessageById(messageId);
 
     // Send delete notification via native chat
     if (_chatProvider != null && conv.peerId != null) {
@@ -617,6 +671,7 @@ class ChatService {
       where: 'id = ?',
       whereArgs: [messageId],
     );
+    await _emitMessageById(messageId);
 
     // Send edit via native chat
     if (_chatProvider != null && conv.peerId != null) {
@@ -719,24 +774,6 @@ class ChatService {
     if (parsed == null) {
       debugPrint('ChatService: Failed to parse text message');
       return;
-    }
-
-    // Deduplication: reject messages with same sender+content within window
-    final dedupKey = '${received.fromNodeId}:${parsed.text.hashCode}';
-    final now = DateTime.now();
-    final previous = _recentlyReceived[dedupKey];
-    if (previous != null &&
-        now.difference(previous).inMilliseconds < _dedupWindowMs) {
-      debugPrint(
-          'ChatService: Duplicate message suppressed from ${received.fromNodeId}');
-      return;
-    }
-    _recentlyReceived[dedupKey] = now;
-
-    // Prune old dedup entries periodically
-    if (_recentlyReceived.length > 128) {
-      _recentlyReceived.removeWhere(
-          (_, ts) => now.difference(ts).inMilliseconds > _dedupWindowMs);
     }
 
     // Filter out messages from blocked contacts
@@ -892,6 +929,7 @@ class ChatService {
       where: 'id = ?',
       whereArgs: [localId],
     );
+    await _emitMessageById(localId);
 
     debugPrint('ChatService: Message $localId status: ${newStatus.name}');
   }
@@ -940,6 +978,7 @@ class ChatService {
       where: 'id = ?',
       whereArgs: [localId],
     );
+    await _emitMessageById(localId);
 
     debugPrint('ChatService: Message $localId deleted by sender');
   }
@@ -960,6 +999,7 @@ class ChatService {
       where: 'id = ?',
       whereArgs: [localId],
     );
+    await _emitMessageById(localId);
 
     debugPrint('ChatService: Message $localId edited to: ${edit.newText}');
   }
