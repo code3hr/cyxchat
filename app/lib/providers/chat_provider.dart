@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:ffi';
-import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:ffi/ffi.dart';
@@ -15,12 +14,14 @@ import 'settings_provider.dart';
 class ReceivedMessage {
   final String fromNodeId;
   final int type;
+  final String msgId;
   final List<int> rawData;
   final DateTime receivedAt;
 
   ReceivedMessage({
     required this.fromNodeId,
     required this.type,
+    required this.msgId,
     required this.rawData,
     DateTime? receivedAt,
   }) : receivedAt = receivedAt ?? DateTime.now();
@@ -743,15 +744,18 @@ class ChatProvider extends ChangeNotifier {
     final log = LogService.instance;
     final fromBytes = msg['from'] as List<int>;
     final type = msg['type'] as int;
+    final msgIdBytes = msg['msgId'] as List<int>;
     final data = msg['data'] as List<int>;
 
     final fromNodeId = NodeIdUtils.bytesToNodeId(fromBytes, fromBytes.length);
+    final msgId = ReceivedMessage._bytesToHex(msgIdBytes);
     final shortFromId =
         fromNodeId.length > 8 ? fromNodeId.substring(0, 8) : fromNodeId;
 
     final received = ReceivedMessage(
       fromNodeId: fromNodeId,
       type: type,
+      msgId: msgId,
       rawData: data,
     );
 

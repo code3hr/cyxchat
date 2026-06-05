@@ -379,12 +379,13 @@ class CyxChatBindings {
   }
 
   /// Get next received message
-  /// Returns map with 'from', 'type', 'data' keys, or null if queue empty
+  /// Returns map with 'from', 'type', 'msgId', 'data' keys, or null if queue empty
   Map<String, dynamic>? chatRecvNext() {
     if (_chatCtx == null) return null;
 
     final fromPtr = calloc<Uint8>(32);
     final typePtr = calloc<Uint8>(1);
+    final msgIdPtr = calloc<Uint8>(8);
     final dataPtr = calloc<Uint8>(4096);
     final lenPtr = calloc<Size>(1);
     lenPtr.value = 4096;
@@ -394,6 +395,7 @@ class CyxChatBindings {
         _chatCtx!,
         fromPtr,
         typePtr,
+        msgIdPtr,
         dataPtr,
         lenPtr,
       );
@@ -402,12 +404,14 @@ class CyxChatBindings {
         // Copy data before freeing
         final fromBytes = List<int>.generate(32, (i) => fromPtr[i]);
         final type = typePtr[0];
+        final msgId = List<int>.generate(8, (i) => msgIdPtr[i]);
         final dataLen = lenPtr.value;
         final data = List<int>.generate(dataLen, (i) => dataPtr[i]);
 
         return {
           'from': fromBytes,
           'type': type,
+          'msgId': msgId,
           'data': data,
         };
       }
@@ -415,6 +419,7 @@ class CyxChatBindings {
     } finally {
       calloc.free(fromPtr);
       calloc.free(typePtr);
+      calloc.free(msgIdPtr);
       calloc.free(dataPtr);
       calloc.free(lenPtr);
     }
@@ -4172,9 +4177,9 @@ late final cyxchat_conn_get_peer_pubkey = _lib.lookupFunction<      Int32 Functi
 
   late final cyxchat_recv_next = _lib.lookupFunction<
       Int32 Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>,
-          Pointer<Uint8>, Pointer<Size>),
+          Pointer<Uint8>, Pointer<Uint8>, Pointer<Size>),
       int Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>,
-          Pointer<Uint8>, Pointer<Size>)>('cyxchat_recv_next');
+          Pointer<Uint8>, Pointer<Uint8>, Pointer<Size>)>('cyxchat_recv_next');
 
   late final cyxchat_send_text = _lib.lookupFunction<
       Int32 Function(Pointer<Void>, Pointer<Uint8>, Pointer<Int8>, Size,

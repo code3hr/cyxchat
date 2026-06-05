@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/models.dart';
 import '../services/chat_service.dart';
+import 'chat_provider.dart' as native_chat;
 import 'file_provider.dart';
 import 'network_provider.dart';
 
@@ -66,7 +67,18 @@ class ChatActions {
   }
 
   Future<void> markAsRead(String conversationId) async {
-    await ChatService.instance.markAsRead(conversationId);
+    await ChatService.instance.markAsRead(
+      conversationId,
+      readReceiptSender: ({
+        required String toPeerId,
+        required String msgId,
+      }) {
+        return _ref.read(native_chat.chatActionsProvider).sendReadReceipt(
+              toPeerId: toPeerId,
+              msgId: msgId,
+            );
+      },
+    );
     _ref.invalidate(conversationsProvider);
   }
 

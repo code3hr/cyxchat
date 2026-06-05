@@ -48,6 +48,7 @@
 typedef struct {
     cyxwiz_node_id_t from;
     uint8_t type;
+    cyxchat_msg_id_t msg_id;
     uint8_t data[RECV_MSG_MAX_DATA];
     size_t data_len;
     int valid;
@@ -632,6 +633,7 @@ static int queue_push(
     cyxchat_ctx_t *ctx,
     const cyxwiz_node_id_t *from,
     uint8_t type,
+    const cyxchat_msg_id_t *msg_id,
     const uint8_t *data,
     size_t data_len
 ) {
@@ -643,6 +645,11 @@ static int queue_push(
     cyxchat_recv_msg_t *msg = &ctx->recv_queue[ctx->recv_head];
     memcpy(&msg->from, from, sizeof(cyxwiz_node_id_t));
     msg->type = type;
+    if (msg_id) {
+        memcpy(&msg->msg_id, msg_id, sizeof(cyxchat_msg_id_t));
+    } else {
+        memset(&msg->msg_id, 0, sizeof(cyxchat_msg_id_t));
+    }
     msg->data_len = (data_len > RECV_MSG_MAX_DATA) ? RECV_MSG_MAX_DATA : data_len;
     memcpy(msg->data, data, msg->data_len);
     msg->valid = 1;
@@ -655,6 +662,7 @@ static int queue_pop(
     cyxchat_ctx_t *ctx,
     cyxwiz_node_id_t *from_out,
     uint8_t *type_out,
+    cyxchat_msg_id_t *msg_id_out,
     uint8_t *data_out,
     size_t *data_len
 ) {
@@ -666,6 +674,7 @@ static int queue_pop(
 
     if (from_out) memcpy(from_out, &msg->from, sizeof(cyxwiz_node_id_t));
     if (type_out) *type_out = msg->type;
+    if (msg_id_out) memcpy(msg_id_out, &msg->msg_id, sizeof(cyxchat_msg_id_t));
 
     if (data_out && data_len) {
         size_t copy_len = (*data_len < msg->data_len) ? *data_len : msg->data_len;
@@ -873,7 +882,7 @@ static void on_onion_delivery(
             memcpy(queued_data + 2, reassembled, total_len);
 
             CYXWIZ_INFO("Queuing reassembled message: %zu bytes", total_len);
-            queue_push(ctx, actual_sender, type, queued_data, 2 + total_len);
+            queue_push(ctx, actual_sender, type, &msg_id, queued_data, 2 + total_len);
 
             /* Mark entry as used */
             entry->valid = 0;
@@ -905,11 +914,11 @@ static void on_onion_delivery(
             converted[0] = wire_text_len;
             converted[1] = 0;
             memcpy(converted + 2, data + offset + 1, wire_text_len);
-            queue_push(ctx, actual_sender, type, converted, 2 + wire_text_len);
+            queue_push(ctx, actual_sender, type, &msg_id, converted, 2 + wire_text_len);
         }
     } else if (type < CYXCHAT_MSG_GROUP_TEXT || type > CYXCHAT_MSG_GROUP_KEY_ACK) {
         /* Only queue non-group messages; group messages are handled by callbacks only */
-        queue_push(ctx, actual_sender, type, data + offset, len - offset);
+        queue_push(ctx, actual_sender, type, &msg_id, data + offset, len - offset);
     }
 
     /* Also fire callbacks if registered */
@@ -1114,11 +1123,12 @@ int cyxchat_recv_next(
     cyxchat_ctx_t *ctx,
     cyxwiz_node_id_t *from_out,
     uint8_t *type_out,
+    cyxchat_msg_id_t *msg_id_out,
     uint8_t *data_out,
     size_t *data_len
 ) {
     if (!ctx) return 0;
-    return queue_pop(ctx, from_out, type_out, data_out, data_len);
+    return queue_pop(ctx, from_out, type_out, msg_id_out, data_out, data_len);
 }
 
 const cyxwiz_node_id_t* cyxchat_get_local_id(cyxchat_ctx_t *ctx) {

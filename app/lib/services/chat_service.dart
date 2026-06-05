@@ -20,6 +20,11 @@ typedef MediaRetrySender = Future<FileSendResult> Function({
   required String? localPath,
 });
 
+typedef ReadReceiptSender = Future<bool> Function({
+  required String toPeerId,
+  required String msgId,
+});
+
 /// Service for chat operations
 class ChatService {
   static final ChatService instance = ChatService._();
@@ -634,8 +639,27 @@ class ChatService {
   }
 
   /// Mark messages as read
-  Future<void> markAsRead(String conversationId) async {
+  Future<void> markAsRead(
+    String conversationId, {
+    ReadReceiptSender? readReceiptSender,
+  }) async {
     final db = await DatabaseService.instance.database;
+
+    final convRows = await db.query(
+      'conversations',
+      where: 'id = ?',
+      whereArgs: [conversationId],
+      limit: 1,
+    );
+    final conversation =
+        convRows.isNotEmpty ? Conversation.fromMap(convRows.first) : null;
+
+    final unreadInboundRows = await db.query(
+      'messages',
+      columns: ['id'],
+      where: 'conversation_id = ? AND is_outgoing = 0 AND status < ?',
+      whereArgs: [conversationId, MessageStatus.read.index],
+    );
 
     await db.update(
       'messages',
@@ -650,6 +674,18 @@ class ChatService {
       where: 'id = ?',
       whereArgs: [conversationId],
     );
+
+    if (readReceiptSender != null && conversation?.peerId != null) {
+      for (final row in unreadInboundRows) {
+        final messageId = row['id'] as String;
+        final nativeMsgId = _localIdToNativeMsgId[messageId];
+        if (nativeMsgId == null) continue;
+        await readReceiptSender(
+          toPeerId: conversation!.peerId!,
+          msgId: nativeMsgId,
+        );
+      }
+    }
   }
 
   /// Delete message
@@ -875,6 +911,9 @@ class ChatService {
           whereArgs: [conversation.id],
         );
       });
+
+      _nativeMsgIdToLocalId[received.msgId] = message.id;
+      _localIdToNativeMsgId[message.id] = received.msgId;
 
       // Emit to stream
       _messageController.add(message);

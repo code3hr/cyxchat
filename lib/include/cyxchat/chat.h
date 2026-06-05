@@ -166,6 +166,7 @@ CYXCHAT_API int cyxchat_poll(cyxchat_ctx_t *ctx, uint64_t now_ms);
  * @param ctx           Chat context
  * @param from_out      Output: sender node ID
  * @param type_out      Output: message type (CYXCHAT_MSG_*)
+ * @param msg_id_out    Output: native message ID
  * @param data_out      Output buffer for message data
  * @param data_len      Input: buffer size, Output: actual data length
  * @return              1 if message retrieved, 0 if queue empty
@@ -174,6 +175,7 @@ CYXCHAT_API int cyxchat_recv_next(
     cyxchat_ctx_t *ctx,
     cyxwiz_node_id_t *from_out,
     uint8_t *type_out,
+    cyxchat_msg_id_t *msg_id_out,
     uint8_t *data_out,
     size_t *data_len
 );

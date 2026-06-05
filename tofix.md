@@ -23,6 +23,7 @@ This file tracks the core chat-app readiness work. Keep each fix small, auditabl
 - [x] Calls: permission-denied accept path rejects the caller instead of leaving them waiting.
 - [x] Media persistence: sent/received file and voice bytes are stored in app support storage, message metadata saves `localPath`, and playback/save can recover after restart.
 - [x] Non-text retry: failed file/voice messages retry from persisted local media, start a replacement transfer, and update the existing message with the new transfer ID.
+- [x] Read receipts: marking a direct conversation read sends privacy-aware read receipts for unread inbound messages with known native IDs.
 
 ## Next Fixes
 
@@ -37,8 +38,7 @@ This file tracks the core chat-app readiness work. Keep each fix small, auditabl
    - Consider a clearer UI label for media retries while the replacement transfer is still in progress.
 
 4. Read receipts
-   - When a direct conversation is marked read, send read receipts for unread inbound messages that have native message IDs.
-   - Respect the existing read receipt privacy setting.
+   - Persist inbound native IDs so read receipts still work after app restart.
 
 5. Native message ID persistence
    - Persist native message IDs with local messages.
