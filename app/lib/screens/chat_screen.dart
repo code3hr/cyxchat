@@ -1455,6 +1455,7 @@ class _FileMessageContent extends ConsumerWidget {
     String filename = 'Unknown file';
     String sizeStr = '';
     String? fileId;
+    String? localPath;
 
     final content = message.content;
     if (content.startsWith('{')) {
@@ -1464,6 +1465,7 @@ class _FileMessageContent extends ConsumerWidget {
         filename = json['filename'] as String? ?? 'Unknown file';
         sizeStr = json['size'] as String? ?? '';
         fileId = json['fileId'] as String?;
+        localPath = json['localPath'] as String?;
       } catch (e) {
         debugPrint('Failed to parse file message JSON: $e');
       }
@@ -1477,7 +1479,8 @@ class _FileMessageContent extends ConsumerWidget {
 
     // Watch file provider for transfer state and received files
     final fileProvider = ref.watch(fileNotifierProvider);
-    final hasFileData = fileId != null && fileProvider.getReceivedFile(fileId) != null;
+    final hasFileData = fileId != null &&
+        fileProvider.hasFileData(fileId, localPath: localPath);
     final transfer = fileId != null ? fileProvider.transfers[fileId] : null;
 
     // Determine transfer state
@@ -1492,7 +1495,7 @@ class _FileMessageContent extends ConsumerWidget {
 
     return InkWell(
       onTap: hasFileData && !isTransferring && !isPaused
-          ? () => _saveFile(context, ref, fileId!, filename)
+          ? () => _saveFile(context, ref, fileId!, filename, localPath)
           : null,
       borderRadius: BorderRadius.circular(8),
       child: Column(
@@ -1785,9 +1788,17 @@ class _FileMessageContent extends ConsumerWidget {
     }
   }
 
-  Future<void> _saveFile(BuildContext context, WidgetRef ref, String fileId, String filename) async {
+  Future<void> _saveFile(
+    BuildContext context,
+    WidgetRef ref,
+    String fileId,
+    String filename,
+    String? localPath,
+  ) async {
     try {
-      final fileData = ref.read(fileNotifierProvider).getReceivedFile(fileId);
+      final fileData = ref
+          .read(fileNotifierProvider)
+          .getReceivedFile(fileId, localPath: localPath);
       if (fileData == null) {
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -1885,11 +1896,13 @@ class _VoiceMessageContent extends ConsumerWidget {
     // Parse voice message info from content JSON
     // Format: {"fileId":"xxx","duration":30,"filename":"voice.m4a"}
     String? fileId;
+    String? localPath;
     int durationSecs = 0;
 
     try {
       final json = jsonDecode(message.content) as Map<String, dynamic>;
       fileId = json['fileId'] as String?;
+      localPath = json['localPath'] as String?;
       durationSecs = json['duration'] as int? ?? 0;
     } catch (e) {
       debugPrint('Failed to parse voice message: $e');
@@ -1900,7 +1913,8 @@ class _VoiceMessageContent extends ConsumerWidget {
     final isThisPlaying = player.currentFileId == fileId;
     final isPlaying = isThisPlaying && player.isPlaying;
     final isPaused = isThisPlaying && player.state == VoicePlaybackState.paused;
-    final hasFileData = fileId != null && fileProvider.getReceivedFile(fileId) != null;
+    final hasFileData = fileId != null &&
+        fileProvider.hasFileData(fileId, localPath: localPath);
 
     // Format duration
     final duration = Duration(seconds: durationSecs);
@@ -1917,7 +1931,9 @@ class _VoiceMessageContent extends ConsumerWidget {
       children: [
         // Play/pause button
         GestureDetector(
-          onTap: hasFileData ? () => _togglePlayback(ref, fileId!, fileProvider) : null,
+          onTap: hasFileData
+              ? () => _togglePlayback(ref, fileId!, fileProvider, localPath)
+              : null,
           child: Container(
             width: 40,
             height: 40,
@@ -2004,9 +2020,14 @@ class _VoiceMessageContent extends ConsumerWidget {
     );
   }
 
-  void _togglePlayback(WidgetRef ref, String fileId, FileProvider fileProvider) {
+  void _togglePlayback(
+    WidgetRef ref,
+    String fileId,
+    FileProvider fileProvider,
+    String? localPath,
+  ) {
     final player = ref.read(voicePlayerProvider);
-    final fileData = fileProvider.getReceivedFile(fileId);
+    final fileData = fileProvider.getReceivedFile(fileId, localPath: localPath);
 
     if (fileData == null) return;
 
@@ -2328,6 +2349,7 @@ class _MessageInputState extends ConsumerState<_MessageInput> {
           filename: file.name,
           fileSize: sizeStr,
           fileId: sendResult.fileId,
+          localPath: sendResult.localPath,
         );
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -2419,6 +2441,7 @@ class _MessageInputState extends ConsumerState<_MessageInput> {
         fileId: sendResult.fileId!,
         duration: voiceMessage.duration.inSeconds,
         filename: voiceMessage.filename,
+        localPath: sendResult.localPath,
       );
       debugPrint('VoiceMessage: Audio message saved to conversation');
       if (mounted) {

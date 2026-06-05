@@ -21,6 +21,7 @@ This file tracks the core chat-app readiness work. Keep each fix small, auditabl
 - [x] Calls: outgoing unanswered calls timeout with `noAnswer`.
 - [x] Calls: incoming unanswered calls expire.
 - [x] Calls: permission-denied accept path rejects the caller instead of leaving them waiting.
+- [x] Media persistence: sent/received file and voice bytes are stored in app support storage, message metadata saves `localPath`, and playback/save can recover after restart.
 
 ## Next Fixes
 
@@ -29,9 +30,7 @@ This file tracks the core chat-app readiness work. Keep each fix small, auditabl
    - Add a repeatable command note once the working command is found.
 
 2. Media persistence
-   - Store sent and received file/voice bytes under app storage instead of memory-only maps.
-   - Save local paths in message metadata.
-   - Keep playback/download working after app restart.
+   - Add a cleanup policy for orphaned app-support media files after message/conversation deletion.
 
 3. Non-text retry
    - Add retry flow for failed file and voice sends.

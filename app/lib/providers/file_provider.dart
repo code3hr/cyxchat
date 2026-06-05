@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'dart:ffi';
+import 'dart:io';
 import 'dart:typed_data';
 import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path_provider/path_provider.dart';
 import '../ffi/bindings.dart';
 import '../utils/node_id_utils.dart';
 
@@ -64,9 +66,15 @@ class FileRequest {
 class FileSendResult {
   final bool success;
   final String? fileId;
+  final String? localPath;
   final String? error;
 
-  FileSendResult({required this.success, this.fileId, this.error});
+  FileSendResult({
+    required this.success,
+    this.fileId,
+    this.localPath,
+    this.error,
+  });
 }
 
 /// File provider for managing file transfers
@@ -85,6 +93,7 @@ class FileProvider extends ChangeNotifier {
 
   // Completed file data (for received files)
   final Map<String, Uint8List> _receivedFiles = {};
+  final Map<String, String> _storedFilePaths = {};
 
   /// Callback when a file is fully received
   /// Parameters: fromPeerId, filename, fileSize (formatted), fileId
@@ -216,8 +225,8 @@ class FileProvider extends ChangeNotifier {
         _pendingRequests.removeAt(requestIndex);
       }
 
-      // Store received file data
-      _receivedFiles[fileId] = Uint8List.fromList(data);
+      final fileData = Uint8List.fromList(data);
+      _receivedFiles[fileId] = fileData;
 
       // Update transfer state if tracking
       if (_transfers.containsKey(fileId)) {
@@ -236,18 +245,14 @@ class FileProvider extends ChangeNotifier {
         );
       }
 
-      _completeController.add(fileId);
-      onTransferComplete?.call(fileId);
       notifyListeners();
 
-      // Notify callback for incoming files
-      if (request != null) {
-        debugPrint(
-            'FileProvider: Received file "${request.filename}" from ${request.fromPeerId}');
-        final formattedSize = _bindings.fileFormatSize(data.length);
-        onFileReceived?.call(
-            request.fromPeerId, request.filename, formattedSize, fileId);
-      }
+      unawaited(_persistCompletedFile(
+        fileId: fileId,
+        filename: request?.filename ?? _transfers[fileId]?.filename ?? fileId,
+        data: fileData,
+        request: request,
+      ));
     };
 
     // Handle progress updates
@@ -320,7 +325,33 @@ class FileProvider extends ChangeNotifier {
     _pendingRequests.clear();
     _pendingRequestsById.clear();
     _receivedFiles.clear();
+    _storedFilePaths.clear();
     debugPrint('FileProvider: Shutdown');
+    notifyListeners();
+  }
+
+  Future<void> _persistCompletedFile({
+    required String fileId,
+    required String filename,
+    required Uint8List data,
+    required FileRequest? request,
+  }) async {
+    try {
+      await _storeFileData(fileId, filename, data);
+    } catch (e) {
+      debugPrint('FileProvider: Could not persist completed file $fileId: $e');
+    }
+
+    _completeController.add(fileId);
+    onTransferComplete?.call(fileId);
+
+    if (request != null) {
+      debugPrint(
+          'FileProvider: Received file "${request.filename}" from ${request.fromPeerId}');
+      final formattedSize = _bindings.fileFormatSize(data.length);
+      onFileReceived?.call(
+          request.fromPeerId, request.filename, formattedSize, fileId);
+    }
     notifyListeners();
   }
 
@@ -426,12 +457,23 @@ class FileProvider extends ChangeNotifier {
           startedAt: DateTime.now(),
         );
 
-        // Store sent file data so sender can play their own voice messages
-        _receivedFiles[fileId] = Uint8List.fromList(data);
+        // Persist sent file data so sender can play/export after restart.
+        final fileData = Uint8List.fromList(data);
+        _receivedFiles[fileId] = fileData;
+        String? localPath;
+        try {
+          localPath = await _storeFileData(fileId, filename, fileData);
+        } catch (e) {
+          debugPrint('FileProvider: Could not persist sent file $fileId: $e');
+        }
 
         notifyListeners();
 
-        return FileSendResult(success: true, fileId: fileId);
+        return FileSendResult(
+          success: true,
+          fileId: fileId,
+          localPath: localPath,
+        );
       } else {
         return FileSendResult(success: false, error: 'Failed to send file');
       }
@@ -575,13 +617,77 @@ class FileProvider extends ChangeNotifier {
   }
 
   /// Get received file data
-  Uint8List? getReceivedFile(String fileId) {
-    return _receivedFiles[fileId];
+  Uint8List? getReceivedFile(String fileId, {String? localPath}) {
+    final cached = _receivedFiles[fileId];
+    if (cached != null) return cached;
+
+    final path = localPath ?? _storedFilePaths[fileId];
+    if (path == null) return null;
+
+    try {
+      final file = File(path);
+      if (!file.existsSync()) return null;
+      final data = file.readAsBytesSync();
+      final bytes = Uint8List.fromList(data);
+      _receivedFiles[fileId] = bytes;
+      _storedFilePaths[fileId] = path;
+      return bytes;
+    } catch (e) {
+      debugPrint('FileProvider: Could not load stored file $fileId: $e');
+      return null;
+    }
+  }
+
+  bool hasFileData(String fileId, {String? localPath}) {
+    if (_receivedFiles.containsKey(fileId)) return true;
+    final path = localPath ?? _storedFilePaths[fileId];
+    return path != null && File(path).existsSync();
+  }
+
+  String? getStoredFilePath(String fileId) => _storedFilePaths[fileId];
+
+  Future<String> _storeFileData(
+    String fileId,
+    String filename,
+    Uint8List data,
+  ) async {
+    final dir = await _mediaDirectory();
+    final path =
+        '${dir.path}${Platform.pathSeparator}${_safeFileId(fileId)}${_safeExtension(filename)}';
+    final file = File(path);
+    await file.writeAsBytes(data, flush: true);
+    _storedFilePaths[fileId] = file.path;
+    return file.path;
   }
 
   /// Clear received file from memory
   void clearReceivedFile(String fileId) {
     _receivedFiles.remove(fileId);
+  }
+
+  Future<Directory> _mediaDirectory() async {
+    final base = await getApplicationSupportDirectory();
+    final dir = Directory('${base.path}${Platform.pathSeparator}media');
+    if (!await dir.exists()) {
+      await dir.create(recursive: true);
+    }
+    return dir;
+  }
+
+  String _safeFileId(String fileId) {
+    return fileId.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
+  }
+
+  String _safeExtension(String filename) {
+    final basename = filename.split(RegExp(r'[\\/]')).last;
+    final dot = basename.lastIndexOf('.');
+    if (dot <= 0 || dot == basename.length - 1) return '';
+    final extension = basename.substring(dot);
+    if (extension.length > 16 ||
+        !RegExp(r'^\.[A-Za-z0-9]+$').hasMatch(extension)) {
+      return '';
+    }
+    return extension;
   }
 
   /// Get active transfer count

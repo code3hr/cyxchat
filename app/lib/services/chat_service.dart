@@ -445,6 +445,7 @@ class ChatService {
     required String filename,
     required String fileSize,
     required String fileId,
+    String? localPath,
   }) async {
     final db = await DatabaseService.instance.database;
 
@@ -474,6 +475,7 @@ class ChatService {
         'fileId': fileId,
         'duration': estimatedDuration,
         'filename': filename,
+        if (localPath != null) 'localPath': localPath,
       });
       messageType = MessageType.audio;
       debugPrint('ChatService: Received voice message: $filename ($fileSize)');
@@ -483,6 +485,7 @@ class ChatService {
         'fileId': fileId,
         'filename': filename,
         'size': fileSize,
+        if (localPath != null) 'localPath': localPath,
       });
       messageType = MessageType.file;
       debugPrint('ChatService: Received file: $filename ($fileSize)');
@@ -551,7 +554,10 @@ class ChatService {
   }
 
   /// Mark an outgoing file/media message complete once FileProvider finishes.
-  Future<void> handleFileTransferCompleted(String fileId) async {
+  Future<void> handleFileTransferCompleted(
+    String fileId, {
+    String? localPath,
+  }) async {
     final db = await DatabaseService.instance.database;
     final rows = await db.query(
       'messages',
@@ -561,15 +567,39 @@ class ChatService {
     );
     if (rows.isEmpty) return;
 
-    final message =
-        Message.fromMap(rows.first).copyWith(status: MessageStatus.delivered);
+    final existing = Message.fromMap(rows.first);
+    final content = _contentWithLocalPath(existing.content, localPath);
+    final message = existing.copyWith(
+      content: content,
+      status: MessageStatus.delivered,
+    );
     await db.update(
       'messages',
-      {'status': MessageStatus.delivered.index},
+      {
+        'status': MessageStatus.delivered.index,
+        if (content != existing.content) 'content': content,
+      },
       where: 'id = ?',
       whereArgs: [message.id],
     );
     _messageController.add(message);
+  }
+
+  String _contentWithLocalPath(String content, String? localPath) {
+    if (localPath == null || localPath.isEmpty) return content;
+
+    try {
+      final decoded = jsonDecode(content);
+      if (decoded is Map<String, dynamic>) {
+        if (decoded['localPath'] == localPath) return content;
+        final updated = Map<String, dynamic>.from(decoded);
+        updated['localPath'] = localPath;
+        return jsonEncode(updated);
+      }
+    } catch (_) {
+      // Legacy non-JSON media messages cannot safely carry structured paths.
+    }
+    return content;
   }
 
   /// Mark an outgoing file/media message failed when FileProvider reports error.

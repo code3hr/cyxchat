@@ -354,10 +354,14 @@ class ConnectionActions {
           filename: filename,
           fileSize: fileSize,
           fileId: fileId,
+          localPath: fileProvider.getStoredFilePath(fileId),
         );
       };
       fileProvider.onTransferComplete = (fileId) {
-        ChatService.instance.handleFileTransferCompleted(fileId);
+        ChatService.instance.handleFileTransferCompleted(
+          fileId,
+          localPath: fileProvider.getStoredFilePath(fileId),
+        );
       };
       fileProvider.onTransferError = (fileId) {
         ChatService.instance.handleFileTransferFailed(fileId);

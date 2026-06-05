@@ -86,11 +86,13 @@ class ChatActions {
     required String filename,
     required String fileSize,
     String? fileId,
+    String? localPath,
   }) async {
     final content = jsonEncode({
       'filename': filename,
       'size': fileSize,
       if (fileId != null) 'fileId': fileId,
+      if (localPath != null) 'localPath': localPath,
     });
     final message = await ChatService.instance.sendMessage(
       conversationId: conversationId,
@@ -108,11 +110,13 @@ class ChatActions {
     required String fileId,
     required int duration,
     required String filename,
+    String? localPath,
   }) async {
     final content = jsonEncode({
       'fileId': fileId,
       'duration': duration,
       'filename': filename,
+      if (localPath != null) 'localPath': localPath,
     });
     final message = await ChatService.instance.sendMessage(
       conversationId: conversationId,
