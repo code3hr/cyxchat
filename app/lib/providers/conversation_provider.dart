@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/models.dart';
 import '../services/chat_service.dart';
+import 'file_provider.dart';
 import 'network_provider.dart';
 
 /// Provider for all conversations
@@ -154,8 +155,39 @@ class ChatActions {
 
   /// Retry sending a failed message
   Future<bool> retryMessage(String messageId, String conversationId) async {
-    final success =
-        await ChatService.instance.retryMessage(messageId, conversationId);
+    final success = await ChatService.instance.retryMessage(
+      messageId,
+      conversationId,
+      mediaRetrySender: ({
+        required String toPeerId,
+        required String fileId,
+        required String filename,
+        required MessageType messageType,
+        required String? localPath,
+      }) async {
+        final fileProvider = _ref.read(fileNotifierProvider);
+        final fileData = fileProvider.getReceivedFile(
+          fileId,
+          localPath: localPath,
+        );
+        if (fileData == null) {
+          return FileSendResult(
+            success: false,
+            error: 'Stored media data not available',
+          );
+        }
+
+        return fileProvider.sendFile(
+          toPeerId: toPeerId,
+          filename: filename,
+          data: fileData,
+          mimeType: messageType == MessageType.audio ||
+                  messageType == MessageType.voice
+              ? 'audio/mp4'
+              : null,
+        );
+      },
+    );
     _ref.invalidate(messagesProvider(conversationId));
     return success;
   }

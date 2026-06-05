@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:sqflite/sqflite.dart';
 import 'package:uuid/uuid.dart';
 import '../models/models.dart';
 import '../providers/chat_provider.dart';
@@ -10,6 +11,14 @@ import 'database_service.dart';
 import 'identity_service.dart';
 import 'queue_service.dart';
 import 'notification_service.dart';
+
+typedef MediaRetrySender = Future<FileSendResult> Function({
+  required String toPeerId,
+  required String fileId,
+  required String filename,
+  required MessageType messageType,
+  required String? localPath,
+});
 
 /// Service for chat operations
 class ChatService {
@@ -1035,7 +1044,11 @@ class ChatService {
   }
 
   /// Retry sending a failed message
-  Future<bool> retryMessage(String messageId, String conversationId) async {
+  Future<bool> retryMessage(
+    String messageId,
+    String conversationId, {
+    MediaRetrySender? mediaRetrySender,
+  }) async {
     final db = await DatabaseService.instance.database;
 
     // Load the message
@@ -1084,20 +1097,18 @@ class ChatService {
       whereArgs: [messageId],
     );
 
-    // Try to send via native chat
-    if (_chatProvider == null) {
-      debugPrint('ChatService: No chat provider for retry');
-      await db.update(
-        'messages',
-        {'status': MessageStatus.failed.index},
-        where: 'id = ?',
-        whereArgs: [messageId],
-      );
-      return false;
-    }
-
-    // Only retry text messages via chat provider
     if (message.type == MessageType.text) {
+      if (_chatProvider == null) {
+        debugPrint('ChatService: No chat provider for retry');
+        await db.update(
+          'messages',
+          {'status': MessageStatus.failed.index},
+          where: 'id = ?',
+          whereArgs: [messageId],
+        );
+        return false;
+      }
+
       // Look up previous native msg_id to reuse on retry (prevents duplicates)
       final previousNativeMsgId = _localIdToNativeMsgId[messageId];
       if (previousNativeMsgId != null) {
@@ -1139,10 +1150,17 @@ class ChatService {
         debugPrint('ChatService: Retry failed: ${result.error}');
         return false;
       }
+    } else if (message.type == MessageType.file ||
+        message.type == MessageType.audio ||
+        message.type == MessageType.voice) {
+      return _retryMediaMessage(
+        db: db,
+        message: message,
+        conversation: conversation,
+        mediaRetrySender: mediaRetrySender,
+      );
     } else {
-      // For non-text messages (file, audio), mark as failed - they need special handling
-      debugPrint(
-          'ChatService: Cannot retry non-text message type: ${message.type}');
+      debugPrint('ChatService: Cannot retry message type: ${message.type}');
       await db.update(
         'messages',
         {'status': MessageStatus.failed.index},
@@ -1151,6 +1169,93 @@ class ChatService {
       );
       return false;
     }
+  }
+
+  Future<bool> _retryMediaMessage({
+    required Database db,
+    required Message message,
+    required Conversation conversation,
+    required MediaRetrySender? mediaRetrySender,
+  }) async {
+    if (mediaRetrySender == null) {
+      debugPrint('ChatService: No media retry sender available');
+      await db.update(
+        'messages',
+        {'status': MessageStatus.failed.index},
+        where: 'id = ?',
+        whereArgs: [message.id],
+      );
+      return false;
+    }
+
+    final metadata = _decodeMessageContent(message.content);
+    final fileId = metadata?['fileId'] as String?;
+    final filename = metadata?['filename'] as String?;
+    final localPath = metadata?['localPath'] as String?;
+    if (metadata == null || fileId == null || filename == null) {
+      debugPrint('ChatService: Media retry missing file metadata');
+      await db.update(
+        'messages',
+        {'status': MessageStatus.failed.index},
+        where: 'id = ?',
+        whereArgs: [message.id],
+      );
+      return false;
+    }
+
+    final result = await mediaRetrySender(
+      toPeerId: conversation.peerId!,
+      fileId: fileId,
+      filename: filename,
+      messageType: message.type,
+      localPath: localPath,
+    );
+
+    if (!result.success || result.fileId == null) {
+      debugPrint('ChatService: Media retry failed: ${result.error}');
+      await db.update(
+        'messages',
+        {'status': MessageStatus.failed.index},
+        where: 'id = ?',
+        whereArgs: [message.id],
+      );
+      return false;
+    }
+
+    final updatedMetadata = Map<String, dynamic>.from(metadata)
+      ..['fileId'] = result.fileId!;
+    if (result.localPath != null) {
+      updatedMetadata['localPath'] = result.localPath!;
+    }
+    final updatedContent = jsonEncode(updatedMetadata);
+    final updatedMessage = message.copyWith(
+      content: updatedContent,
+      status: MessageStatus.sending,
+    );
+
+    await db.update(
+      'messages',
+      {
+        'content': updatedContent,
+        'status': MessageStatus.sending.index,
+      },
+      where: 'id = ?',
+      whereArgs: [message.id],
+    );
+    _messageController.add(updatedMessage);
+    debugPrint('ChatService: Media retry started for ${message.id}');
+    return true;
+  }
+
+  Map<String, dynamic>? _decodeMessageContent(String content) {
+    try {
+      final decoded = jsonDecode(content);
+      if (decoded is Map<String, dynamic>) return decoded;
+      if (decoded is Map) return Map<String, dynamic>.from(decoded);
+    } catch (_) {
+      return null;
+    }
+    return null;
   }
 
   /// Update message status

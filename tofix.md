@@ -22,6 +22,7 @@ This file tracks the core chat-app readiness work. Keep each fix small, auditabl
 - [x] Calls: incoming unanswered calls expire.
 - [x] Calls: permission-denied accept path rejects the caller instead of leaving them waiting.
 - [x] Media persistence: sent/received file and voice bytes are stored in app support storage, message metadata saves `localPath`, and playback/save can recover after restart.
+- [x] Non-text retry: failed file/voice messages retry from persisted local media, start a replacement transfer, and update the existing message with the new transfer ID.
 
 ## Next Fixes
 
@@ -33,8 +34,7 @@ This file tracks the core chat-app readiness work. Keep each fix small, auditabl
    - Add a cleanup policy for orphaned app-support media files after message/conversation deletion.
 
 3. Non-text retry
-   - Add retry flow for failed file and voice sends.
-   - Reuse existing transfer IDs where possible or create a clear replacement message flow.
+   - Consider a clearer UI label for media retries while the replacement transfer is still in progress.
 
 4. Read receipts
    - When a direct conversation is marked read, send read receipts for unread inbound messages that have native message IDs.
