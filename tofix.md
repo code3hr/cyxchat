@@ -52,6 +52,7 @@ This file tracks the core chat-app readiness work. Keep each fix small, auditabl
 - [x] Desktop call permission hardening: audio/video calls bypass mobile `permission_handler` prompts on desktop and let WebRTC device acquisition report real microphone/camera errors.
 - [x] Windows bootstrap/offline fix: Windows install now bundles the current native `cyxchat.dll`, app bootstrap resolution falls back to the Oracle default if settings are still loading, and the rebuilt Debug app auto-connects to `129.151.146.219:7777`.
 - [x] Direct text delivery retry hardening: Dart ACK status values now match native delivery/read constants, and ACK timeouts no longer enqueue duplicate offline-queue retries for messages already owned by the native retry/dedup layer.
+- [x] Windows notification/file-control log hardening: local notifications are a clean no-op on unsupported Windows builds, and native file-control frames no longer enter the Dart chat receive queue as unknown message types.
 
 ## Next Fixes
 

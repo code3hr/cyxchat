@@ -23,7 +23,8 @@ class NotificationService {
 
   NotificationService._internal();
 
-  final FlutterLocalNotificationsPlugin _plugin = FlutterLocalNotificationsPlugin();
+  final FlutterLocalNotificationsPlugin _plugin =
+      FlutterLocalNotificationsPlugin();
   bool _initialized = false;
   NotificationTapCallback? onNotificationTap;
 
@@ -40,15 +41,30 @@ class NotificationService {
   static const String _channelName = 'Messages';
   static const String _channelDescription = 'New message notifications';
 
+  bool get _platformSupported =>
+      Platform.isAndroid ||
+      Platform.isIOS ||
+      Platform.isMacOS ||
+      Platform.isLinux;
+
   /// Initialize the notification plugin
   Future<bool> initialize() async {
     if (_initialized) return true;
 
     final log = LogService.instance;
 
+    if (!_platformSupported) {
+      log.info(
+        'Local notifications are not supported on this platform',
+        source: 'Notifications',
+      );
+      return true;
+    }
+
     try {
       // Platform-specific initialization settings
-      const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
+      const androidSettings =
+          AndroidInitializationSettings('@mipmap/ic_launcher');
       const darwinSettings = DarwinInitializationSettings(
         requestAlertPermission: true,
         requestBadgePermission: true,
@@ -83,11 +99,13 @@ class NotificationService {
 
         return true;
       } else {
-        log.warning('Notification initialization returned false', source: 'Notifications');
+        log.warning('Notification initialization returned false',
+            source: 'Notifications');
         return false;
       }
     } catch (e) {
-      log.error('Failed to initialize notifications: $e', source: 'Notifications');
+      log.error('Failed to initialize notifications: $e',
+          source: 'Notifications');
       return false;
     }
   }
@@ -102,15 +120,15 @@ class NotificationService {
     );
 
     await _plugin
-        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+        .resolvePlatformSpecificImplementation<
+            AndroidFlutterLocalNotificationsPlugin>()
         ?.createNotificationChannel(channel);
   }
 
   /// Request runtime notification permission on Android 13+.
   Future<void> _requestAndroidNotificationPermission() async {
-    final androidPlugin =
-        _plugin.resolvePlatformSpecificImplementation<
-            AndroidFlutterLocalNotificationsPlugin>();
+    final androidPlugin = _plugin.resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
     final granted = await androidPlugin?.requestNotificationsPermission();
     if (granted == false) {
       LogService.instance.warning(
@@ -126,7 +144,8 @@ class NotificationService {
     final payload = response.payload;
 
     if (payload != null && onNotificationTap != null) {
-      log.info('Notification tapped for conversation: $payload', source: 'Notifications');
+      log.info('Notification tapped for conversation: $payload',
+          source: 'Notifications');
       onNotificationTap!(payload);
     }
   }
@@ -161,6 +180,8 @@ class NotificationService {
     bool isGroupMessage = false,
     String? groupName,
   }) async {
+    if (!_platformSupported) return;
+
     if (!_initialized) {
       debugPrint('Notification service not initialized');
       return;
@@ -248,7 +269,8 @@ class NotificationService {
         payload: conversationId,
       );
 
-      log.debug('Showed notification for $conversationId: $title', source: 'Notifications');
+      log.debug('Showed notification for $conversationId: $title',
+          source: 'Notifications');
     } catch (e) {
       log.error('Failed to show notification: $e', source: 'Notifications');
     }
@@ -280,12 +302,14 @@ class NotificationService {
   Future<bool> requestPermissions() async {
     if (Platform.isIOS) {
       final result = await _plugin
-          .resolvePlatformSpecificImplementation<IOSFlutterLocalNotificationsPlugin>()
+          .resolvePlatformSpecificImplementation<
+              IOSFlutterLocalNotificationsPlugin>()
           ?.requestPermissions(alert: true, badge: true, sound: true);
       return result ?? false;
     } else if (Platform.isMacOS) {
       final result = await _plugin
-          .resolvePlatformSpecificImplementation<MacOSFlutterLocalNotificationsPlugin>()
+          .resolvePlatformSpecificImplementation<
+              MacOSFlutterLocalNotificationsPlugin>()
           ?.requestPermissions(alert: true, badge: true, sound: true);
       return result ?? false;
     }

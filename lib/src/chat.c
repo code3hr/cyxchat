@@ -916,8 +916,10 @@ static void on_onion_delivery(
             memcpy(converted + 2, data + offset + 1, wire_text_len);
             queue_push(ctx, actual_sender, type, &msg_id, converted, 2 + wire_text_len);
         }
-    } else if (type < CYXCHAT_MSG_GROUP_TEXT || type > CYXCHAT_MSG_GROUP_KEY_ACK) {
-        /* Only queue non-group messages; group messages are handled by callbacks only */
+    } else if (!is_file_msg &&
+               (type < CYXCHAT_MSG_GROUP_TEXT || type > CYXCHAT_MSG_GROUP_KEY_ACK)) {
+        /* Only queue direct chat/control messages; file and group messages are
+         * routed to their modules through callbacks. */
         queue_push(ctx, actual_sender, type, &msg_id, data + offset, len - offset);
     }
 
