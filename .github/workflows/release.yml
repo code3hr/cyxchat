@@ -83,8 +83,9 @@ jobs:
           cmake -B build `
             -DCMAKE_BUILD_TYPE=Release `
             -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake `
+            -DCYXWIZ_ENABLE_UPNP=OFF `
             -DCYXWIZ_BUILD_TOOLS=OFF
-          cmake --build build --config Release
+          cmake --build build --config Release --target cyxwiz
 
       - name: Locate libsodium
         id: sodium
@@ -115,6 +116,7 @@ jobs:
             "-DCYXWIZ_INCLUDE_DIR=${{ github.workspace }}/cyxwiz/include" `
             "-DSODIUM_INCLUDE_DIR=${{ steps.sodium.outputs.include }}" `
             "-DSODIUM_LIBRARY=${{ steps.sodium.outputs.library }}" `
+            -DCYXCHAT_ENABLE_UPNP=OFF `
             -DCYXCHAT_BUILD_TESTS=OFF
           cmake --build build --config Release
 
@@ -184,12 +186,13 @@ jobs:
           cmake -B build \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DCYXWIZ_ENABLE_UPNP=OFF \
             -DCYXWIZ_BUILD_TOOLS=OFF \
             -DCYXWIZ_TRANSPORT_BLUETOOTH=OFF \
             -DCYXWIZ_TRANSPORT_LORA=OFF \
             "-DSODIUM_INCLUDE_DIR=${SODIUM_PREFIX}/include" \
             "-DSODIUM_LIBRARY=${SODIUM_PREFIX}/lib/libsodium.a"
-          cmake --build build --config Release
+          cmake --build build --config Release --target cyxwiz
 
       - name: Build CyxChat native library
         working-directory: cyxchat/lib
@@ -202,6 +205,7 @@ jobs:
             "-DCYXWIZ_INCLUDE_DIR=${{ github.workspace }}/cyxwiz/include" \
             "-DSODIUM_INCLUDE_DIR=${SODIUM_PREFIX}/include" \
             "-DSODIUM_LIBRARY=${SODIUM_PREFIX}/lib/libsodium.a" \
+            -DCYXCHAT_ENABLE_UPNP=OFF \
             -DCYXCHAT_BUILD_TESTS=OFF
           cmake --build build --config Release
 
@@ -311,6 +315,7 @@ jobs:
               -DANDROID_ABI="$ABI" \
               -DANDROID_PLATFORM="android-${{ env.ANDROID_API_LEVEL }}" \
               -DCMAKE_BUILD_TYPE=Release \
+              -DCYXWIZ_ENABLE_UPNP=OFF \
               -DCYXWIZ_BUILD_TESTS=OFF \
               -DCYXWIZ_BUILD_TOOLS=OFF \
               -DCYXWIZ_HAS_CRYPTO=ON \
@@ -320,7 +325,7 @@ jobs:
               -DSODIUM_INCLUDE_DIR="$SODIUM_ROOT/include" \
               -DSODIUM_LIBRARY="$SODIUM_ROOT/lib/libsodium.a" \
               -G Ninja
-            cmake --build "cyxwiz/$BUILD_DIR" --config Release
+            cmake --build "cyxwiz/$BUILD_DIR" --config Release --target cyxwiz
           done
 
       - name: Build CyxChat for Android
@@ -343,6 +348,7 @@ jobs:
               -DCYXWIZ_BUILD_DIR="$GITHUB_WORKSPACE/cyxwiz/$BUILD_DIR" \
               -DSODIUM_INCLUDE_DIR="$SODIUM_ROOT/include" \
               -DSODIUM_LIBRARY="$SODIUM_ROOT/lib/libsodium.a" \
+              -DCYXCHAT_ENABLE_UPNP=OFF \
               -DCYXCHAT_BUILD_TESTS=OFF \
               -DCYXCHAT_BUILD_STATIC=OFF \
               -G Ninja
