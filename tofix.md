@@ -42,12 +42,12 @@ This file tracks the core chat-app readiness work. Keep each fix small, auditabl
 - [x] Group media transfer hardening tests: native tests cover chunk assembly, duplicate chunks, missing-chunk requests, and completion callback behavior.
 - [x] Production verification baseline: native Debug build passes, native test suite passes, and Windows app CMake Debug build passes when run elevated outside sandbox restrictions.
 - [x] Dart analyzer stabilization: app-wide `dart analyze .` completes elevated with exit 0 after SDK/analyzer baseline updates and warning cleanup.
+- [x] Flutter test harness stabilization: `flutter.bat` remains unreliable in this shell, but direct elevated Flutter tools invocation runs the widget smoke test successfully.
 
 ## Next Fixes
 
-1. Flutter wrapper/test stabilization
-   - `flutter test --no-pub` timed out without output in this shell on 2026-06-06.
-   - Direct elevated Windows CMake Debug build previously passed, but the latest bounded rerun timed out while compiling plugin targets without reporting a build error.
+1. Windows app build stabilization
+   - Direct elevated Windows CMake Debug build previously passed, but later bounded reruns timed out while compiling plugin targets without reporting a build error.
    - Add focused Dart tests for message status and media metadata when the Flutter test harness is stable.
 
 ## Verification Baseline
@@ -66,5 +66,7 @@ This file tracks the core chat-app readiness work. Keep each fix small, auditabl
 - Direct elevated `D:\Flutter\flutter\bin\cache\dart-sdk\bin\dart.exe analyze .` from `app\` still hung past a bounded 120 second verification run on 2026-06-06.
 - Direct elevated `D:\Flutter\flutter\bin\cache\dart-sdk\bin\dart.exe analyze .` from `app\` passed with exit 0 on 2026-06-06 after analyzer baseline updates.
 - Direct elevated `C:\Program Files\CMake\bin\cmake.exe --build D:\Dev\conspiracy\cyxchat\app\build\windows\x64 --config Debug` passed on 2026-06-06.
+- Direct elevated `D:\Flutter\flutter\bin\cache\dart-sdk\bin\dart.exe --packages=D:\Flutter\flutter\packages\flutter_tools\.dart_tool\package_config.json D:\Flutter\flutter\bin\cache\flutter_tools.snapshot test --no-pub test\widget_test.dart` passed on 2026-06-06.
+- `D:\Flutter\flutter\bin\flutter.bat --version` and `flutter.bat test --help` timed out in this shell and spawned native build processes; use direct Flutter tools invocation instead.
 - Direct `D:\Flutter\flutter\bin\cache\dart-sdk\bin\dart.exe analyze .` from `app\` crashed with `FileSystemException: writeFrom failed` / `Bad state: The analysis server crashed unexpectedly`.
 - `D:\Flutter\flutter\bin\flutter.bat analyze --no-pub` from `app\` hung and was interrupted.
