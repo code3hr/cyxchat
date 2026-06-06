@@ -54,9 +54,19 @@ class ChatService {
 
   // Disappearing messages cleanup timer
   Timer? _disappearingMessagesTimer;
+  Timer? _readReceiptRetryTimer;
+  bool _flushingReadReceipts = false;
 
   // Default disappearing messages setting (from settings)
   int? _defaultDisappearingSeconds;
+
+  ReadReceiptSender? _readReceiptSender;
+  final Map<String, _PendingReadReceipt> _pendingReadReceipts = {};
+
+  static const Duration _readReceiptRetryInterval = Duration(seconds: 5);
+  static const Duration _readReceiptBaseBackoff = Duration(seconds: 3);
+  static const Duration _readReceiptMaxBackoff = Duration(minutes: 1);
+  static const int _readReceiptMaxAttempts = 8;
 
   ChatService._() {
     // Start cleanup timer for disappearing messages
@@ -675,6 +685,7 @@ class ChatService {
     String conversationId, {
     ReadReceiptSender? readReceiptSender,
   }) async {
+    _readReceiptSender = readReceiptSender ?? _readReceiptSender;
     final db = await DatabaseService.instance.database;
 
     final convRows = await db.query(
@@ -712,7 +723,8 @@ class ChatService {
         final messageId = row['id'] as String;
         final nativeMsgId = _localIdToNativeMsgId[messageId];
         if (nativeMsgId == null) continue;
-        await readReceiptSender(
+        await _sendOrQueueReadReceipt(
+          sender: readReceiptSender,
           toPeerId: conversation!.peerId!,
           msgId: nativeMsgId,
         );
@@ -1373,6 +1385,111 @@ class ChatService {
     return null;
   }
 
+  Future<void> _sendOrQueueReadReceipt({
+    required ReadReceiptSender sender,
+    required String toPeerId,
+    required String msgId,
+  }) async {
+    try {
+      final sent = await sender(toPeerId: toPeerId, msgId: msgId);
+      if (sent) {
+        _pendingReadReceipts.remove(_readReceiptKey(toPeerId, msgId));
+        if (_pendingReadReceipts.isEmpty) _stopReadReceiptRetryTimer();
+        return;
+      }
+    } catch (e) {
+      debugPrint('ChatService: Read receipt send failed: $e');
+    }
+
+    _queueReadReceipt(toPeerId: toPeerId, msgId: msgId);
+  }
+
+  void _queueReadReceipt({
+    required String toPeerId,
+    required String msgId,
+    int attempts = 1,
+  }) {
+    final key = _readReceiptKey(toPeerId, msgId);
+    final existing = _pendingReadReceipts[key];
+    if (existing != null) return;
+
+    _pendingReadReceipts[key] = _PendingReadReceipt(
+      toPeerId: toPeerId,
+      msgId: msgId,
+      attempts: attempts,
+      nextAttemptAt: DateTime.now().add(_readReceiptBackoff(attempts)),
+    );
+    _startReadReceiptRetryTimer();
+    debugPrint('ChatService: Queued read receipt retry for $msgId');
+  }
+
+  void _startReadReceiptRetryTimer() {
+    _readReceiptRetryTimer ??= Timer.periodic(
+      _readReceiptRetryInterval,
+      (_) => unawaited(_flushReadReceiptRetries()),
+    );
+  }
+
+  void _stopReadReceiptRetryTimer() {
+    _readReceiptRetryTimer?.cancel();
+    _readReceiptRetryTimer = null;
+  }
+
+  Future<void> _flushReadReceiptRetries() async {
+    if (_flushingReadReceipts || _pendingReadReceipts.isEmpty) return;
+    final sender = _readReceiptSender;
+    if (sender == null) return;
+
+    _flushingReadReceipts = true;
+    try {
+      final now = DateTime.now();
+      final ready = _pendingReadReceipts.values
+          .where((receipt) => !receipt.nextAttemptAt.isAfter(now))
+          .toList();
+
+      for (final receipt in ready) {
+        final key = _readReceiptKey(receipt.toPeerId, receipt.msgId);
+        try {
+          final sent = await sender(
+            toPeerId: receipt.toPeerId,
+            msgId: receipt.msgId,
+          );
+          if (sent) {
+            _pendingReadReceipts.remove(key);
+            continue;
+          }
+        } catch (e) {
+          debugPrint('ChatService: Read receipt retry failed: $e');
+        }
+
+        final attempts = receipt.attempts + 1;
+        if (attempts > _readReceiptMaxAttempts) {
+          _pendingReadReceipts.remove(key);
+          debugPrint('ChatService: Dropped read receipt after retries');
+          continue;
+        }
+
+        _pendingReadReceipts[key] = receipt.copyWith(
+          attempts: attempts,
+          nextAttemptAt: now.add(_readReceiptBackoff(attempts)),
+        );
+      }
+    } finally {
+      _flushingReadReceipts = false;
+      if (_pendingReadReceipts.isEmpty) _stopReadReceiptRetryTimer();
+    }
+  }
+
+  Duration _readReceiptBackoff(int attempts) {
+    final seconds = _readReceiptBaseBackoff.inSeconds * (1 << (attempts - 1));
+    if (seconds >= _readReceiptMaxBackoff.inSeconds) {
+      return _readReceiptMaxBackoff;
+    }
+    return Duration(seconds: seconds);
+  }
+
+  String _readReceiptKey(String toPeerId, String msgId) => '$toPeerId:$msgId';
+
   Future<void> _cleanupMessageMedia(
     Message message, {
     MediaCleanup? mediaCleanup,
@@ -1559,6 +1676,7 @@ class ChatService {
 
   void dispose() {
     disconnectProvider();
+    _stopReadReceiptRetryTimer();
     _messageController.close();
   }
 }
@@ -1571,4 +1689,30 @@ class _StoredMediaRef {
     required this.fileId,
     required this.localPath,
   });
+}
+
+class _PendingReadReceipt {
+  final String toPeerId;
+  final String msgId;
+  final int attempts;
+  final DateTime nextAttemptAt;
+
+  const _PendingReadReceipt({
+    required this.toPeerId,
+    required this.msgId,
+    required this.attempts,
+    required this.nextAttemptAt,
+  });
+
+  _PendingReadReceipt copyWith({
+    int? attempts,
+    DateTime? nextAttemptAt,
+  }) {
+    return _PendingReadReceipt(
+      toPeerId: toPeerId,
+      msgId: msgId,
+      attempts: attempts ?? this.attempts,
+      nextAttemptAt: nextAttemptAt ?? this.nextAttemptAt,
+    );
+  }
 }

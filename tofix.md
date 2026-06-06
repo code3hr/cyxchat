@@ -29,24 +29,22 @@ This file tracks the core chat-app readiness work. Keep each fix small, auditabl
 - [x] Verification baseline: use focused Dart analyzer checks on touched Dart files until app-scope analysis is stable.
 - [x] Media cleanup: deleting direct messages/conversations removes referenced app-support media files and clears live file caches.
 - [x] Non-text retry UI: media retry rows now show `Retrying...` while the replacement file/voice transfer is in progress.
+- [x] Read receipts retry: failed read receipts are deduplicated and retried with capped backoff while the app is running.
 
 ## Next Fixes
 
-1. Read receipts
-   - Add retry/backoff if sending a read receipt fails while the peer is temporarily unreachable.
-
-2. Native message ID persistence
+1. Native message ID persistence
    - Audit native ID persistence for direct media and group messages once their native ACK paths are surfaced.
 
-3. Group message status
+2. Group message status
    - Surface native group ACK state in Dart.
    - Update outgoing group message delivery status from group ACK callbacks.
 
-4. Group media and voice audit
+3. Group media and voice audit
    - Check whether group media has the same persistence/status/retry gaps as direct media.
    - Fix with shared helpers only if it reduces real duplication.
 
-5. Production verification
+4. Production verification
    - Run app-level analyzer/build.
    - Run C tests where native protocol behavior changed.
    - Add focused Dart tests for message status and media metadata when test harness is stable.
