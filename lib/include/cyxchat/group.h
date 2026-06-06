@@ -131,6 +131,14 @@ typedef void (*cyxchat_on_group_message_t)(
     void *user_data
 );
 
+typedef void (*cyxchat_on_group_media_t)(
+    cyxchat_group_ctx_t *ctx,
+    const cyxchat_group_media_t *media,
+    const uint8_t *data,
+    size_t data_len,
+    void *user_data
+);
+
 typedef void (*cyxchat_on_group_invite_t)(
     cyxchat_group_ctx_t *ctx,
     const cyxchat_group_invite_t *invite,
@@ -458,6 +466,12 @@ CYXCHAT_API cyxchat_group_t* cyxchat_group_get(
 CYXCHAT_API void cyxchat_group_set_on_message(
     cyxchat_group_ctx_t *ctx,
     cyxchat_on_group_message_t callback,
+    void *user_data
+);
+
+CYXCHAT_API void cyxchat_group_set_on_media(
+    cyxchat_group_ctx_t *ctx,
+    cyxchat_on_group_media_t callback,
     void *user_data
 );
 
