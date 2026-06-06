@@ -3250,6 +3250,7 @@ class CyxChatBindings {
   ({int error, String? msgId, String? fileId}) groupSendFile(
     String groupIdHex,
     String filename,
+    String mimeType,
     List<int> fileData,
     List<int>? thumbnailData,
   ) {
@@ -3259,6 +3260,7 @@ class CyxChatBindings {
 
     final groupIdPtr = calloc<Uint8>(8);
     final filenamePtr = filename.toNativeUtf8();
+    final mimeTypePtr = mimeType.toNativeUtf8();
     final dataPtr = calloc<Uint8>(fileData.length);
     final thumbnailPtr = thumbnailData != null
         ? calloc<Uint8>(thumbnailData.length)
@@ -3288,6 +3290,7 @@ class CyxChatBindings {
         _groupCtx!,
         groupIdPtr,
         filenamePtr.cast(),
+        mimeTypePtr.cast(),
         dataPtr,
         fileData.length,
         thumbnailPtr,
@@ -3316,6 +3319,7 @@ class CyxChatBindings {
     } finally {
       calloc.free(groupIdPtr);
       calloc.free(filenamePtr);
+      calloc.free(mimeTypePtr);
       calloc.free(dataPtr);
       if (thumbnailPtr != nullptr) calloc.free(thumbnailPtr);
       calloc.free(msgIdOut);
@@ -4677,9 +4681,9 @@ late final cyxchat_conn_get_peer_pubkey = _lib.lookupFunction<      Int32 Functi
   // Group Media functions
   late final cyxchat_group_send_file = _lib.lookupFunction<
       Int32 Function(Pointer<Void>, Pointer<Uint8>, Pointer<Int8>,
-          Pointer<Uint8>, Size, Pointer<Uint8>, Size, Pointer<Uint8>,
-          Pointer<Uint8>),
-      int Function(Pointer<Void>, Pointer<Uint8>, Pointer<Int8>,
+          Pointer<Int8>, Pointer<Uint8>, Size, Pointer<Uint8>, Size,
+          Pointer<Uint8>, Pointer<Uint8>),
+      int Function(Pointer<Void>, Pointer<Uint8>, Pointer<Int8>, Pointer<Int8>,
           Pointer<Uint8>, int, Pointer<Uint8>, int, Pointer<Uint8>,
           Pointer<Uint8>)>('cyxchat_group_send_file');
 

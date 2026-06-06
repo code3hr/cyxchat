@@ -123,6 +123,25 @@ class GroupActions {
     return message;
   }
 
+  Future<Message> sendVoice({
+    required String groupId,
+    required List<int> audioData,
+    required int durationMs,
+    String? filename,
+    String? localPath,
+  }) async {
+    final message = await GroupService.instance.sendVoice(
+      groupId: groupId,
+      audioData: audioData,
+      durationMs: durationMs,
+      filename: filename,
+      localPath: localPath,
+    );
+    _ref.invalidate(groupMessagesProvider(groupId));
+    _ref.invalidate(groupsProvider);
+    return message;
+  }
+
   /// Invite contact to group
   Future<void> inviteMember(String groupId, String nodeId) async {
     await GroupService.instance.inviteMember(groupId, nodeId);

@@ -909,6 +909,7 @@ class GroupFFIProvider extends ChangeNotifier {
     required String filename,
     required List<int> fileData,
     List<int>? thumbnailData,
+    String? mimeType,
   }) async {
     final log = LogService.instance;
     if (!_initialized) {
@@ -918,6 +919,7 @@ class GroupFFIProvider extends ChangeNotifier {
     final result = _bindings.groupSendFile(
       groupId,
       filename,
+      mimeType ?? _bindings.fileDetectMime(filename),
       fileData,
       thumbnailData,
     );

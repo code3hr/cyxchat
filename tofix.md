@@ -32,12 +32,14 @@ This file tracks the core chat-app readiness work. Keep each fix small, auditabl
 - [x] Read receipts retry: failed read receipts are deduplicated and retried with capped backoff while the app is running.
 - [x] Native ID persistence audit: direct media remains file-transfer keyed because no chat ACK ID is surfaced; outgoing group file/image rows now persist the returned FFI `msgId` as the message ID.
 - [x] Group message status: native group ACK tracking now emits delivered/failed events and outgoing group message rows update from those callbacks.
+- [x] Group media/voice Dart path: group file sends now pass the native MIME argument, outgoing group media bytes are copied to app support storage, and group voice has service/provider persistence.
 
 ## Next Fixes
 
-1. Group media and voice audit
-   - Check whether group media has the same persistence/status/retry gaps as direct media.
-   - Fix with shared helpers only if it reduces real duplication.
+1. Native group media transport
+   - `cyxchat_group_send_file`, `cyxchat_group_send_image`, and `cyxchat_group_send_voice` still generate IDs/metadata but do not broadcast media payloads to members.
+   - Implement real group media delivery or route group media through a shared transfer path.
+   - Wire incoming group media metadata/content into Dart message persistence.
 
 2. Production verification
    - Run app-level analyzer/build.

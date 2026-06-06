@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
+import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart' show ConflictAlgorithm, Sqflite;
 import 'package:uuid/uuid.dart';
 import '../models/models.dart';
@@ -1139,17 +1141,25 @@ class GroupService {
       throw StateError('Failed to send file: ${result.error}');
     }
 
+    final storedPath = await _storeOutgoingMedia(
+      id: result.fileId ?? result.msgId!,
+      filename: filename,
+      data: fileData,
+      fallbackPath: localPath,
+    );
+
     return _persistOutgoingMediaMessage(
       groupId: groupId,
       msgId: result.msgId!,
       type: MessageType.file,
-      content: localPath ?? filename,
+      content: storedPath ?? localPath ?? filename,
       mediaType: _mediaTypeForFilename(filename),
       mediaMetadata: {
         'filename': filename,
         'size': fileData.length,
         if (result.fileId != null) 'fileId': result.fileId,
-        if (localPath != null) 'localPath': localPath,
+        if (storedPath != null) 'localPath': storedPath,
+        if (storedPath == null && localPath != null) 'localPath': localPath,
       },
     );
   }
@@ -1177,6 +1187,13 @@ class GroupService {
       throw StateError('Failed to send image: ${result.error}');
     }
 
+    final storedPath = await _storeOutgoingMedia(
+      id: result.fileId ?? result.msgId!,
+      filename: filename,
+      data: imageData,
+      fallbackPath: localPath,
+    );
+
     return _persistOutgoingMediaMessage(
       groupId: groupId,
       msgId: result.msgId!,
@@ -1189,9 +1206,56 @@ class GroupService {
         'width': width,
         'height': height,
         if (result.fileId != null) 'fileId': result.fileId,
-        if (localPath != null) 'localPath': localPath,
+        if (storedPath != null) 'localPath': storedPath,
+        if (storedPath == null && localPath != null) 'localPath': localPath,
       },
-      thumbnailPath: localPath,
+      thumbnailPath: storedPath ?? localPath,
+    );
+  }
+
+  Future<Message> sendVoice({
+    required String groupId,
+    required List<int> audioData,
+    required int durationMs,
+    String? filename,
+    String? localPath,
+  }) async {
+    if (_ffiProvider == null || !_ffiProvider!.initialized) {
+      throw StateError('Group FFI not connected');
+    }
+
+    final result = await _ffiProvider!.sendVoice(
+      groupId: groupId,
+      audioData: audioData,
+      durationMs: durationMs,
+    );
+    if (!result.success || result.msgId == null) {
+      throw StateError('Failed to send voice message: ${result.error}');
+    }
+
+    final resolvedFilename =
+        filename ?? 'voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
+    final storedPath = await _storeOutgoingMedia(
+      id: result.msgId!,
+      filename: resolvedFilename,
+      data: audioData,
+      fallbackPath: localPath,
+    );
+
+    return _persistOutgoingMediaMessage(
+      groupId: groupId,
+      msgId: result.msgId!,
+      type: MessageType.audio,
+      content: storedPath ?? localPath ?? resolvedFilename,
+      mediaType: MediaType.voice,
+      mediaMetadata: {
+        'filename': resolvedFilename,
+        'size': audioData.length,
+        'duration': durationMs,
+        'mimeType': 'audio/mp4',
+        if (storedPath != null) 'localPath': storedPath,
+        if (storedPath == null && localPath != null) 'localPath': localPath,
+      },
     );
   }
 
@@ -1267,6 +1331,46 @@ class GroupService {
       default:
         return MediaType.document;
     }
+  }
+
+  Future<String?> _storeOutgoingMedia({
+    required String id,
+    required String filename,
+    required List<int> data,
+    String? fallbackPath,
+  }) async {
+    try {
+      final base = await getApplicationSupportDirectory();
+      final dir = Directory('${base.path}${Platform.pathSeparator}group_media');
+      if (!await dir.exists()) {
+        await dir.create(recursive: true);
+      }
+      final file = File(
+        '${dir.path}${Platform.pathSeparator}${_safePathPart(id)}${_safeExtension(filename)}',
+      );
+      await file.writeAsBytes(data, flush: true);
+      return file.path;
+    } catch (e) {
+      _log.warning('Could not persist outgoing group media: $e',
+          source: 'GroupService');
+      return fallbackPath;
+    }
+  }
+
+  String _safePathPart(String value) {
+    return value.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
+  }
+
+  String _safeExtension(String filename) {
+    final basename = filename.split(RegExp(r'[\\/]')).last;
+    final dot = basename.lastIndexOf('.');
+    if (dot <= 0 || dot == basename.length - 1) return '';
+    final extension = basename.substring(dot);
+    if (extension.length > 16 ||
+        !RegExp(r'^\.[A-Za-z0-9]+$').hasMatch(extension)) {
+      return '';
+    }
+    return extension;
   }
 
   // ============================================================
