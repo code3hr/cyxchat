@@ -294,16 +294,20 @@ class GroupService {
         'Received group media metadata from ${media.fromNodeId.substring(0, 8)}...',
         source: 'GroupService');
 
-    if (_recentGroupMsgIds.contains(media.msgId)) {
+    final hasPayload = media.data != null && media.data!.isNotEmpty;
+    final isDuplicate = _recentGroupMsgIds.contains(media.msgId);
+    if (isDuplicate && !hasPayload) {
       _log.info('Duplicate group media suppressed: ${media.msgId}',
           source: 'GroupService');
       return;
     }
-    _recentGroupMsgIds.add(media.msgId);
-    if (_recentGroupMsgIds.length > 256) {
-      final toRemove =
-          _recentGroupMsgIds.take(_recentGroupMsgIds.length - 128).toList();
-      _recentGroupMsgIds.removeAll(toRemove);
+    if (!isDuplicate) {
+      _recentGroupMsgIds.add(media.msgId);
+      if (_recentGroupMsgIds.length > 256) {
+        final toRemove =
+            _recentGroupMsgIds.take(_recentGroupMsgIds.length - 128).toList();
+        _recentGroupMsgIds.removeAll(toRemove);
+      }
     }
 
     final db = await DatabaseService.instance.database;
@@ -322,7 +326,6 @@ class GroupService {
     final filename = media.filename.isNotEmpty
         ? media.filename
         : 'group_media_${media.fileId}';
-    final hasPayload = media.data != null && media.data!.isNotEmpty;
     final localPath = hasPayload
         ? await _storeIncomingMedia(
             id: media.fileId,
@@ -362,6 +365,19 @@ class GroupService {
       }),
       thumbnailPath: messageType == MessageType.image ? localPath : null,
     );
+
+    if (isDuplicate) {
+      final updated = await db.update(
+        'messages',
+        message.toMap(),
+        where: 'id = ? AND conversation_id = ?',
+        whereArgs: [media.msgId, media.groupId],
+      );
+      if (updated > 0) {
+        _messageController.add(message);
+        return;
+      }
+    }
 
     await db.insert(
       'messages',

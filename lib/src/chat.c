@@ -1035,6 +1035,12 @@ static void on_onion_delivery(
         case CYXCHAT_MSG_GROUP_ADMIN:
         case CYXCHAT_MSG_GROUP_KEY_ACK:
         case CYXCHAT_MSG_GROUP_TEXT_ACK:
+        case CYXCHAT_MSG_GROUP_FILE:
+        case CYXCHAT_MSG_GROUP_FILE_CHUNK:
+        case CYXCHAT_MSG_GROUP_FILE_ACK:
+        case CYXCHAT_MSG_GROUP_VOICE:
+        case CYXCHAT_MSG_GROUP_IMAGE:
+        case CYXCHAT_MSG_GROUP_VIDEO:
             /* Route to group module if registered */
             if (ctx->group_ctx) {
                 CYXWIZ_INFO("Routing group message (type=0x%02x) to group module", type);

@@ -36,13 +36,13 @@ This file tracks the core chat-app readiness work. Keep each fix small, auditabl
 - [x] Native group media metadata transport: group file/image/voice sends now broadcast encrypted typed metadata to members, receivers validate/decrypt it through a media callback, and media metadata delivery participates in group ACK/retry tracking.
 - [x] Incoming group media metadata persistence: Dart FFI now subscribes to native group media callbacks, provider exposes a media stream, and GroupService persists incoming media rows with payload status metadata.
 - [x] Inline group media payload delivery: small group file/image/voice payloads are encrypted into the group media packet and forwarded through the existing incoming media persistence path.
+- [x] Chunked group media payload delivery: larger group file/image/voice payloads are queued as encrypted group chunks from `cyxchat_group_poll`, assembled by receivers, and persisted by updating the pending media row when complete.
 
 ## Next Fixes
 
-1. Chunked group media payload delivery
-   - Small group media payloads are delivered inline, but larger file/image/voice payloads still fall back to metadata-only.
-   - Implement chunked payload delivery or route large group media through a shared transfer path.
-   - Wire completed large payload content into the same incoming group media persistence path.
+1. Group media transfer hardening
+   - Add chunk retry/missing-chunk recovery and progress/error callbacks for large group media.
+   - Add focused native tests for chunk assembly, duplicate chunks, and completion callback behavior.
 
 2. Production verification
    - Run app-level analyzer/build.
