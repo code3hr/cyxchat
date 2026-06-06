@@ -1456,6 +1456,7 @@ class _FileMessageContent extends ConsumerWidget {
     String sizeStr = '';
     String? fileId;
     String? localPath;
+    bool isRetrying = false;
 
     final content = message.content;
     if (content.startsWith('{')) {
@@ -1466,6 +1467,7 @@ class _FileMessageContent extends ConsumerWidget {
         sizeStr = json['size'] as String? ?? '';
         fileId = json['fileId'] as String?;
         localPath = json['localPath'] as String?;
+        isRetrying = json['retrying'] == true;
       } catch (e) {
         debugPrint('Failed to parse file message JSON: $e');
       }
@@ -1534,6 +1536,8 @@ class _FileMessageContent extends ConsumerWidget {
                     _buildStatusText(
                       transfer: transfer,
                       hasFileData: hasFileData,
+                      isRetrying: isRetrying &&
+                          message.status == MessageStatus.sending,
                     ),
                   ],
                 ),
@@ -1597,8 +1601,15 @@ class _FileMessageContent extends ConsumerWidget {
   Widget _buildStatusText({
     required FileTransferInfo? transfer,
     required bool hasFileData,
+    required bool isRetrying,
   }) {
     if (transfer == null) {
+      if (isRetrying) {
+        return const Text(
+          'Retrying...',
+          style: TextStyle(fontSize: 11, color: Colors.cyan),
+        );
+      }
       if (hasFileData) {
         return Text(
           'Tap to save',
@@ -1616,7 +1627,8 @@ class _FileMessageContent extends ConsumerWidget {
 
     switch (transfer.state) {
       case CyxChatFileState.sending:
-        statusText = 'Sending... ${(transfer.progress * 100).toInt()}%';
+        statusText =
+            '${isRetrying ? 'Retrying' : 'Sending'}... ${(transfer.progress * 100).toInt()}%';
         statusColor = Colors.cyan;
         break;
       case CyxChatFileState.receiving:
@@ -1898,12 +1910,14 @@ class _VoiceMessageContent extends ConsumerWidget {
     String? fileId;
     String? localPath;
     int durationSecs = 0;
+    bool isRetrying = false;
 
     try {
       final json = jsonDecode(message.content) as Map<String, dynamic>;
       fileId = json['fileId'] as String?;
       localPath = json['localPath'] as String?;
       durationSecs = json['duration'] as int? ?? 0;
+      isRetrying = json['retrying'] == true;
     } catch (e) {
       debugPrint('Failed to parse voice message: $e');
     }
@@ -1915,6 +1929,10 @@ class _VoiceMessageContent extends ConsumerWidget {
     final isPaused = isThisPlaying && player.state == VoicePlaybackState.paused;
     final hasFileData = fileId != null &&
         fileProvider.hasFileData(fileId, localPath: localPath);
+    final transfer = fileId != null ? fileProvider.transfers[fileId] : null;
+    final isRetryingTransfer = isRetrying &&
+        message.status == MessageStatus.sending &&
+        (transfer == null || transfer.state == CyxChatFileState.sending);
 
     // Format duration
     final duration = Duration(seconds: durationSecs);
@@ -1922,9 +1940,11 @@ class _VoiceMessageContent extends ConsumerWidget {
 
     // Progress for playback
     final progress = isThisPlaying ? player.progress : 0.0;
-    final currentPosition = isThisPlaying
-        ? VoiceRecorderProvider.formatDuration(player.position)
-        : durationStr;
+    final currentPosition = isRetryingTransfer
+        ? 'Retrying...'
+        : isThisPlaying
+            ? VoiceRecorderProvider.formatDuration(player.position)
+            : durationStr;
 
     return Row(
       mainAxisSize: MainAxisSize.min,
@@ -1982,9 +2002,11 @@ class _VoiceMessageContent extends ConsumerWidget {
                     currentPosition,
                     style: TextStyle(
                       fontSize: 11,
-                      color: isOutgoing
-                          ? colorScheme.onPrimary.withOpacity(0.7)
-                          : colorScheme.onSurface.withOpacity(0.6),
+                      color: isRetryingTransfer
+                          ? Colors.cyan
+                          : isOutgoing
+                              ? colorScheme.onPrimary.withOpacity(0.7)
+                              : colorScheme.onSurface.withOpacity(0.6),
                     ),
                   ),
                   // Playback speed button (only while playing)

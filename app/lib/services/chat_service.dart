@@ -631,14 +631,15 @@ class ChatService {
   }
 
   String _contentWithLocalPath(String content, String? localPath) {
-    if (localPath == null || localPath.isEmpty) return content;
-
     try {
       final decoded = jsonDecode(content);
       if (decoded is Map<String, dynamic>) {
-        if (decoded['localPath'] == localPath) return content;
         final updated = Map<String, dynamic>.from(decoded);
-        updated['localPath'] = localPath;
+        if (localPath != null && localPath.isNotEmpty) {
+          updated['localPath'] = localPath;
+        }
+        updated.remove('retrying');
+        if (mapEquals(decoded, updated)) return content;
         return jsonEncode(updated);
       }
     } catch (_) {
@@ -1336,7 +1337,8 @@ class ChatService {
     }
 
     final updatedMetadata = Map<String, dynamic>.from(metadata)
-      ..['fileId'] = result.fileId!;
+      ..['fileId'] = result.fileId!
+      ..['retrying'] = true;
     if (result.localPath != null) {
       updatedMetadata['localPath'] = result.localPath!;
     }
