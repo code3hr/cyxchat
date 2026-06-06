@@ -27,6 +27,14 @@
 #define GROUP_MEDIA_CHUNK_DATA_MAX CYXCHAT_CHUNK_SIZE
 #define GROUP_MEDIA_MAX_TRANSFERS 4
 #define GROUP_MEDIA_CHUNK_INTERVAL_MS 250
+#define GROUP_MEDIA_RX_STALL_MS 3000
+#define GROUP_MEDIA_RX_REQUEST_INTERVAL_MS 5000
+#define GROUP_MEDIA_RX_MAX_REQUESTS 5
+#define GROUP_MEDIA_TX_RETAIN_MS 120000
+#define GROUP_MEDIA_CHUNK_ACK_WIRE_SIZE 71
+#define GROUP_MEDIA_ACK_METADATA 0
+#define GROUP_MEDIA_ACK_CHUNK_REQUEST 1
+#define GROUP_MEDIA_ACK_COMPLETE 2
 #define GROUP_MEDIA_MAX_PLAINTEXT \
     (CYXCHAT_FILE_ID_SIZE + 1 + 8 + 4 + 2 + 2 + 4 + 8 + 1 + 1 + CYXCHAT_MAX_FILENAME + CYXCHAT_MAX_MIME_TYPE + 4 + GROUP_MEDIA_INLINE_MAX)
 #define GROUP_MEDIA_CHUNK_WIRE_MAX \
@@ -133,6 +141,8 @@ typedef struct {
     uint32_t chunk_count;
     uint32_t chunks_received;
     uint64_t updated_at_ms;
+    uint64_t last_request_ms;
+    uint8_t request_count;
     int active;
 } cyxchat_group_media_rx_t;
 
@@ -145,6 +155,7 @@ typedef struct {
     uint32_t key_version;
     uint8_t group_key[32];
     uint64_t last_send_ms;
+    uint64_t completed_at_ms;
     int active;
 } cyxchat_group_media_tx_t;
 
@@ -398,6 +409,67 @@ static int media_chunk_seen(const cyxchat_group_media_rx_t *slot, uint32_t idx) 
 
 static void media_mark_chunk_seen(cyxchat_group_media_rx_t *slot, uint32_t idx) {
     slot->chunk_bitmap[idx / 8] |= (uint8_t)(1U << (idx % 8));
+}
+
+static void write_u32_be(uint8_t *out, size_t *offset, uint32_t value);
+
+static uint32_t media_first_missing_chunk(const cyxchat_group_media_rx_t *slot) {
+    for (uint32_t i = 0; i < slot->chunk_count; i++) {
+        if (!media_chunk_seen(slot, i)) {
+            return i;
+        }
+    }
+    return slot->chunk_count;
+}
+
+static cyxchat_group_media_tx_t* media_tx_find(
+    cyxchat_group_ctx_t *ctx,
+    const cyxchat_msg_id_t *msg_id,
+    const cyxchat_group_id_t *group_id,
+    const uint8_t file_id[CYXCHAT_FILE_ID_SIZE]
+) {
+    for (int i = 0; i < GROUP_MEDIA_MAX_TRANSFERS; i++) {
+        cyxchat_group_media_tx_t *slot = &ctx->media_tx[i];
+        if (slot->active &&
+            memcmp(slot->media.msg_id, msg_id->bytes, CYXCHAT_MSG_ID_SIZE) == 0 &&
+            memcmp(slot->media.group_id, group_id->bytes, CYXCHAT_GROUP_ID_SIZE) == 0 &&
+            memcmp(slot->media.file_id, file_id, CYXCHAT_FILE_ID_SIZE) == 0) {
+            return slot;
+        }
+    }
+    return NULL;
+}
+
+static void media_rx_send_ack(
+    cyxchat_group_ctx_t *ctx,
+    const cyxchat_group_media_rx_t *slot,
+    uint8_t status,
+    uint32_t chunk_index
+) {
+    cyxwiz_onion_ctx_t *onion = cyxchat_get_onion(ctx->chat_ctx);
+    if (!onion) return;
+
+    cyxwiz_node_id_t sender_id;
+    memcpy(sender_id.bytes, slot->media.sender_id, CYXCHAT_NODE_ID_SIZE);
+
+    uint8_t ack_buf[GROUP_MEDIA_CHUNK_ACK_WIRE_SIZE];
+    size_t ack_len = 0;
+    ack_buf[ack_len++] = CYXCHAT_MSG_GROUP_FILE_ACK;
+    ack_buf[ack_len++] = 0;
+    memcpy(ack_buf + ack_len, slot->media.msg_id, CYXCHAT_MSG_ID_SIZE);
+    ack_len += CYXCHAT_MSG_ID_SIZE;
+    memcpy(ack_buf + ack_len, ctx->local_id.bytes, CYXCHAT_NODE_ID_SIZE);
+    ack_len += CYXCHAT_NODE_ID_SIZE;
+    memcpy(ack_buf + ack_len, slot->media.group_id, CYXCHAT_GROUP_ID_SIZE);
+    ack_len += CYXCHAT_GROUP_ID_SIZE;
+    memcpy(ack_buf + ack_len, slot->media.file_id, CYXCHAT_FILE_ID_SIZE);
+    ack_len += CYXCHAT_FILE_ID_SIZE;
+    ack_buf[ack_len++] = status;
+    write_u32_be(ack_buf, &ack_len, chunk_index);
+    write_u32_be(ack_buf, &ack_len, slot->chunks_received);
+    write_u32_be(ack_buf, &ack_len, slot->chunk_count);
+
+    cyxwiz_onion_send_to(onion, &sender_id, ack_buf, ack_len);
 }
 
 static cyxchat_error_t media_rx_prepare(
@@ -1025,10 +1097,14 @@ static int deserialize_group_media_plaintext(
 static int media_tx_send_next(
     cyxchat_group_ctx_t *ctx,
     cyxchat_group_media_tx_t *slot,
-    uint64_t now_ms
+    uint64_t now_ms,
+    const cyxwiz_node_id_t *only_member,
+    uint32_t requested_chunk
 ) {
-    if (!slot->active || slot->next_chunk >= slot->chunk_count) return 0;
-    if (slot->last_send_ms != 0 &&
+    if (!slot->active) return 0;
+    uint32_t chunk_index = only_member ? requested_chunk : slot->next_chunk;
+    if (chunk_index >= slot->chunk_count) return 0;
+    if (!only_member && slot->last_send_ms != 0 &&
         now_ms - slot->last_send_ms < GROUP_MEDIA_CHUNK_INTERVAL_MS) {
         return 0;
     }
@@ -1042,7 +1118,7 @@ static int media_tx_send_next(
         return 1;
     }
 
-    size_t offset = (size_t)slot->next_chunk * GROUP_MEDIA_CHUNK_DATA_MAX;
+    size_t offset = (size_t)chunk_index * GROUP_MEDIA_CHUNK_DATA_MAX;
     if (offset >= slot->data_len) {
         media_tx_free(slot);
         return 1;
@@ -1072,7 +1148,7 @@ static int media_tx_send_next(
         wire, sizeof(wire),
         &msg_id, &group_id, &ctx->local_id,
         slot->key_version, slot->media.file_id,
-        slot->next_chunk, slot->chunk_count,
+        chunk_index, slot->chunk_count,
         ciphertext, ct_len
     );
     if (wire_len == 0) {
@@ -1089,25 +1165,41 @@ static int media_tx_send_next(
     }
 
     int sent_count = 0;
-    for (uint8_t i = 0; i < group->member_count; i++) {
-        if (memcmp(&group->members[i].node_id, &ctx->local_id, CYXCHAT_NODE_ID_SIZE) == 0) {
-            continue;
-        }
-        err = cyxwiz_onion_send_to(onion, &group->members[i].node_id, wire, wire_len);
+    if (only_member) {
+        err = cyxwiz_onion_send_to(onion, only_member, wire, wire_len);
         if (err == CYXWIZ_OK) {
             sent_count++;
         } else {
-            CYXWIZ_WARN("Failed to send group media chunk %u/%u to member %u: %d",
-                        slot->next_chunk + 1, slot->chunk_count, i, err);
+            CYXWIZ_WARN("Failed to resend group media chunk %u/%u: %d",
+                        chunk_index + 1, slot->chunk_count, err);
         }
+    } else {
+        for (uint8_t i = 0; i < group->member_count; i++) {
+            if (memcmp(&group->members[i].node_id, &ctx->local_id, CYXCHAT_NODE_ID_SIZE) == 0) {
+                continue;
+            }
+            err = cyxwiz_onion_send_to(onion, &group->members[i].node_id, wire, wire_len);
+            if (err == CYXWIZ_OK) {
+                sent_count++;
+            } else {
+                CYXWIZ_WARN("Failed to send group media chunk %u/%u to member %u: %d",
+                            chunk_index + 1, slot->chunk_count, i, err);
+            }
+        }
+    }
+
+    if (only_member) {
+        CYXWIZ_INFO("Resent group media chunk %u/%u to requester",
+                    chunk_index + 1, slot->chunk_count);
+        return sent_count > 0 ? 1 : 0;
     }
 
     slot->next_chunk++;
     slot->last_send_ms = now_ms;
-    if (slot->next_chunk >= slot->chunk_count) {
+    if (slot->next_chunk >= slot->chunk_count && slot->completed_at_ms == 0) {
         CYXWIZ_INFO("Queued all group media chunks to %d/%u members",
                     sent_count, group->member_count - 1);
-        media_tx_free(slot);
+        slot->completed_at_ms = now_ms;
     }
     return 1;
 }
@@ -1116,8 +1208,53 @@ static int media_tx_poll(cyxchat_group_ctx_t *ctx, uint64_t now_ms) {
     int events = 0;
     for (int i = 0; i < GROUP_MEDIA_MAX_TRANSFERS; i++) {
         if (ctx->media_tx[i].active) {
-            events += media_tx_send_next(ctx, &ctx->media_tx[i], now_ms);
+            if (ctx->media_tx[i].completed_at_ms != 0 &&
+                now_ms - ctx->media_tx[i].completed_at_ms >= GROUP_MEDIA_TX_RETAIN_MS) {
+                media_tx_free(&ctx->media_tx[i]);
+                events++;
+                continue;
+            }
+            events += media_tx_send_next(ctx, &ctx->media_tx[i], now_ms, NULL, 0);
         }
+    }
+    return events;
+}
+
+static int media_rx_poll(cyxchat_group_ctx_t *ctx, uint64_t now_ms) {
+    int events = 0;
+    for (int i = 0; i < GROUP_MEDIA_MAX_TRANSFERS; i++) {
+        cyxchat_group_media_rx_t *slot = &ctx->media_rx[i];
+        if (!slot->active || slot->chunks_received >= slot->chunk_count) {
+            continue;
+        }
+
+        uint64_t since_update = now_ms - slot->updated_at_ms;
+        uint64_t since_request = now_ms - slot->last_request_ms;
+        if (since_update < GROUP_MEDIA_RX_STALL_MS ||
+            (slot->last_request_ms != 0 &&
+             since_request < GROUP_MEDIA_RX_REQUEST_INTERVAL_MS)) {
+            continue;
+        }
+
+        uint32_t missing = media_first_missing_chunk(slot);
+        if (missing >= slot->chunk_count) {
+            continue;
+        }
+
+        if (slot->request_count >= GROUP_MEDIA_RX_MAX_REQUESTS) {
+            CYXWIZ_WARN("Abandoning stalled group media receive after retries");
+            media_rx_free(slot);
+            events++;
+            continue;
+        }
+
+        media_rx_send_ack(ctx, slot, GROUP_MEDIA_ACK_CHUNK_REQUEST, missing);
+        slot->last_request_ms = now_ms;
+        slot->request_count++;
+        CYXWIZ_INFO("Requested missing group media chunk %u/%u (retry %u/%u)",
+                    missing + 1, slot->chunk_count,
+                    slot->request_count, GROUP_MEDIA_RX_MAX_REQUESTS);
+        events++;
     }
     return events;
 }
@@ -2269,6 +2406,7 @@ int cyxchat_group_poll(cyxchat_group_ctx_t *ctx, uint64_t now_ms) {
     pending_grp_check_timeouts(ctx, now_ms);
 
     events += media_tx_poll(ctx, now_ms);
+    events += media_rx_poll(ctx, now_ms);
 
     /* Process active key distribution jobs */
     for (int i = 0; i < CYXCHAT_MAX_KEY_DIST_JOBS; i++) {
@@ -3903,12 +4041,73 @@ static void handle_group_media_chunk(
     if (slot->chunks_received == slot->chunk_count) {
         CYXWIZ_INFO("Completed group media payload assembly (%llu bytes)",
                     (unsigned long long)slot->media.file_size);
+        media_rx_send_ack(ctx, slot, GROUP_MEDIA_ACK_COMPLETE, slot->chunk_count);
         if (ctx->on_media) {
             ctx->on_media(ctx, &slot->media, slot->data,
                           (size_t)slot->media.file_size, ctx->on_media_data);
         }
         media_rx_free(slot);
     }
+}
+
+static int handle_group_media_chunk_ack(
+    cyxchat_group_ctx_t *ctx,
+    const cyxwiz_node_id_t *from,
+    const uint8_t *data,
+    size_t len
+) {
+    if (len < GROUP_MEDIA_CHUNK_ACK_WIRE_SIZE) {
+        return 0;
+    }
+
+    size_t offset = 2; /* type + flags */
+    cyxchat_msg_id_t msg_id;
+    memcpy(msg_id.bytes, data + offset, CYXCHAT_MSG_ID_SIZE);
+    offset += CYXCHAT_MSG_ID_SIZE;
+
+    cyxwiz_node_id_t acker_id;
+    memcpy(acker_id.bytes, data + offset, CYXCHAT_NODE_ID_SIZE);
+    offset += CYXCHAT_NODE_ID_SIZE;
+
+    if (from && memcmp(from, &acker_id, CYXCHAT_NODE_ID_SIZE) != 0) {
+        CYXWIZ_WARN("Ignoring group media chunk ACK with mismatched sender");
+        return 1;
+    }
+
+    cyxchat_group_id_t group_id;
+    memcpy(group_id.bytes, data + offset, CYXCHAT_GROUP_ID_SIZE);
+    offset += CYXCHAT_GROUP_ID_SIZE;
+
+    uint8_t file_id[CYXCHAT_FILE_ID_SIZE];
+    memcpy(file_id, data + offset, CYXCHAT_FILE_ID_SIZE);
+    offset += CYXCHAT_FILE_ID_SIZE;
+
+    uint8_t status = data[offset++];
+    uint32_t chunk_index = read_u32_be(data, &offset);
+    uint32_t chunks_received = read_u32_be(data, &offset);
+    uint32_t chunk_count = read_u32_be(data, &offset);
+
+    cyxchat_group_media_tx_t *slot = media_tx_find(ctx, &msg_id, &group_id, file_id);
+    if (!slot) {
+        CYXWIZ_DEBUG("Group media chunk ACK for unknown/expired transfer");
+        return 1;
+    }
+    if (chunk_count != slot->chunk_count) {
+        CYXWIZ_WARN("Ignoring group media chunk ACK with mismatched chunk count");
+        return 1;
+    }
+
+    if (status == GROUP_MEDIA_ACK_CHUNK_REQUEST) {
+        if (chunk_index >= slot->chunk_count) {
+            CYXWIZ_WARN("Ignoring invalid group media chunk request");
+            return 1;
+        }
+        media_tx_send_next(ctx, slot, cyxchat_timestamp_ms(), &acker_id, chunk_index);
+    } else if (status == GROUP_MEDIA_ACK_COMPLETE) {
+        CYXWIZ_DEBUG("Group media receiver completed %u/%u chunks",
+                     chunks_received, chunk_count);
+    }
+    return 1;
 }
 
 /**
@@ -4500,7 +4699,6 @@ static void handle_group_msg_ack(
     const uint8_t *data,
     size_t len
 ) {
-    (void)from;
     /* Wire format: type(1) + flags(1) + msg_id(8) + sender_id(32) + group_id(8) = 50 */
     if (len < 50) {
         CYXWIZ_WARN("Group message ACK too short: %zu", len);
@@ -4508,6 +4706,11 @@ static void handle_group_msg_ack(
     }
 
     uint8_t ack_type = data[0];
+    if (ack_type == CYXCHAT_MSG_GROUP_FILE_ACK &&
+        handle_group_media_chunk_ack(ctx, from, data, len)) {
+        return;
+    }
+
     size_t offset = 2; /* skip type + flags */
     cyxchat_msg_id_t msg_id;
     memcpy(&msg_id, data + offset, CYXCHAT_MSG_ID_SIZE);
