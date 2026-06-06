@@ -1,4 +1,4 @@
-name: Build and Release
+name: Release Builds
 
 on:
   push:
@@ -13,241 +13,176 @@ permissions:
   contents: write
 
 env:
-  FLUTTER_VERSION: '3.24.0'
+  FLUTTER_CHANNEL: stable
+  ANDROID_NDK_VERSION: '27.0.12077973'
+  ANDROID_API_LEVEL: '23'
+  LIBSODIUM_VERSION: '1.0.20'
 
 jobs:
-  build-windows:
-    runs-on: windows-latest
-    steps:
-      - name: Checkout CyxChat
-        uses: actions/checkout@v4
-        with:
-          path: cyxchat
-
-      - name: Checkout CyxWiz (parent)
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ github.repository_owner }}/conspiracy
-          path: cyxwiz
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          channel: stable
-          cache: true
-
-      - name: Install vcpkg and libsodium
-        run: |
-          if not exist C:\vcpkg git clone https://github.com/microsoft/vcpkg.git C:\vcpkg
-          C:\vcpkg\bootstrap-vcpkg.bat
-          C:\vcpkg\vcpkg install libsodium:x64-windows
-        shell: cmd
-
-      - name: Build CyxWiz library
-        run: |
-          cd cyxwiz
-          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake -DCYXWIZ_BUILD_TOOLS=OFF
-          cmake --build build --config Release
-        shell: cmd
-
-      - name: Find sodium path
-        id: sodium
-        run: |
-          # vcpkg with toolchain installs to packages/, not installed/
-          if (Test-Path "C:\vcpkg\packages\libsodium_x64-windows\include\sodium.h") {
-            echo "SODIUM_INCLUDE=C:/vcpkg/packages/libsodium_x64-windows/include" >> $env:GITHUB_OUTPUT
-            echo "SODIUM_LIBRARY=C:/vcpkg/packages/libsodium_x64-windows/lib/libsodium.lib" >> $env:GITHUB_OUTPUT
-            echo "Found in packages directory"
-          } elseif (Test-Path "C:\vcpkg\installed\x64-windows\include\sodium.h") {
-            echo "SODIUM_INCLUDE=C:/vcpkg/installed/x64-windows/include" >> $env:GITHUB_OUTPUT
-            echo "SODIUM_LIBRARY=C:/vcpkg/installed/x64-windows/lib/libsodium.lib" >> $env:GITHUB_OUTPUT
-            echo "Found in installed directory"
-          } else {
-            echo "ERROR: sodium.h not found!"
-            Get-ChildItem -Path "C:\vcpkg" -Recurse -Name "sodium.h" -ErrorAction SilentlyContinue | Select-Object -First 5
-            exit 1
-          }
-        shell: pwsh
-
-      - name: Build CyxChat library
-        run: |
-          cd cyxchat\lib
-          cmake -B build -DCMAKE_BUILD_TYPE=Release ^
-            "-DCYXWIZ_LIBRARY=${{ github.workspace }}\cyxwiz\build\Release\cyxwiz.lib" ^
-            "-DCYXWIZ_INCLUDE_DIR=${{ github.workspace }}\cyxwiz\include" ^
-            "-DSODIUM_INCLUDE_DIR=${{ steps.sodium.outputs.SODIUM_INCLUDE }}" ^
-            "-DSODIUM_LIBRARY=${{ steps.sodium.outputs.SODIUM_LIBRARY }}" ^
-            -DCYXCHAT_BUILD_TESTS=OFF
-          cmake --build build --config Release
-        shell: cmd
-
-      - name: Build Flutter app
-        run: |
-          cd cyxchat/app
-          flutter pub get
-          flutter build windows --release
-        shell: pwsh
-
-      - name: Copy DLLs to release
-        run: |
-          $dest = "cyxchat/app/build/windows/x64/runner/Release"
-          Write-Host "Destination: $dest"
-          Write-Host "Checking if destination exists..."
-          if (-not (Test-Path $dest)) {
-            Write-Host "ERROR: Flutter build output not found at $dest"
-            Get-ChildItem -Path "cyxchat/app/build" -Recurse -Directory | Select-Object -First 10
-            exit 1
-          }
-          Write-Host "Copying cyxchat.dll..."
-          Copy-Item "cyxchat/lib/build/Release/cyxchat.dll" $dest
-          Write-Host "Finding libsodium.dll..."
-          if (Test-Path "C:/vcpkg/packages/libsodium_x64-windows/bin/libsodium.dll") {
-            Write-Host "Found in packages/bin/"
-            Copy-Item "C:/vcpkg/packages/libsodium_x64-windows/bin/libsodium.dll" $dest
-          } elseif (Test-Path "C:/vcpkg/installed/x64-windows/bin/libsodium.dll") {
-            Write-Host "Found in installed/bin/"
-            Copy-Item "C:/vcpkg/installed/x64-windows/bin/libsodium.dll" $dest
-          } else {
-            Write-Host "WARNING: libsodium.dll not found, searching..."
-            Get-ChildItem -Path "C:/vcpkg" -Recurse -Name "libsodium.dll" -ErrorAction SilentlyContinue | Select-Object -First 5
-          }
-          Write-Host "DLLs copied successfully"
-        shell: pwsh
-
-      - name: Create ZIP package
-        run: |
-          cd cyxchat/app/build/windows/x64/runner
-          Compress-Archive -Path Release/* -DestinationPath CyxChat-Windows-x64.zip
-        shell: pwsh
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: CyxChat-Windows-x64
-          path: cyxchat/app/build/windows/x64/runner/CyxChat-Windows-x64.zip
-
-      - name: Create Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v1
-        with:
-          files: cyxchat/app/build/windows/x64/runner/CyxChat-Windows-x64.zip
-          draft: false
-          prerelease: ${{ contains(github.ref, '-') }}
-          generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  build-linux:
+  validate-flutter:
+    name: Validate Flutter
     runs-on: ubuntu-latest
     steps:
       - name: Checkout CyxChat
         uses: actions/checkout@v4
-        with:
-          path: cyxchat
-
-      - name: Checkout CyxWiz (parent)
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ github.repository_owner }}/conspiracy
-          path: cyxwiz
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake ninja-build libsodium-dev libbluetooth-dev
-          sudo apt-get install -y clang git pkg-config libgtk-3-dev liblzma-dev libstdc++-12-dev libsecret-1-dev
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          channel: stable
+          channel: ${{ env.FLUTTER_CHANNEL }}
           cache: true
 
-      - name: Build CyxWiz library
-        run: |
-          cd cyxwiz
-          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DCYXWIZ_BUILD_TOOLS=OFF
-          cmake --build build --config Release
+      - name: Install dependencies
+        working-directory: app
+        run: flutter pub get
 
-      - name: Build CyxChat library
-        run: |
-          cd cyxchat/lib
-          cmake -B build -DCMAKE_BUILD_TYPE=Release \
-            "-DCYXWIZ_LIBRARY=${{ github.workspace }}/cyxwiz/build/libcyxwiz.a" \
-            "-DCYXWIZ_INCLUDE_DIR=${{ github.workspace }}/cyxwiz/include" \
-            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-            -DCYXCHAT_BUILD_TESTS=OFF \
-            "-DSODIUM_INCLUDE_DIR=/usr/include" \
-            "-DSODIUM_LIBRARY=/usr/lib/x86_64-linux-gnu/libsodium.so"
-          cmake --build build --config Release
+      - name: Analyze
+        working-directory: app
+        run: dart analyze .
 
-      - name: Build Flutter app
-        run: |
-          cd cyxchat/app
-          flutter create --platforms=linux .
-          flutter pub get
-          flutter build linux --release
+      - name: Test
+        working-directory: app
+        run: flutter test
 
-      - name: Copy libraries to release
-        run: |
-          cp cyxchat/lib/build/libcyxchat.so cyxchat/app/build/linux/x64/release/bundle/lib/
-
-      - name: Create tarball
-        run: |
-          cd cyxchat/app/build/linux/x64/release
-          tar -czvf CyxChat-Linux-x64.tar.gz bundle/
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: CyxChat-Linux-x64
-          path: cyxchat/app/build/linux/x64/release/CyxChat-Linux-x64.tar.gz
-
-      - name: Create Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v1
-        with:
-          files: cyxchat/app/build/linux/x64/release/CyxChat-Linux-x64.tar.gz
-          draft: false
-          prerelease: ${{ contains(github.ref, '-') }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  build-macos:
-    runs-on: macos-latest
+  build-windows:
+    name: Build Windows
+    runs-on: windows-latest
+    needs: validate-flutter
     steps:
       - name: Checkout CyxChat
         uses: actions/checkout@v4
         with:
           path: cyxchat
 
-      - name: Checkout CyxWiz (parent)
+      - name: Checkout CyxWiz
         uses: actions/checkout@v4
         with:
           repository: ${{ github.repository_owner }}/conspiracy
           path: cyxwiz
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Install dependencies
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: ${{ env.FLUTTER_CHANNEL }}
+          cache: true
+
+      - name: Install native dependencies
+        shell: pwsh
         run: |
-          brew install libsodium cmake ninja
+          if (-not (Test-Path C:\vcpkg\vcpkg.exe)) {
+            git clone https://github.com/microsoft/vcpkg.git C:\vcpkg
+            C:\vcpkg\bootstrap-vcpkg.bat
+          }
+          C:\vcpkg\vcpkg install libsodium:x64-windows
+
+      - name: Build CyxWiz
+        shell: pwsh
+        working-directory: cyxwiz
+        run: |
+          cmake -B build `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake `
+            -DCYXWIZ_BUILD_TOOLS=OFF
+          cmake --build build --config Release
+
+      - name: Locate libsodium
+        id: sodium
+        shell: pwsh
+        run: |
+          $candidates = @(
+            'C:/vcpkg/installed/x64-windows',
+            'C:/vcpkg/packages/libsodium_x64-windows'
+          )
+          foreach ($root in $candidates) {
+            if (Test-Path "$root/include/sodium.h") {
+              "include=$root/include" >> $env:GITHUB_OUTPUT
+              "library=$root/lib/libsodium.lib" >> $env:GITHUB_OUTPUT
+              "bin=$root/bin" >> $env:GITHUB_OUTPUT
+              exit 0
+            }
+          }
+          Write-Error 'libsodium was not found after vcpkg install'
+          exit 1
+
+      - name: Build CyxChat native library
+        shell: pwsh
+        working-directory: cyxchat/lib
+        run: |
+          cmake -B build `
+            -DCMAKE_BUILD_TYPE=Release `
+            "-DCYXWIZ_LIBRARY=${{ github.workspace }}/cyxwiz/build/Release/cyxwiz.lib" `
+            "-DCYXWIZ_INCLUDE_DIR=${{ github.workspace }}/cyxwiz/include" `
+            "-DSODIUM_INCLUDE_DIR=${{ steps.sodium.outputs.include }}" `
+            "-DSODIUM_LIBRARY=${{ steps.sodium.outputs.library }}" `
+            -DCYXCHAT_BUILD_TESTS=OFF
+          cmake --build build --config Release
+
+      - name: Build Flutter Windows app
+        shell: pwsh
+        working-directory: cyxchat/app
+        run: |
+          flutter pub get
+          flutter build windows --release
+
+      - name: Copy runtime dependencies
+        shell: pwsh
+        run: |
+          $dest = 'cyxchat/app/build/windows/x64/runner/Release'
+          if (Test-Path '${{ steps.sodium.outputs.bin }}/libsodium.dll') {
+            Copy-Item '${{ steps.sodium.outputs.bin }}/libsodium.dll' $dest -Force
+          }
+          if (Test-Path 'C:/vcpkg/installed/x64-windows/bin/miniupnpc.dll') {
+            Copy-Item 'C:/vcpkg/installed/x64-windows/bin/miniupnpc.dll' $dest -Force
+          }
+
+      - name: Package Windows artifact
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path release-assets | Out-Null
+          Compress-Archive `
+            -Path cyxchat/app/build/windows/x64/runner/Release/* `
+            -DestinationPath release-assets/CyxChat-Windows-x64.zip `
+            -Force
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CyxChat-Windows-x64
+          path: release-assets/CyxChat-Windows-x64.zip
+
+  build-macos:
+    name: Build macOS
+    runs-on: macos-latest
+    needs: validate-flutter
+    steps:
+      - name: Checkout CyxChat
+        uses: actions/checkout@v4
+        with:
+          path: cyxchat
+
+      - name: Checkout CyxWiz
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/conspiracy
+          path: cyxwiz
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install native dependencies
+        run: brew install libsodium cmake ninja
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          channel: stable
+          channel: ${{ env.FLUTTER_CHANNEL }}
           cache: true
 
-      - name: Build CyxWiz library
+      - name: Build CyxWiz
+        working-directory: cyxwiz
         run: |
-          cd cyxwiz
-          SODIUM_PREFIX=$(brew --prefix libsodium)
-          cmake -B build -DCMAKE_BUILD_TYPE=Release \
+          SODIUM_PREFIX="$(brew --prefix libsodium)"
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
             -DCYXWIZ_BUILD_TOOLS=OFF \
             -DCYXWIZ_TRANSPORT_BLUETOOTH=OFF \
@@ -256,73 +191,66 @@ jobs:
             "-DSODIUM_LIBRARY=${SODIUM_PREFIX}/lib/libsodium.a"
           cmake --build build --config Release
 
-      - name: Build CyxChat library
+      - name: Build CyxChat native library
+        working-directory: cyxchat/lib
         run: |
-          cd cyxchat/lib
-          SODIUM_PREFIX=$(brew --prefix libsodium)
-          cmake -B build -DCMAKE_BUILD_TYPE=Release \
+          SODIUM_PREFIX="$(brew --prefix libsodium)"
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
             "-DCYXWIZ_LIBRARY=${{ github.workspace }}/cyxwiz/build/libcyxwiz.a" \
             "-DCYXWIZ_INCLUDE_DIR=${{ github.workspace }}/cyxwiz/include" \
-            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-            -DCYXCHAT_BUILD_TESTS=OFF \
             "-DSODIUM_INCLUDE_DIR=${SODIUM_PREFIX}/include" \
-            "-DSODIUM_LIBRARY=${SODIUM_PREFIX}/lib/libsodium.a"
+            "-DSODIUM_LIBRARY=${SODIUM_PREFIX}/lib/libsodium.a" \
+            -DCYXCHAT_BUILD_TESTS=OFF
           cmake --build build --config Release
 
-      - name: Build Flutter app
+      - name: Build Flutter macOS app
+        working-directory: cyxchat/app
         run: |
-          cd cyxchat/app
           flutter create --platforms=macos .
-          # Update minimum macOS version for record_macos plugin
           sed -i '' 's/platform :osx, .*/platform :osx, "10.15"/' macos/Podfile
-          # Also update MACOSX_DEPLOYMENT_TARGET in Xcode project (10.14 -> 10.15)
           sed -i '' 's/MACOSX_DEPLOYMENT_TARGET = 10.14/MACOSX_DEPLOYMENT_TARGET = 10.15/g' macos/Runner.xcodeproj/project.pbxproj
           flutter pub get
           flutter build macos --release
 
-      - name: Copy libraries to release
+      - name: Bundle native library
         run: |
-          # Find the .app bundle (could be cyxchat.app or app.app depending on flutter create)
-          APP_BUNDLE=$(find cyxchat/app/build/macos/Build/Products/Release -name "*.app" -type d | head -1)
-          echo "Found app bundle: $APP_BUNDLE"
+          APP_BUNDLE="$(find cyxchat/app/build/macos/Build/Products/Release -name '*.app' -type d | head -1)"
+          if [ -z "$APP_BUNDLE" ]; then
+            echo 'macOS app bundle not found'
+            exit 1
+          fi
           mkdir -p "$APP_BUNDLE/Contents/Frameworks"
-          cp cyxchat/lib/build/libcyxchat.dylib "$APP_BUNDLE/Contents/Frameworks/"
-          # Rename to CyxChat.app for consistency
-          mv "$APP_BUNDLE" "cyxchat/app/build/macos/Build/Products/Release/CyxChat.app"
+          cp cyxchat/lib/build/libcyxchat.dylib "$APP_BUNDLE/Contents/Frameworks/libcyxchat.dylib"
+          if [ "$APP_BUNDLE" != "cyxchat/app/build/macos/Build/Products/Release/CyxChat.app" ]; then
+            rm -rf cyxchat/app/build/macos/Build/Products/Release/CyxChat.app
+            mv "$APP_BUNDLE" cyxchat/app/build/macos/Build/Products/Release/CyxChat.app
+          fi
 
-      - name: Create DMG package
+      - name: Package macOS artifact
         run: |
+          mkdir -p release-assets
           cd cyxchat/app/build/macos/Build/Products/Release
-          hdiutil create -volname "CyxChat" -srcfolder "CyxChat.app" -ov -format UDZO CyxChat-macOS.dmg
+          hdiutil create -volname 'CyxChat' -srcfolder 'CyxChat.app' -ov -format UDZO "$GITHUB_WORKSPACE/release-assets/CyxChat-macOS.dmg"
 
-      - name: Upload artifact
+      - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
         with:
           name: CyxChat-macOS
-          path: cyxchat/app/build/macos/Build/Products/Release/CyxChat-macOS.dmg
-
-      - name: Create Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v1
-        with:
-          files: cyxchat/app/build/macos/Build/Products/Release/CyxChat-macOS.dmg
-          draft: false
-          prerelease: ${{ contains(github.ref, '-') }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          path: release-assets/CyxChat-macOS.dmg
 
   build-android:
+    name: Build Android
     runs-on: ubuntu-latest
-    env:
-      ANDROID_NDK_VERSION: '27.0.12077973'
-      ANDROID_API_LEVEL: '23'
+    needs: validate-flutter
     steps:
       - name: Checkout CyxChat
         uses: actions/checkout@v4
         with:
           path: cyxchat
 
-      - name: Checkout CyxWiz (parent)
+      - name: Checkout CyxWiz
         uses: actions/checkout@v4
         with:
           repository: ${{ github.repository_owner }}/conspiracy
@@ -332,7 +260,7 @@ jobs:
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
-          distribution: 'zulu'
+          distribution: zulu
           java-version: '17'
 
       - name: Setup Android SDK
@@ -340,193 +268,155 @@ jobs:
 
       - name: Install Android NDK
         run: |
-          echo "y" | sdkmanager --install "ndk;${{ env.ANDROID_NDK_VERSION }}"
-          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${{ env.ANDROID_NDK_VERSION }}" >> $GITHUB_ENV
+          yes | sdkmanager --install "ndk;${{ env.ANDROID_NDK_VERSION }}"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${{ env.ANDROID_NDK_VERSION }}" >> "$GITHUB_ENV"
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          channel: stable
+          channel: ${{ env.FLUTTER_CHANNEL }}
           cache: true
 
-      - name: Install build dependencies
+      - name: Install native build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build
+          sudo apt-get install -y autoconf automake build-essential cmake libtool ninja-build
 
-      - name: Download libsodium
+      - name: Build libsodium for Android
         run: |
-          curl -L -o libsodium.tar.gz https://download.libsodium.org/libsodium/releases/libsodium-1.0.20.tar.gz
+          curl -L -o libsodium.tar.gz "https://download.libsodium.org/libsodium/releases/libsodium-${{ env.LIBSODIUM_VERSION }}.tar.gz"
           tar -xzf libsodium.tar.gz
-          mv libsodium-1.0.20 libsodium
-
-      - name: Build libsodium for Android (arm64-v8a)
-        run: |
+          mv "libsodium-${{ env.LIBSODIUM_VERSION }}" libsodium
           cd libsodium
-          export ANDROID_NDK_HOME=$ANDROID_NDK_HOME
-          export NDK_PLATFORM=android-${{ env.ANDROID_API_LEVEL }}
+          export ANDROID_NDK_HOME="$ANDROID_NDK_HOME"
+          export NDK_PLATFORM="android-${{ env.ANDROID_API_LEVEL }}"
           export LIBSODIUM_FULL_BUILD=1
           ./dist-build/android-armv8-a.sh
-
-      - name: Build libsodium for Android (armeabi-v7a)
-        run: |
-          cd libsodium
-          export ANDROID_NDK_HOME=$ANDROID_NDK_HOME
-          export NDK_PLATFORM=android-${{ env.ANDROID_API_LEVEL }}
-          export LIBSODIUM_FULL_BUILD=1
           ./dist-build/android-armv7-a.sh
-
-      - name: Build libsodium for Android (x86_64)
-        run: |
-          cd libsodium
-          export ANDROID_NDK_HOME=$ANDROID_NDK_HOME
-          export NDK_PLATFORM=android-${{ env.ANDROID_API_LEVEL }}
-          export LIBSODIUM_FULL_BUILD=1
           ./dist-build/android-x86_64.sh
 
-      - name: Build libcyxwiz for Android (arm64-v8a)
+      - name: Build CyxWiz for Android
         run: |
-          cd cyxwiz
-          SODIUM_ROOT=${{ github.workspace }}/libsodium/libsodium-android-armv8-a+crypto
-          cmake -B build-android-arm64 \
-            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
-            -DANDROID_ABI=arm64-v8a \
-            -DANDROID_PLATFORM=android-${{ env.ANDROID_API_LEVEL }} \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCYXWIZ_BUILD_TESTS=OFF \
-            -DCYXWIZ_BUILD_TOOLS=OFF \
-            -DCYXWIZ_HAS_CRYPTO=ON \
-            -DCYXWIZ_TRANSPORT_BLUETOOTH=OFF \
-            -DCYXWIZ_TRANSPORT_WIFI=OFF \
-            -DCYXWIZ_TRANSPORT_LORA=OFF \
-            -DSODIUM_INCLUDE_DIR=$SODIUM_ROOT/include \
-            -DSODIUM_LIBRARY=$SODIUM_ROOT/lib/libsodium.a \
-            -G Ninja
-          cmake --build build-android-arm64 --config Release
+          for row in \
+            "arm64-v8a build-android-arm64 $GITHUB_WORKSPACE/libsodium/libsodium-android-armv8-a+crypto" \
+            "armeabi-v7a build-android-arm32 $GITHUB_WORKSPACE/libsodium/libsodium-android-armv7-a" \
+            "x86_64 build-android-x64 $GITHUB_WORKSPACE/libsodium/libsodium-android-westmere"
+          do
+            set -- $row
+            ABI="$1"
+            BUILD_DIR="$2"
+            SODIUM_ROOT="$3"
+            cmake -S cyxwiz -B "cyxwiz/$BUILD_DIR" \
+              -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
+              -DANDROID_ABI="$ABI" \
+              -DANDROID_PLATFORM="android-${{ env.ANDROID_API_LEVEL }}" \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCYXWIZ_BUILD_TESTS=OFF \
+              -DCYXWIZ_BUILD_TOOLS=OFF \
+              -DCYXWIZ_HAS_CRYPTO=ON \
+              -DCYXWIZ_TRANSPORT_BLUETOOTH=OFF \
+              -DCYXWIZ_TRANSPORT_WIFI=OFF \
+              -DCYXWIZ_TRANSPORT_LORA=OFF \
+              -DSODIUM_INCLUDE_DIR="$SODIUM_ROOT/include" \
+              -DSODIUM_LIBRARY="$SODIUM_ROOT/lib/libsodium.a" \
+              -G Ninja
+            cmake --build "cyxwiz/$BUILD_DIR" --config Release
+          done
 
-      - name: Build libcyxwiz for Android (armeabi-v7a)
+      - name: Build CyxChat for Android
         run: |
-          cd cyxwiz
-          SODIUM_ROOT=${{ github.workspace }}/libsodium/libsodium-android-armv7-a
-          cmake -B build-android-arm32 \
-            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
-            -DANDROID_ABI=armeabi-v7a \
-            -DANDROID_PLATFORM=android-${{ env.ANDROID_API_LEVEL }} \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCYXWIZ_BUILD_TESTS=OFF \
-            -DCYXWIZ_BUILD_TOOLS=OFF \
-            -DCYXWIZ_HAS_CRYPTO=ON \
-            -DCYXWIZ_TRANSPORT_BLUETOOTH=OFF \
-            -DCYXWIZ_TRANSPORT_WIFI=OFF \
-            -DCYXWIZ_TRANSPORT_LORA=OFF \
-            -DSODIUM_INCLUDE_DIR=$SODIUM_ROOT/include \
-            -DSODIUM_LIBRARY=$SODIUM_ROOT/lib/libsodium.a \
-            -G Ninja
-          cmake --build build-android-arm32 --config Release
+          for row in \
+            "arm64-v8a build-android-arm64 $GITHUB_WORKSPACE/libsodium/libsodium-android-armv8-a+crypto" \
+            "armeabi-v7a build-android-arm32 $GITHUB_WORKSPACE/libsodium/libsodium-android-armv7-a" \
+            "x86_64 build-android-x64 $GITHUB_WORKSPACE/libsodium/libsodium-android-westmere"
+          do
+            set -- $row
+            ABI="$1"
+            BUILD_DIR="$2"
+            SODIUM_ROOT="$3"
+            cmake -S cyxchat/lib -B "cyxchat/lib/$BUILD_DIR" \
+              -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
+              -DANDROID_ABI="$ABI" \
+              -DANDROID_PLATFORM="android-${{ env.ANDROID_API_LEVEL }}" \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCYXWIZ_ROOT="$GITHUB_WORKSPACE/cyxwiz" \
+              -DCYXWIZ_BUILD_DIR="$GITHUB_WORKSPACE/cyxwiz/$BUILD_DIR" \
+              -DSODIUM_INCLUDE_DIR="$SODIUM_ROOT/include" \
+              -DSODIUM_LIBRARY="$SODIUM_ROOT/lib/libsodium.a" \
+              -DCYXCHAT_BUILD_TESTS=OFF \
+              -DCYXCHAT_BUILD_STATIC=OFF \
+              -G Ninja
+            cmake --build "cyxchat/lib/$BUILD_DIR" --config Release
+          done
 
-      - name: Build libcyxwiz for Android (x86_64)
-        run: |
-          cd cyxwiz
-          SODIUM_ROOT=${{ github.workspace }}/libsodium/libsodium-android-westmere
-          cmake -B build-android-x64 \
-            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
-            -DANDROID_ABI=x86_64 \
-            -DANDROID_PLATFORM=android-${{ env.ANDROID_API_LEVEL }} \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCYXWIZ_BUILD_TESTS=OFF \
-            -DCYXWIZ_BUILD_TOOLS=OFF \
-            -DCYXWIZ_HAS_CRYPTO=ON \
-            -DCYXWIZ_TRANSPORT_BLUETOOTH=OFF \
-            -DCYXWIZ_TRANSPORT_WIFI=OFF \
-            -DCYXWIZ_TRANSPORT_LORA=OFF \
-            -DSODIUM_INCLUDE_DIR=$SODIUM_ROOT/include \
-            -DSODIUM_LIBRARY=$SODIUM_ROOT/lib/libsodium.a \
-            -G Ninja
-          cmake --build build-android-x64 --config Release
-
-      - name: Build libcyxchat for Android (arm64-v8a)
-        run: |
-          cd cyxchat/lib
-          SODIUM_ROOT=${{ github.workspace }}/libsodium/libsodium-android-armv8-a+crypto
-          cmake -B build-android-arm64 \
-            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
-            -DANDROID_ABI=arm64-v8a \
-            -DANDROID_PLATFORM=android-${{ env.ANDROID_API_LEVEL }} \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCYXWIZ_ROOT=${{ github.workspace }}/cyxwiz \
-            -DCYXWIZ_BUILD_DIR=${{ github.workspace }}/cyxwiz/build-android-arm64 \
-            -DSODIUM_INCLUDE_DIR=$SODIUM_ROOT/include \
-            -DSODIUM_LIBRARY=$SODIUM_ROOT/lib/libsodium.a \
-            -DCYXCHAT_BUILD_TESTS=OFF \
-            -DCYXCHAT_BUILD_STATIC=OFF \
-            -G Ninja
-          cmake --build build-android-arm64 --config Release
-
-      - name: Build libcyxchat for Android (armeabi-v7a)
-        run: |
-          cd cyxchat/lib
-          SODIUM_ROOT=${{ github.workspace }}/libsodium/libsodium-android-armv7-a
-          cmake -B build-android-arm32 \
-            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
-            -DANDROID_ABI=armeabi-v7a \
-            -DANDROID_PLATFORM=android-${{ env.ANDROID_API_LEVEL }} \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCYXWIZ_ROOT=${{ github.workspace }}/cyxwiz \
-            -DCYXWIZ_BUILD_DIR=${{ github.workspace }}/cyxwiz/build-android-arm32 \
-            -DSODIUM_INCLUDE_DIR=$SODIUM_ROOT/include \
-            -DSODIUM_LIBRARY=$SODIUM_ROOT/lib/libsodium.a \
-            -DCYXCHAT_BUILD_TESTS=OFF \
-            -DCYXCHAT_BUILD_STATIC=OFF \
-            -G Ninja
-          cmake --build build-android-arm32 --config Release
-
-      - name: Build libcyxchat for Android (x86_64)
-        run: |
-          cd cyxchat/lib
-          SODIUM_ROOT=${{ github.workspace }}/libsodium/libsodium-android-westmere
-          cmake -B build-android-x64 \
-            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake \
-            -DANDROID_ABI=x86_64 \
-            -DANDROID_PLATFORM=android-${{ env.ANDROID_API_LEVEL }} \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCYXWIZ_ROOT=${{ github.workspace }}/cyxwiz \
-            -DCYXWIZ_BUILD_DIR=${{ github.workspace }}/cyxwiz/build-android-x64 \
-            -DSODIUM_INCLUDE_DIR=$SODIUM_ROOT/include \
-            -DSODIUM_LIBRARY=$SODIUM_ROOT/lib/libsodium.a \
-            -DCYXCHAT_BUILD_TESTS=OFF \
-            -DCYXCHAT_BUILD_STATIC=OFF \
-            -G Ninja
-          cmake --build build-android-x64 --config Release
-
-      - name: Setup jniLibs
+      - name: Copy Android native libraries
         run: |
           mkdir -p cyxchat/app/android/app/src/main/jniLibs/arm64-v8a
           mkdir -p cyxchat/app/android/app/src/main/jniLibs/armeabi-v7a
           mkdir -p cyxchat/app/android/app/src/main/jniLibs/x86_64
-          cp cyxchat/lib/build-android-arm64/libcyxchat.so cyxchat/app/android/app/src/main/jniLibs/arm64-v8a/
-          cp cyxchat/lib/build-android-arm32/libcyxchat.so cyxchat/app/android/app/src/main/jniLibs/armeabi-v7a/
-          cp cyxchat/lib/build-android-x64/libcyxchat.so cyxchat/app/android/app/src/main/jniLibs/x86_64/
-          ls -la cyxchat/app/android/app/src/main/jniLibs/*/
+          cp cyxchat/lib/build-android-arm64/libcyxchat.so cyxchat/app/android/app/src/main/jniLibs/arm64-v8a/libcyxchat.so
+          cp cyxchat/lib/build-android-arm32/libcyxchat.so cyxchat/app/android/app/src/main/jniLibs/armeabi-v7a/libcyxchat.so
+          cp cyxchat/lib/build-android-x64/libcyxchat.so cyxchat/app/android/app/src/main/jniLibs/x86_64/libcyxchat.so
 
-      - name: Build Flutter APK
+      - name: Configure Android signing
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          cd cyxchat/app
+          if [ -z "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo 'Android signing secrets are not configured; using debug signing fallback.'
+            exit 0
+          fi
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/cyxchat-release.jks"
+          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/cyxchat-release.jks" >> "$GITHUB_ENV"
+          echo "ANDROID_KEYSTORE_PASSWORD=$ANDROID_KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+          echo "ANDROID_KEY_ALIAS=$ANDROID_KEY_ALIAS" >> "$GITHUB_ENV"
+          echo "ANDROID_KEY_PASSWORD=$ANDROID_KEY_PASSWORD" >> "$GITHUB_ENV"
+
+      - name: Build Flutter Android artifacts
+        working-directory: cyxchat/app
+        run: |
           flutter pub get
           flutter build apk --release
+          flutter build appbundle --release
 
-      - name: Upload artifact
+      - name: Package Android artifacts
+        run: |
+          mkdir -p release-assets
+          cp cyxchat/app/build/app/outputs/flutter-apk/app-release.apk release-assets/CyxChat-Android.apk
+          cp cyxchat/app/build/app/outputs/bundle/release/app-release.aab release-assets/CyxChat-Android.aab
+
+      - name: Upload Android artifacts
         uses: actions/upload-artifact@v4
         with:
           name: CyxChat-Android
-          path: cyxchat/app/build/app/outputs/flutter-apk/app-release.apk
+          path: |
+            release-assets/CyxChat-Android.apk
+            release-assets/CyxChat-Android.aab
 
-      - name: Create Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v1
+  publish-release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs:
+      - build-windows
+      - build-macos
+      - build-android
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v4
         with:
-          files: cyxchat/app/build/app/outputs/flutter-apk/app-release.apk
+          path: release-assets
+          merge-multiple: true
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*
           draft: false
-          prerelease: ${{ contains(github.ref, '-') }}
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
