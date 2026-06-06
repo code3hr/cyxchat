@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 import 'package:sqflite/sqflite.dart' show ConflictAlgorithm, Sqflite;
 import 'package:uuid/uuid.dart';
@@ -1078,6 +1079,155 @@ class GroupService {
       where: 'id = ?',
       whereArgs: [groupId],
     );
+  }
+
+  Future<Message> sendFile({
+    required String groupId,
+    required String filename,
+    required List<int> fileData,
+    String? localPath,
+  }) async {
+    if (_ffiProvider == null || !_ffiProvider!.initialized) {
+      throw StateError('Group FFI not connected');
+    }
+
+    final result = await _ffiProvider!.sendFile(
+      groupId: groupId,
+      filename: filename,
+      fileData: fileData,
+    );
+    if (!result.success || result.msgId == null) {
+      throw StateError('Failed to send file: ${result.error}');
+    }
+
+    return _persistOutgoingMediaMessage(
+      groupId: groupId,
+      msgId: result.msgId!,
+      type: MessageType.file,
+      content: localPath ?? filename,
+      mediaType: _mediaTypeForFilename(filename),
+      mediaMetadata: {
+        'filename': filename,
+        'size': fileData.length,
+        if (result.fileId != null) 'fileId': result.fileId,
+        if (localPath != null) 'localPath': localPath,
+      },
+    );
+  }
+
+  Future<Message> sendImage({
+    required String groupId,
+    required String filename,
+    required List<int> imageData,
+    required int width,
+    required int height,
+    String? localPath,
+  }) async {
+    if (_ffiProvider == null || !_ffiProvider!.initialized) {
+      throw StateError('Group FFI not connected');
+    }
+
+    final result = await _ffiProvider!.sendImage(
+      groupId: groupId,
+      filename: filename,
+      imageData: imageData,
+      width: width,
+      height: height,
+    );
+    if (!result.success || result.msgId == null) {
+      throw StateError('Failed to send image: ${result.error}');
+    }
+
+    return _persistOutgoingMediaMessage(
+      groupId: groupId,
+      msgId: result.msgId!,
+      type: MessageType.image,
+      content: localPath ?? '',
+      mediaType: MediaType.image,
+      mediaMetadata: {
+        'filename': filename,
+        'size': imageData.length,
+        'width': width,
+        'height': height,
+        if (result.fileId != null) 'fileId': result.fileId,
+        if (localPath != null) 'localPath': localPath,
+      },
+      thumbnailPath: localPath,
+    );
+  }
+
+  Future<Message> _persistOutgoingMediaMessage({
+    required String groupId,
+    required String msgId,
+    required MessageType type,
+    required String content,
+    required MediaType mediaType,
+    required Map<String, dynamic> mediaMetadata,
+    String? thumbnailPath,
+  }) async {
+    final db = await DatabaseService.instance.database;
+    final identity = IdentityService.instance.currentIdentity;
+    if (identity == null) {
+      throw StateError('No identity');
+    }
+
+    final now = DateTime.now();
+    final message = Message(
+      id: msgId,
+      conversationId: groupId,
+      senderId: identity.nodeId,
+      type: type,
+      content: content,
+      timestamp: now,
+      status: MessageStatus.sent,
+      isOutgoing: true,
+      mediaType: mediaType,
+      mediaMetadata: jsonEncode(mediaMetadata),
+      thumbnailPath: thumbnailPath,
+    );
+
+    await db.insert(
+      'messages',
+      message.toMap(),
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+
+    await db.update(
+      'conversations',
+      {'last_activity_at': now.millisecondsSinceEpoch},
+      where: 'id = ?',
+      whereArgs: [groupId],
+    );
+
+    await db.update(
+      'groups',
+      {'updated_at': now.millisecondsSinceEpoch},
+      where: 'id = ?',
+      whereArgs: [groupId],
+    );
+
+    _messageController.add(message);
+    return message;
+  }
+
+  MediaType _mediaTypeForFilename(String filename) {
+    final ext = filename.split('.').last.toLowerCase();
+    switch (ext) {
+      case 'zip':
+      case 'rar':
+      case '7z':
+      case 'tar':
+      case 'gz':
+        return MediaType.archive;
+      case 'mp3':
+      case 'm4a':
+      case 'aac':
+      case 'opus':
+      case 'wav':
+        return MediaType.audio;
+      default:
+        return MediaType.document;
+    }
   }
 
   // ============================================================

@@ -86,15 +86,17 @@ class GroupFFIResult {
   final bool success;
   final String? groupId;
   final String? msgId;
+  final String? fileId;
   final String? error;
 
-  GroupFFIResult.success({this.groupId, this.msgId})
+  GroupFFIResult.success({this.groupId, this.msgId, this.fileId})
       : success = true,
         error = null;
   GroupFFIResult.failure(this.error)
       : success = false,
         groupId = null,
-        msgId = null;
+        msgId = null,
+        fileId = null;
 }
 
 /// Low-level FFI provider for group chat operations
@@ -888,7 +890,10 @@ class GroupFFIProvider extends ChangeNotifier {
     if (result.error == CyxChatError.ok && result.msgId != null) {
       log.info('Sent file "$filename" (${fileData.length} bytes) to group',
           source: 'GroupFFI');
-      return GroupFFIResult.success(msgId: result.msgId);
+      return GroupFFIResult.success(
+        msgId: result.msgId,
+        fileId: result.fileId,
+      );
     } else {
       final errorStr = _bindings.errorString(result.error);
       log.error('Failed to send file: $errorStr', source: 'GroupFFI');

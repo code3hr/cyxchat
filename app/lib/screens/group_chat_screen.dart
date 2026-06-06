@@ -5,7 +5,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:file_picker/file_picker.dart';
 import '../main.dart';
 import '../providers/group_provider.dart';
-import '../providers/group_ffi_provider.dart';
 import '../providers/conversation_provider.dart';
 import '../models/models.dart';
 import '../services/identity_service.dart';
@@ -244,16 +243,12 @@ class _GroupChatScreenState extends ConsumerState<GroupChatScreen> {
         return;
       }
 
-      final groupFFI = ref.read(groupFFINotifierProvider);
-      final sendResult = await groupFFI.sendFile(
+      await ref.read(groupActionsProvider).sendFile(
         groupId: widget.groupId,
         filename: file.name,
         fileData: bytes,
+        localPath: file.path,
       );
-
-      if (!sendResult.success && mounted) {
-        _showError(sendResult.error ?? 'Failed to send file');
-      }
     } catch (e) {
       _showError('Error picking file: $e');
     }
@@ -284,19 +279,15 @@ class _GroupChatScreenState extends ConsumerState<GroupChatScreen> {
         return;
       }
 
-      final groupFFI = ref.read(groupFFINotifierProvider);
       // TODO: Get actual image dimensions
-      final sendResult = await groupFFI.sendImage(
+      await ref.read(groupActionsProvider).sendImage(
         groupId: widget.groupId,
         filename: file.name,
         imageData: bytes,
         width: 800,
         height: 600,
+        localPath: file.path,
       );
-
-      if (!sendResult.success && mounted) {
-        _showError(sendResult.error ?? 'Failed to send image');
-      }
     } catch (e) {
       _showError('Error picking image: $e');
     }

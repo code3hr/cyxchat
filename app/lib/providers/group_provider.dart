@@ -85,6 +85,44 @@ class GroupActions {
     return message;
   }
 
+  Future<Message> sendFile({
+    required String groupId,
+    required String filename,
+    required List<int> fileData,
+    String? localPath,
+  }) async {
+    final message = await GroupService.instance.sendFile(
+      groupId: groupId,
+      filename: filename,
+      fileData: fileData,
+      localPath: localPath,
+    );
+    _ref.invalidate(groupMessagesProvider(groupId));
+    _ref.invalidate(groupsProvider);
+    return message;
+  }
+
+  Future<Message> sendImage({
+    required String groupId,
+    required String filename,
+    required List<int> imageData,
+    required int width,
+    required int height,
+    String? localPath,
+  }) async {
+    final message = await GroupService.instance.sendImage(
+      groupId: groupId,
+      filename: filename,
+      imageData: imageData,
+      width: width,
+      height: height,
+      localPath: localPath,
+    );
+    _ref.invalidate(groupMessagesProvider(groupId));
+    _ref.invalidate(groupsProvider);
+    return message;
+  }
+
   /// Invite contact to group
   Future<void> inviteMember(String groupId, String nodeId) async {
     await GroupService.instance.inviteMember(groupId, nodeId);
