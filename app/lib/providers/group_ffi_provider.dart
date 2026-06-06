@@ -25,6 +25,21 @@ class GroupMessageReceived {
   }) : receivedAt = receivedAt ?? DateTime.now();
 }
 
+/// Received group media metadata/content from FFI layer
+class GroupMediaReceived {
+  final GroupMediaMetadata metadata;
+  final DateTime receivedAt;
+
+  GroupMediaReceived({
+    required this.metadata,
+    DateTime? receivedAt,
+  }) : receivedAt = receivedAt ?? DateTime.now();
+
+  String get groupId => metadata.groupId;
+  String get fromNodeId => metadata.fromNodeId;
+  String get msgId => metadata.msgId;
+}
+
 /// Member event (join or leave)
 class MemberEvent {
   final String groupId;
@@ -157,6 +172,7 @@ class GroupFFIProvider extends ChangeNotifier {
   final _keyDistCompleteController =
       StreamController<KeyDistProgress>.broadcast();
   final _deliveryController = StreamController<GroupDeliveryEvent>.broadcast();
+  final _mediaController = StreamController<GroupMediaReceived>.broadcast();
 
   // Getters
   bool get initialized => _initialized;
@@ -165,6 +181,9 @@ class GroupFFIProvider extends ChangeNotifier {
 
   /// Stream of incoming group messages
   Stream<GroupMessageReceived> get messageStream => _messageController.stream;
+
+  /// Stream of incoming group media metadata/content
+  Stream<GroupMediaReceived> get mediaStream => _mediaController.stream;
 
   /// Stream of group invitations
   Stream<GroupInvite> get inviteStream => _inviteController.stream;
@@ -1018,6 +1037,7 @@ class GroupFFIProvider extends ChangeNotifier {
     _bindings.onKeyDistComplete = _onKeyDistComplete;
     _bindings.onGroupDelivery = _onGroupDelivery;
     _bindings.onGroupDeliveryFailed = _onGroupDeliveryFailed;
+    _bindings.onGroupMedia = _onGroupMedia;
 
     // Register native callbacks
     _bindings.groupSetupCallbacks();
@@ -1036,6 +1056,18 @@ class GroupFFIProvider extends ChangeNotifier {
       msgId: msgId,
       text: text,
     ));
+  }
+
+  void _onGroupMedia(GroupMediaMetadata media) {
+    final log = LogService.instance;
+    final shortFrom = media.fromNodeId.length > 8
+        ? media.fromNodeId.substring(0, 8)
+        : media.fromNodeId;
+    final label = media.filename.isNotEmpty ? media.filename : media.fileId;
+    log.info('Group media metadata from $shortFrom...: "$label"',
+        source: 'GroupFFI');
+
+    _mediaController.add(GroupMediaReceived(metadata: media));
   }
 
   void _onGroupInvite(String groupId, String groupName, String inviter) {
@@ -1198,6 +1230,7 @@ class GroupFFIProvider extends ChangeNotifier {
     _keyUpdateController.close();
     _keyDistCompleteController.close();
     _deliveryController.close();
+    _mediaController.close();
     super.dispose();
   }
 }
@@ -1217,6 +1250,11 @@ final pendingGroupInvitesProvider = Provider<List<GroupInvite>>((ref) {
 final groupFFIMessageStreamProvider =
     StreamProvider<GroupMessageReceived>((ref) {
   return ref.watch(groupFFINotifierProvider).messageStream;
+});
+
+/// Provider for group FFI media stream
+final groupFFIMediaStreamProvider = StreamProvider<GroupMediaReceived>((ref) {
+  return ref.watch(groupFFINotifierProvider).mediaStream;
 });
 
 /// Provider for group invite stream from FFI

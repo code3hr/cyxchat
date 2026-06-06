@@ -69,6 +69,11 @@ class GroupService {
       provider.messageStream.listen(_handleIncomingMessage),
     );
 
+    // Subscribe to incoming group media metadata/content
+    _subscriptions.add(
+      provider.mediaStream.listen(_handleIncomingMedia),
+    );
+
     // Subscribe to member events (join/leave)
     _subscriptions.add(
       provider.memberEventStream.listen(_handleMemberEvent),
@@ -277,6 +282,105 @@ class GroupService {
       {'updated_at': message.timestamp.millisecondsSinceEpoch},
       where: 'id = ?',
       whereArgs: [msg.groupId],
+    );
+
+    _messageController.add(message);
+  }
+
+  /// Handle incoming group media metadata/content from FFI
+  Future<void> _handleIncomingMedia(GroupMediaReceived event) async {
+    final media = event.metadata;
+    _log.info(
+        'Received group media metadata from ${media.fromNodeId.substring(0, 8)}...',
+        source: 'GroupService');
+
+    if (_recentGroupMsgIds.contains(media.msgId)) {
+      _log.info('Duplicate group media suppressed: ${media.msgId}',
+          source: 'GroupService');
+      return;
+    }
+    _recentGroupMsgIds.add(media.msgId);
+    if (_recentGroupMsgIds.length > 256) {
+      final toRemove =
+          _recentGroupMsgIds.take(_recentGroupMsgIds.length - 128).toList();
+      _recentGroupMsgIds.removeAll(toRemove);
+    }
+
+    final db = await DatabaseService.instance.database;
+    final groupRows = await db.query(
+      'groups',
+      where: 'id = ?',
+      whereArgs: [media.groupId],
+      limit: 1,
+    );
+    if (groupRows.isEmpty) {
+      _log.warning('Received media for unknown group ${media.groupId}',
+          source: 'GroupService');
+      return;
+    }
+
+    final filename = media.filename.isNotEmpty
+        ? media.filename
+        : 'group_media_${media.fileId}';
+    final hasPayload = media.data != null && media.data!.isNotEmpty;
+    final localPath = hasPayload
+        ? await _storeIncomingMedia(
+            id: media.fileId,
+            filename: filename,
+            data: media.data!,
+          )
+        : null;
+    final timestamp = media.timestampMs > 0
+        ? DateTime.fromMillisecondsSinceEpoch(media.timestampMs)
+        : event.receivedAt;
+    final messageType = _messageTypeForNativeMedia(media.mediaType);
+    final mediaType = _mediaTypeForNativeMedia(media.mediaType);
+
+    final message = Message(
+      id: media.msgId,
+      conversationId: media.groupId,
+      senderId: media.fromNodeId,
+      type: messageType,
+      content: localPath ?? filename,
+      timestamp: timestamp,
+      status: MessageStatus.delivered,
+      isOutgoing: false,
+      mediaType: mediaType,
+      mediaMetadata: jsonEncode({
+        'fileId': media.fileId,
+        'filename': filename,
+        'size': media.fileSize,
+        'mimeType': media.mimeType,
+        'duration': media.durationMs,
+        'width': media.width,
+        'height': media.height,
+        'thumbnailSize': media.thumbnailSize,
+        'nativeTimestamp': media.timestampMs,
+        'hasPayload': localPath != null,
+        'payloadStatus': localPath != null ? 'complete' : 'pending',
+        if (localPath != null) 'localPath': localPath,
+      }),
+      thumbnailPath: messageType == MessageType.image ? localPath : null,
+    );
+
+    await db.insert(
+      'messages',
+      message.toMap(),
+      conflictAlgorithm: ConflictAlgorithm.ignore,
+    );
+
+    await db.rawUpdate('''
+      UPDATE conversations
+      SET last_activity_at = ?,
+          unread_count = unread_count + 1
+      WHERE id = ?
+    ''', [message.timestamp.millisecondsSinceEpoch, media.groupId]);
+
+    await db.update(
+      'groups',
+      {'updated_at': message.timestamp.millisecondsSinceEpoch},
+      where: 'id = ?',
+      whereArgs: [media.groupId],
     );
 
     _messageController.add(message);
@@ -1333,6 +1437,39 @@ class GroupService {
     }
   }
 
+  MessageType _messageTypeForNativeMedia(int nativeType) {
+    switch (nativeType) {
+      case 0:
+        return MessageType.image;
+      case 1:
+        return MessageType.video;
+      case 2:
+      case 3:
+        return MessageType.audio;
+      default:
+        return MessageType.file;
+    }
+  }
+
+  MediaType _mediaTypeForNativeMedia(int nativeType) {
+    switch (nativeType) {
+      case 0:
+        return MediaType.image;
+      case 1:
+        return MediaType.video;
+      case 2:
+        return MediaType.audio;
+      case 3:
+        return MediaType.voice;
+      case 4:
+        return MediaType.document;
+      case 5:
+        return MediaType.archive;
+      default:
+        return MediaType.other;
+    }
+  }
+
   Future<String?> _storeOutgoingMedia({
     required String id,
     required String filename,
@@ -1355,6 +1492,14 @@ class GroupService {
           source: 'GroupService');
       return fallbackPath;
     }
+  }
+
+  Future<String?> _storeIncomingMedia({
+    required String id,
+    required String filename,
+    required List<int> data,
+  }) {
+    return _storeOutgoingMedia(id: id, filename: filename, data: data);
   }
 
   String _safePathPart(String value) {

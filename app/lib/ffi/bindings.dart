@@ -43,6 +43,14 @@ typedef _GroupMessageCallback = Void Function(
     Pointer<Void> msg,
     Pointer<Void> userData);
 
+/// Native callback type for group media metadata/content
+typedef _GroupMediaCallback = Void Function(
+    Pointer<Void> ctx,
+    Pointer<_GroupMediaNative> media,
+    Pointer<Uint8> data,
+    Size dataLen,
+    Pointer<Void> userData);
+
 /// Native callback type for group invite
 typedef _GroupInviteCallback = Void Function(
     Pointer<Void> ctx,
@@ -177,6 +185,82 @@ final class _FileMetaNative extends Struct {
 
   @Array(32)
   external Array<Uint8> fileHash;
+}
+
+/// Native group media metadata structure (matches cyxchat_group_media_t)
+final class _GroupMediaNative extends Struct {
+  @Array(8)
+  external Array<Uint8> msgId;
+
+  @Array(8)
+  external Array<Uint8> groupId;
+
+  @Array(32)
+  external Array<Uint8> senderId;
+
+  @Array(8)
+  external Array<Uint8> fileId;
+
+  @Int32()
+  external int mediaType;
+
+  @Uint64()
+  external int fileSize;
+
+  @Uint32()
+  external int durationMs;
+
+  @Uint16()
+  external int width;
+
+  @Uint16()
+  external int height;
+
+  @Array(128)
+  external Array<Int8> filename;
+
+  @Array(64)
+  external Array<Int8> mimeType;
+
+  @Uint32()
+  external int thumbnailSize;
+
+  @Uint64()
+  external int timestamp;
+}
+
+class GroupMediaMetadata {
+  final String groupId;
+  final String fromNodeId;
+  final String msgId;
+  final String fileId;
+  final int mediaType;
+  final int fileSize;
+  final int durationMs;
+  final int width;
+  final int height;
+  final String filename;
+  final String mimeType;
+  final int thumbnailSize;
+  final int timestampMs;
+  final Uint8List? data;
+
+  const GroupMediaMetadata({
+    required this.groupId,
+    required this.fromNodeId,
+    required this.msgId,
+    required this.fileId,
+    required this.mediaType,
+    required this.fileSize,
+    required this.durationMs,
+    required this.width,
+    required this.height,
+    required this.filename,
+    required this.mimeType,
+    required this.thumbnailSize,
+    required this.timestampMs,
+    this.data,
+  });
 }
 
 /// Native invite link structure (matches cyxchat_invite_link_t)
@@ -1811,6 +1895,7 @@ class CyxChatBindings {
 
   /// Group callback storage (prevent GC)
   NativeCallable<_GroupMessageCallback>? _onGroupMessage;
+  NativeCallable<_GroupMediaCallback>? _onGroupMedia;
   NativeCallable<_GroupInviteCallback>? _onGroupInvite;
   NativeCallable<_MemberJoinCallback>? _onMemberJoin;
   NativeCallable<_MemberLeaveCallback>? _onMemberLeave;
@@ -1821,6 +1906,7 @@ class CyxChatBindings {
 
   /// Dart callbacks for group events
   void Function(String groupId, String from, String msgId, String text)? onGroupMessage;
+  void Function(GroupMediaMetadata media)? onGroupMedia;
   void Function(String groupId, String groupName, String inviter)? onGroupInvite;
   void Function(String groupId, String memberId)? onMemberJoin;
   void Function(String groupId, String memberId, bool wasKicked)? onMemberLeave;
@@ -1845,6 +1931,17 @@ class CyxChatBindings {
     _native.cyxchat_group_set_on_message(
       _groupCtx!,
       _onGroupMessage!.nativeFunction,
+      nullptr,
+    );
+
+    // Group media callback. Native passes stack metadata, so copy it
+    // synchronously before returning to C.
+    _onGroupMedia = NativeCallable<_GroupMediaCallback>.isolateLocal(
+      _handleGroupMedia,
+    );
+    _native.cyxchat_group_set_on_media(
+      _groupCtx!,
+      _onGroupMedia!.nativeFunction,
       nullptr,
     );
 
@@ -1922,6 +2019,7 @@ class CyxChatBindings {
   /// Clean up group callbacks
   void groupCleanupCallbacks() {
     _onGroupMessage?.close();
+    _onGroupMedia?.close();
     _onGroupInvite?.close();
     _onMemberJoin?.close();
     _onMemberLeave?.close();
@@ -1930,6 +2028,7 @@ class CyxChatBindings {
     _onGroupDelivery?.close();
     _onGroupDeliveryFailed?.close();
     _onGroupMessage = null;
+    _onGroupMedia = null;
     _onGroupInvite = null;
     _onMemberJoin = null;
     _onMemberLeave = null;
@@ -1975,6 +2074,38 @@ class CyxChatBindings {
     try { File('D:/Dev/conspiracy/cyxchat/dart_debug.log').writeAsStringSync('\${DateTime.now()}: group=$groupIdHex from=\${fromHex.substring(0,16)} msgId=$msgIdHex text=$textStr\n', mode: FileMode.append); } catch (_) {}
     print("DEBUG FFI: group=$groupIdHex from=\${fromHex.substring(0,16)} msgId=$msgIdHex text=$textStr");
     onGroupMessage!(groupIdHex, fromHex, msgIdHex, textStr);
+  }
+
+  /// Handle incoming group media metadata/content
+  void _handleGroupMedia(
+    Pointer<Void> ctx,
+    Pointer<_GroupMediaNative> media,
+    Pointer<Uint8> data,
+    int dataLen,
+    Pointer<Void> userData,
+  ) {
+    if (onGroupMedia == null || media == nullptr) return;
+
+    final value = media.ref;
+    final payload =
+        data != nullptr && dataLen > 0 ? data.asTypedList(dataLen) : null;
+
+    onGroupMedia!(GroupMediaMetadata(
+      groupId: _arrayToHex(value.groupId, 8),
+      fromNodeId: _arrayToHex(value.senderId, 32),
+      msgId: _arrayToHex(value.msgId, 8),
+      fileId: _arrayToHex(value.fileId, 8),
+      mediaType: value.mediaType,
+      fileSize: value.fileSize,
+      durationMs: value.durationMs,
+      width: value.width,
+      height: value.height,
+      filename: _charArrayToString(value.filename, 128),
+      mimeType: _charArrayToString(value.mimeType, 64),
+      thumbnailSize: value.thumbnailSize,
+      timestampMs: value.timestamp,
+      data: payload == null ? null : Uint8List.fromList(payload),
+    ));
   }
 
   /// Handle incoming group invite
@@ -2757,6 +2888,24 @@ class CyxChatBindings {
       bytes.add(ptr[i]);
     }
     return _bytesToHex(bytes);
+  }
+
+  String _arrayToHex(Array<Uint8> array, int len) {
+    final bytes = <int>[];
+    for (int i = 0; i < len; i++) {
+      bytes.add(array[i]);
+    }
+    return _bytesToHex(bytes);
+  }
+
+  String _charArrayToString(Array<Int8> array, int maxLen) {
+    final bytes = <int>[];
+    for (int i = 0; i < maxLen; i++) {
+      final value = array[i];
+      if (value == 0) break;
+      bytes.add(value & 0xff);
+    }
+    return utf8.decode(bytes, allowMalformed: true);
   }
 
   // ============================================================
@@ -4455,6 +4604,14 @@ late final cyxchat_conn_get_peer_pubkey = _lib.lookupFunction<      Int32 Functi
       Void Function(Pointer<Void>, Pointer<NativeFunction<_GroupMessageCallback>>, Pointer<Void>),
       void Function(Pointer<Void>, Pointer<NativeFunction<_GroupMessageCallback>>, Pointer<Void>)>(
       'cyxchat_group_set_on_message');
+
+  late final cyxchat_group_set_on_media = _lib.lookupFunction<
+      Void Function(Pointer<Void>,
+          Pointer<NativeFunction<_GroupMediaCallback>>, Pointer<Void>),
+      void Function(
+          Pointer<Void>,
+          Pointer<NativeFunction<_GroupMediaCallback>>,
+          Pointer<Void>)>('cyxchat_group_set_on_media');
 
   late final cyxchat_group_set_on_invite = _lib.lookupFunction<
       Void Function(Pointer<Void>, Pointer<NativeFunction<_GroupInviteCallback>>, Pointer<Void>),

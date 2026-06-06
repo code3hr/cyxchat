@@ -34,13 +34,14 @@ This file tracks the core chat-app readiness work. Keep each fix small, auditabl
 - [x] Group message status: native group ACK tracking now emits delivered/failed events and outgoing group message rows update from those callbacks.
 - [x] Group media/voice Dart path: group file sends now pass the native MIME argument, outgoing group media bytes are copied to app support storage, and group voice has service/provider persistence.
 - [x] Native group media metadata transport: group file/image/voice sends now broadcast encrypted typed metadata to members, receivers validate/decrypt it through a media callback, and media metadata delivery participates in group ACK/retry tracking.
+- [x] Incoming group media metadata persistence: Dart FFI now subscribes to native group media callbacks, provider exposes a media stream, and GroupService persists incoming media rows with payload status metadata.
 
 ## Next Fixes
 
 1. Group media payload delivery
    - `cyxchat_group_send_file`, `cyxchat_group_send_image`, and `cyxchat_group_send_voice` now broadcast typed metadata, but they still do not transfer raw media bytes to members.
    - Implement chunked payload delivery or route group media through a shared transfer path.
-   - Wire incoming group media metadata/content into Dart message persistence.
+   - Wire completed payload content into the same incoming group media persistence path.
 
 2. Production verification
    - Run app-level analyzer/build.
