@@ -43,19 +43,20 @@ This file tracks the core chat-app readiness work. Keep each fix small, auditabl
 - [x] Production verification baseline: native Debug build passes, native test suite passes, and Windows app CMake Debug build passes when run elevated outside sandbox restrictions.
 - [x] Dart analyzer stabilization: app-wide `dart analyze .` completes elevated with exit 0 after SDK/analyzer baseline updates and warning cleanup.
 - [x] Flutter test harness stabilization: `flutter.bat` remains unreliable in this shell, but direct elevated Flutter tools invocation runs the widget smoke test successfully.
+- [x] Windows app build stabilization: direct elevated MSBuild of `runner\cyxchat.vcxproj` completes and produces `runner\Debug\cyxchat.exe`, avoiding the unreliable `flutter.bat` wrapper path.
 
 ## Next Fixes
 
-1. Windows app build stabilization
-   - Direct elevated Windows CMake Debug build previously passed, but later bounded reruns timed out while compiling plugin targets without reporting a build error.
-   - Add focused Dart tests for message status and media metadata when the Flutter test harness is stable.
+1. Focused Dart coverage for message status and media metadata
+   - Add tests for direct/group status updates around ACK, failure, retry, and media metadata persistence.
+   - Keep tests at the service/provider boundary where possible so they do not depend on the unreliable `flutter.bat` wrapper.
 
 ## Verification Baseline
 
 - Format touched Dart files with `D:\Flutter\flutter\bin\cache\dart-sdk\bin\dart.exe format <files>`.
 - Analyze touched Dart files with `D:\Flutter\flutter\bin\cache\dart-sdk\bin\dart.exe analyze <files>`.
 - In the current sandbox, analyzer process spawning requires an elevated run; use the same command elevated when the sandbox reports `CreateFile failed 5`.
-- Treat app-scope analysis as unresolved until the command below stops hanging/crashing.
+- Direct elevated app-scope analysis is the current analyzer baseline.
 
 ## Known Verification Caveat
 
@@ -66,6 +67,7 @@ This file tracks the core chat-app readiness work. Keep each fix small, auditabl
 - Direct elevated `D:\Flutter\flutter\bin\cache\dart-sdk\bin\dart.exe analyze .` from `app\` still hung past a bounded 120 second verification run on 2026-06-06.
 - Direct elevated `D:\Flutter\flutter\bin\cache\dart-sdk\bin\dart.exe analyze .` from `app\` passed with exit 0 on 2026-06-06 after analyzer baseline updates.
 - Direct elevated `C:\Program Files\CMake\bin\cmake.exe --build D:\Dev\conspiracy\cyxchat\app\build\windows\x64 --config Debug` passed on 2026-06-06.
+- Direct elevated `C:\Program Files\Microsoft Visual Studio\18\Community\MSBuild\Current\Bin\amd64\MSBuild.exe D:\Dev\conspiracy\cyxchat\app\build\windows\x64\runner\cyxchat.vcxproj /p:Configuration=Debug /m:1 /v:m` passed on 2026-06-06.
 - Direct elevated `D:\Flutter\flutter\bin\cache\dart-sdk\bin\dart.exe --packages=D:\Flutter\flutter\packages\flutter_tools\.dart_tool\package_config.json D:\Flutter\flutter\bin\cache\flutter_tools.snapshot test --no-pub test\widget_test.dart` passed on 2026-06-06.
 - `D:\Flutter\flutter\bin\flutter.bat --version` and `flutter.bat test --help` timed out in this shell and spawned native build processes; use direct Flutter tools invocation instead.
 - Direct `D:\Flutter\flutter\bin\cache\dart-sdk\bin\dart.exe analyze .` from `app\` crashed with `FileSystemException: writeFrom failed` / `Bad state: The analysis server crashed unexpectedly`.
