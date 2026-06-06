@@ -44,12 +44,13 @@ This file tracks the core chat-app readiness work. Keep each fix small, auditabl
 - [x] Dart analyzer stabilization: app-wide `dart analyze .` completes elevated with exit 0 after SDK/analyzer baseline updates and warning cleanup.
 - [x] Flutter test harness stabilization: `flutter.bat` remains unreliable in this shell, but direct elevated Flutter tools invocation runs the widget smoke test successfully.
 - [x] Windows app build stabilization: direct elevated MSBuild of `runner\cyxchat.vcxproj` completes and produces `runner\Debug\cyxchat.exe`, avoiding the unreliable `flutter.bat` wrapper path.
+- [x] Focused Dart coverage: service-level Flutter tests now cover persisted message status/media metadata round-trips, direct file transfer delivered/failed updates, emitted status updates, and direct unread-to-read handling.
 
 ## Next Fixes
 
-1. Focused Dart coverage for message status and media metadata
-   - Add tests for direct/group status updates around ACK, failure, retry, and media metadata persistence.
-   - Keep tests at the service/provider boundary where possible so they do not depend on the unreliable `flutter.bat` wrapper.
+1. Call/audio/video lifecycle audit
+   - Audit call, voice recording, playback, and video-call providers for cleanup, permission-denied, timeout, and stale-event behavior.
+   - Add focused tests where provider seams are stable; keep native/device-specific behavior behind narrow adapters.
 
 ## Verification Baseline
 

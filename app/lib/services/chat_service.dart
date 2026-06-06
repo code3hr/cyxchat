@@ -1676,8 +1676,23 @@ class ChatService {
 
   void dispose() {
     disconnectProvider();
+    _disappearingMessagesTimer?.cancel();
+    _disappearingMessagesTimer = null;
     _stopReadReceiptRetryTimer();
     _messageController.close();
+  }
+
+  @visibleForTesting
+  void resetForTesting() {
+    disconnectProvider();
+    _disappearingMessagesTimer?.cancel();
+    _disappearingMessagesTimer = null;
+    _stopReadReceiptRetryTimer();
+    _nativeMsgIdToLocalId.clear();
+    _localIdToNativeMsgId.clear();
+    _pendingReadReceipts.clear();
+    _readReceiptSender = null;
+    _flushingReadReceipts = false;
   }
 }
 
