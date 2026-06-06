@@ -1,10 +1,10 @@
 import 'dart:async';
 import 'dart:ffi';
 import 'dart:io';
-import 'dart:typed_data';
 import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 import '../ffi/bindings.dart';
 import '../utils/node_id_utils.dart';
@@ -646,6 +646,49 @@ class FileProvider extends ChangeNotifier {
 
   String? getStoredFilePath(String fileId) => _storedFilePaths[fileId];
 
+  Future<void> deleteStoredMedia({String? fileId, String? localPath}) async {
+    if (fileId != null) {
+      _receivedFiles.remove(fileId);
+      localPath ??= _storedFilePaths[fileId];
+      _storedFilePaths.remove(fileId);
+    }
+
+    if (localPath != null) {
+      _storedFilePaths.removeWhere((_, path) => path == localPath);
+      await deleteStoredMediaPath(localPath);
+    }
+    notifyListeners();
+  }
+
+  static Future<void> deleteStoredMediaPath(String localPath) async {
+    if (localPath.isEmpty) return;
+
+    final mediaDir = await _mediaDirectory();
+    final context = path.Context(
+      style: Platform.isWindows ? path.Style.windows : path.Style.posix,
+    );
+    final mediaRoot = context.normalize(mediaDir.absolute.path);
+    final targetPath = context.normalize(File(localPath).absolute.path);
+    final compareMediaRoot =
+        Platform.isWindows ? mediaRoot.toLowerCase() : mediaRoot;
+    final compareTargetPath =
+        Platform.isWindows ? targetPath.toLowerCase() : targetPath;
+    final mediaRootWithSeparator = compareMediaRoot.endsWith(context.separator)
+        ? compareMediaRoot
+        : '$compareMediaRoot${context.separator}';
+
+    if (compareTargetPath != compareMediaRoot &&
+        !compareTargetPath.startsWith(mediaRootWithSeparator)) {
+      debugPrint('FileProvider: Refusing to delete media outside app storage');
+      return;
+    }
+
+    final file = File(targetPath);
+    if (await file.exists()) {
+      await file.delete();
+    }
+  }
+
   Future<String> _storeFileData(
     String fileId,
     String filename,
@@ -665,7 +708,7 @@ class FileProvider extends ChangeNotifier {
     _receivedFiles.remove(fileId);
   }
 
-  Future<Directory> _mediaDirectory() async {
+  static Future<Directory> _mediaDirectory() async {
     final base = await getApplicationSupportDirectory();
     final dir = Directory('${base.path}${Platform.pathSeparator}media');
     if (!await dir.exists()) {

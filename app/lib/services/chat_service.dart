@@ -20,6 +20,11 @@ typedef MediaRetrySender = Future<FileSendResult> Function({
   required String? localPath,
 });
 
+typedef MediaCleanup = Future<void> Function({
+  String? fileId,
+  String? localPath,
+});
+
 typedef ReadReceiptSender = Future<bool> Function({
   required String toPeerId,
   required String msgId,
@@ -715,7 +720,10 @@ class ChatService {
   }
 
   /// Delete message
-  Future<void> deleteMessage(String messageId) async {
+  Future<void> deleteMessage(
+    String messageId, {
+    MediaCleanup? mediaCleanup,
+  }) async {
     final db = await DatabaseService.instance.database;
 
     // Get message info to find peer
@@ -730,9 +738,16 @@ class ChatService {
     if (convRows.isEmpty) return;
     final conv = Conversation.fromMap(convRows.first);
 
+    await _cleanupMessageMedia(msg, mediaCleanup: mediaCleanup);
+
     await db.update(
       'messages',
-      {'is_deleted': 1, 'content': ''},
+      {
+        'is_deleted': 1,
+        'content': '',
+        'media_metadata': null,
+        'thumbnail_path': null,
+      },
       where: 'id = ?',
       whereArgs: [messageId],
     );
@@ -832,8 +847,23 @@ class ChatService {
   }
 
   /// Delete conversation and all its messages
-  Future<void> deleteConversation(String conversationId) async {
+  Future<void> deleteConversation(
+    String conversationId, {
+    MediaCleanup? mediaCleanup,
+  }) async {
     final db = await DatabaseService.instance.database;
+
+    final messageRows = await db.query(
+      'messages',
+      where: 'conversation_id = ?',
+      whereArgs: [conversationId],
+    );
+    for (final row in messageRows) {
+      await _cleanupMessageMedia(
+        Message.fromMap(row),
+        mediaCleanup: mediaCleanup,
+      );
+    }
 
     // Delete all messages in the conversation
     await db.delete(
@@ -1076,10 +1106,24 @@ class ChatService {
     }
 
     final db = await DatabaseService.instance.database;
+    final rows = await db.query(
+      'messages',
+      where: 'id = ?',
+      whereArgs: [localId],
+      limit: 1,
+    );
+    if (rows.isEmpty) return;
+
+    await _cleanupMessageMedia(Message.fromMap(rows.first));
 
     await db.update(
       'messages',
-      {'is_deleted': 1, 'content': ''},
+      {
+        'is_deleted': 1,
+        'content': '',
+        'media_metadata': null,
+        'thumbnail_path': null,
+      },
       where: 'id = ?',
       whereArgs: [localId],
     );
@@ -1327,6 +1371,58 @@ class ChatService {
     return null;
   }
 
+  Future<void> _cleanupMessageMedia(
+    Message message, {
+    MediaCleanup? mediaCleanup,
+  }) async {
+    final refs = _storedMediaRefs(message);
+    for (final ref in refs) {
+      try {
+        if (mediaCleanup != null) {
+          await mediaCleanup(fileId: ref.fileId, localPath: ref.localPath);
+        } else if (ref.localPath != null) {
+          await FileProvider.deleteStoredMediaPath(ref.localPath!);
+        }
+      } catch (e) {
+        debugPrint(
+          'ChatService: Failed to delete stored media for ${message.id}: $e',
+        );
+      }
+    }
+  }
+
+  List<_StoredMediaRef> _storedMediaRefs(Message message) {
+    final refs = <_StoredMediaRef>[];
+    final seen = <String>{};
+
+    void addRef({String? fileId, String? localPath}) {
+      if ((fileId == null || fileId.isEmpty) &&
+          (localPath == null || localPath.isEmpty)) {
+        return;
+      }
+
+      final key = '${fileId ?? ''}|${localPath ?? ''}';
+      if (!seen.add(key)) return;
+      refs.add(_StoredMediaRef(fileId: fileId, localPath: localPath));
+    }
+
+    void addRefsFromJson(String? value) {
+      if (value == null || value.isEmpty) return;
+      final decoded = _decodeMessageContent(value);
+      if (decoded == null) return;
+      final fileId = decoded['fileId'] as String?;
+      addRef(fileId: fileId, localPath: decoded['localPath'] as String?);
+      addRef(fileId: fileId, localPath: decoded['filePath'] as String?);
+      addRef(fileId: null, localPath: decoded['thumbnailPath'] as String?);
+    }
+
+    addRefsFromJson(message.content);
+    addRefsFromJson(message.mediaMetadata);
+    addRef(fileId: null, localPath: message.thumbnailPath);
+
+    return refs;
+  }
+
   /// Update message status
   Future<void> updateMessageStatus(
       String messageId, MessageStatus status) async {
@@ -1463,4 +1559,14 @@ class ChatService {
     disconnectProvider();
     _messageController.close();
   }
+}
+
+class _StoredMediaRef {
+  final String? fileId;
+  final String? localPath;
+
+  const _StoredMediaRef({
+    required this.fileId,
+    required this.localPath,
+  });
 }

@@ -83,7 +83,10 @@ class ChatActions {
   }
 
   Future<void> deleteMessage(String messageId, String conversationId) async {
-    await ChatService.instance.deleteMessage(messageId);
+    await ChatService.instance.deleteMessage(
+      messageId,
+      mediaCleanup: _ref.read(fileNotifierProvider).deleteStoredMedia,
+    );
     _ref.invalidate(messagesProvider(conversationId));
   }
 
@@ -152,7 +155,10 @@ class ChatActions {
   }
 
   Future<void> deleteConversation(String conversationId) async {
-    await ChatService.instance.deleteConversation(conversationId);
+    await ChatService.instance.deleteConversation(
+      conversationId,
+      mediaCleanup: _ref.read(fileNotifierProvider).deleteStoredMedia,
+    );
     _ref.invalidate(conversationsProvider);
   }
 
