@@ -69,6 +69,38 @@ void main() {
       await provider.rejectCall();
       provider.dispose();
     });
+
+    test('delayed ended reset does not clear a newer incoming call', () async {
+      final provider = CallProvider();
+
+      await provider.handleOffer(
+        peerId: 'peer-1',
+        sdp: 'offer-sdp-1',
+        type: 'offer',
+        video: false,
+      );
+
+      provider.handleCallEnd(peerId: 'peer-1');
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(provider.state.status, CallStatus.ended);
+
+      await provider.handleOffer(
+        peerId: 'peer-2',
+        sdp: 'offer-sdp-2',
+        type: 'offer',
+        video: true,
+      );
+      expect(provider.state.status, CallStatus.incoming);
+      expect(provider.state.peerId, 'peer-2');
+      expect(provider.state.isVideo, isTrue);
+
+      await Future<void>.delayed(const Duration(milliseconds: 2100));
+      expect(provider.state.status, CallStatus.incoming);
+      expect(provider.state.peerId, 'peer-2');
+
+      await provider.rejectCall();
+      provider.dispose();
+    });
   });
 
   group('voice message metadata', () {

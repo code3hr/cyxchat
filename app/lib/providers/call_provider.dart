@@ -107,6 +107,7 @@ class CallProvider extends ChangeNotifier {
   DateTime? _callStartTime;
   final List<RTCIceCandidate> _pendingRemoteIceCandidates = [];
   bool _remoteDescriptionSet = false;
+  int _callGeneration = 0;
 
   // Callbacks for signaling (set by network layer)
   void Function(String peerId, int type, String payload)? onSendSignal;
@@ -194,6 +195,7 @@ class CallProvider extends ChangeNotifier {
       return false;
     }
 
+    _callGeneration++;
     _state = CallState(
       status: CallStatus.outgoing,
       peerId: peerId,
@@ -246,11 +248,6 @@ class CallProvider extends ChangeNotifier {
     required String type,
     required bool video,
   }) async {
-    if (_state.status == CallStatus.ended) {
-      debugPrint('CallProvider: Ignoring offer from $peerId after call end');
-      return;
-    }
-
     if (_state.isActive) {
       // Already in a call, send busy signal
       _sendSignal(peerId, CallSignalingType.busy, '');
@@ -261,6 +258,7 @@ class CallProvider extends ChangeNotifier {
         'CallProvider: Received ${video ? "video" : "audio"} call offer from $peerId');
     _resetPendingSignaling();
 
+    _callGeneration++;
     _state = CallState(
       status: CallStatus.incoming,
       peerId: peerId,
@@ -485,6 +483,7 @@ class CallProvider extends ChangeNotifier {
   }
 
   void _endCallInternal(CallEndReason reason) async {
+    final endingGeneration = _callGeneration;
     await _cleanup();
 
     _state = CallState(
@@ -500,7 +499,8 @@ class CallProvider extends ChangeNotifier {
 
     // Reset to idle after a short delay
     Future.delayed(const Duration(seconds: 2), () {
-      if (_state.status == CallStatus.ended) {
+      if (_state.status == CallStatus.ended &&
+          _callGeneration == endingGeneration) {
         _state = const CallState(status: CallStatus.idle);
         notifyListeners();
       }
