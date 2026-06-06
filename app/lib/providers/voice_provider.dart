@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
@@ -43,7 +44,11 @@ class VoiceMessageInfo {
 
   /// Format for message content JSON
   String toContentJson(String fileId) {
-    return '{"fileId":"$fileId","duration":${duration.inSeconds},"filename":"$filename"}';
+    return jsonEncode({
+      'fileId': fileId,
+      'duration': duration.inSeconds,
+      'filename': filename,
+    });
   }
 }
 
@@ -154,7 +159,8 @@ class VoiceRecorderProvider extends ChangeNotifier {
       });
 
       notifyListeners();
-      debugPrint('VoiceRecorder: Recording started successfully, state=$_state');
+      debugPrint(
+          'VoiceRecorder: Recording started successfully, state=$_state');
       return true;
     } catch (e, stackTrace) {
       _state = VoiceRecordingState.error;
@@ -176,7 +182,8 @@ class VoiceRecorderProvider extends ChangeNotifier {
 
     // Check minimum duration (at least 500ms)
     if (_recordingDuration.inMilliseconds < 500) {
-      debugPrint('VoiceRecorder: Recording too short (${_recordingDuration.inMilliseconds}ms), cancelling');
+      debugPrint(
+          'VoiceRecorder: Recording too short (${_recordingDuration.inMilliseconds}ms), cancelling');
       await cancelRecording();
       return null;
     }
@@ -191,7 +198,8 @@ class VoiceRecorderProvider extends ChangeNotifier {
       // Stop recording
       debugPrint('VoiceRecorder: Stopping recorder...');
       final path = await _recorder.stop();
-      debugPrint('VoiceRecorder: Recorder stopped, path=$path, tempFilePath=$_tempFilePath');
+      debugPrint(
+          'VoiceRecorder: Recorder stopped, path=$path, tempFilePath=$_tempFilePath');
       if (path == null || _tempFilePath == null) {
         _state = VoiceRecordingState.error;
         _errorMessage = 'Recording failed - no file created';
@@ -227,7 +235,8 @@ class VoiceRecorderProvider extends ChangeNotifier {
       _recordingDuration = Duration.zero;
       notifyListeners();
 
-      debugPrint('VoiceRecorder: Finished recording - ${data.length} bytes, ${duration.inSeconds}s');
+      debugPrint(
+          'VoiceRecorder: Finished recording - ${data.length} bytes, ${duration.inSeconds}s');
 
       return VoiceMessageInfo(
         filename: filename,
@@ -430,7 +439,8 @@ class VoicePlayerProvider extends ChangeNotifier {
 }
 
 /// Global voice recorder provider
-final voiceRecorderProvider = ChangeNotifierProvider<VoiceRecorderProvider>((ref) {
+final voiceRecorderProvider =
+    ChangeNotifierProvider<VoiceRecorderProvider>((ref) {
   return VoiceRecorderProvider();
 });
 
@@ -460,7 +470,8 @@ class VoiceActions {
   Future<void> cancelRecording() => recorder.cancelRecording();
 
   /// Play voice message
-  Future<void> play(String fileId, Uint8List data) => player.playFromBytes(fileId, data);
+  Future<void> play(String fileId, Uint8List data) =>
+      player.playFromBytes(fileId, data);
 
   /// Pause/resume current playback
   Future<void> togglePlayback() async {

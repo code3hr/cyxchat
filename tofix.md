@@ -45,12 +45,13 @@ This file tracks the core chat-app readiness work. Keep each fix small, auditabl
 - [x] Flutter test harness stabilization: `flutter.bat` remains unreliable in this shell, but direct elevated Flutter tools invocation runs the widget smoke test successfully.
 - [x] Windows app build stabilization: direct elevated MSBuild of `runner\cyxchat.vcxproj` completes and produces `runner\Debug\cyxchat.exe`, avoiding the unreliable `flutter.bat` wrapper path.
 - [x] Focused Dart coverage: service-level Flutter tests now cover persisted message status/media metadata round-trips, direct file transfer delivered/failed updates, emitted status updates, and direct unread-to-read handling.
+- [x] Call/voice lifecycle coverage: Flutter tests cover incoming call reject/busy behavior, voice message metadata JSON escaping, and stable voice duration formatting; voice metadata now uses structured JSON encoding.
 
 ## Next Fixes
 
-1. Call/audio/video lifecycle audit
-   - Audit call, voice recording, playback, and video-call providers for cleanup, permission-denied, timeout, and stale-event behavior.
-   - Add focused tests where provider seams are stable; keep native/device-specific behavior behind narrow adapters.
+1. Device-backed audio/video integration audit
+   - Validate microphone/camera acquisition, active-recording disposal, playback temp-file cleanup, and WebRTC connected/disconnected transitions on Windows.
+   - Add narrow adapter seams for native/device APIs where tests cannot exercise behavior without real hardware.
 
 ## Verification Baseline
 

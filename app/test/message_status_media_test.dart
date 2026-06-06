@@ -16,12 +16,16 @@ void main() {
   });
 
   setUp(() async {
+    ChatService.instance.resetForTesting();
     await DatabaseService.instance.clearAllData();
   });
 
   tearDown(() async {
     ChatService.instance.resetForTesting();
     await DatabaseService.instance.clearAllData();
+  });
+
+  tearDownAll(() async {
     await DatabaseService.instance.close();
   });
 
