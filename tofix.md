@@ -41,12 +41,14 @@ This file tracks the core chat-app readiness work. Keep each fix small, auditabl
 - [x] Group media transfer visibility: native group media progress/error callbacks are exposed through Dart FFI and GroupFFIProvider emits transfer progress/error stream events.
 - [x] Group media transfer hardening tests: native tests cover chunk assembly, duplicate chunks, missing-chunk requests, and completion callback behavior.
 - [x] Production verification baseline: native Debug build passes, native test suite passes, and Windows app CMake Debug build passes when run elevated outside sandbox restrictions.
+- [x] Dart analyzer stabilization: app-wide `dart analyze .` completes elevated with exit 0 after SDK/analyzer baseline updates and warning cleanup.
 
 ## Next Fixes
 
-1. Dart analyzer stabilization
-   - App-wide `dart analyze .` still cannot be counted as passing: sandboxed runs fail to spawn `analysis_server`, and elevated runs continue to hang past bounded verification.
-   - Add focused Dart tests for message status and media metadata when the Dart test harness is stable.
+1. Flutter wrapper/test stabilization
+   - `flutter test --no-pub` timed out without output in this shell on 2026-06-06.
+   - Direct elevated Windows CMake Debug build previously passed, but the latest bounded rerun timed out while compiling plugin targets without reporting a build error.
+   - Add focused Dart tests for message status and media metadata when the Flutter test harness is stable.
 
 ## Verification Baseline
 
@@ -62,6 +64,7 @@ This file tracks the core chat-app readiness work. Keep each fix small, auditabl
 - Direct `D:\Flutter\flutter\bin\cache\dart-sdk\bin\dart.exe analyze <file>` works for focused checks when elevated if sandbox process spawning is blocked.
 - Direct sandboxed `D:\Flutter\flutter\bin\cache\dart-sdk\bin\dart.exe analyze .` from `app\` fails with `CreateFile failed 5` when spawning `analysis_server`.
 - Direct elevated `D:\Flutter\flutter\bin\cache\dart-sdk\bin\dart.exe analyze .` from `app\` still hung past a bounded 120 second verification run on 2026-06-06.
+- Direct elevated `D:\Flutter\flutter\bin\cache\dart-sdk\bin\dart.exe analyze .` from `app\` passed with exit 0 on 2026-06-06 after analyzer baseline updates.
 - Direct elevated `C:\Program Files\CMake\bin\cmake.exe --build D:\Dev\conspiracy\cyxchat\app\build\windows\x64 --config Debug` passed on 2026-06-06.
 - Direct `D:\Flutter\flutter\bin\cache\dart-sdk\bin\dart.exe analyze .` from `app\` crashed with `FileSystemException: writeFrom failed` / `Bad state: The analysis server crashed unexpectedly`.
 - `D:\Flutter\flutter\bin\flutter.bat analyze --no-pub` from `app\` hung and was interrupted.

@@ -82,7 +82,9 @@ class SecuritySettingsScreen extends ConsumerWidget {
                       subtitle: 'Require authentication to open app',
                       value: settings.appLockEnabled,
                       onChanged: (value) {
-                        ref.read(settingsProvider.notifier).setAppLockEnabled(value);
+                        ref
+                            .read(settingsProvider.notifier)
+                            .setAppLockEnabled(value);
                       },
                     ),
                     if (settings.appLockEnabled) ...[
@@ -94,7 +96,8 @@ class SecuritySettingsScreen extends ConsumerWidget {
                           Icons.chevron_right_rounded,
                           color: colorScheme.onSurface.withAlpha(128),
                         ),
-                        onTap: () => _showTimeoutPicker(context, ref, settings.appLockTimeout),
+                        onTap: () => _showTimeoutPicker(
+                            context, ref, settings.appLockTimeout),
                       ),
                     ],
                   ],
@@ -114,7 +117,9 @@ class SecuritySettingsScreen extends ConsumerWidget {
                       subtitle: 'Prevent screenshots and screen recording',
                       value: settings.screenSecurityEnabled,
                       onChanged: (value) {
-                        ref.read(settingsProvider.notifier).setScreenSecurityEnabled(value);
+                        ref
+                            .read(settingsProvider.notifier)
+                            .setScreenSecurityEnabled(value);
                         if (value) {
                           _showRestartRequiredSnackbar(context);
                         }
@@ -126,7 +131,9 @@ class SecuritySettingsScreen extends ConsumerWidget {
                       subtitle: 'Show blank screen in recent apps',
                       value: settings.hideInAppSwitcher,
                       onChanged: (value) {
-                        ref.read(settingsProvider.notifier).setHideInAppSwitcher(value);
+                        ref
+                            .read(settingsProvider.notifier)
+                            .setHideInAppSwitcher(value);
                         if (value) {
                           _showRestartRequiredSnackbar(context);
                         }
@@ -148,12 +155,14 @@ class SecuritySettingsScreen extends ConsumerWidget {
                       title: 'Disappearing Messages',
                       subtitle: settings.disappearingMessagesDefault == null
                           ? 'Off'
-                          : _formatDuration(settings.disappearingMessagesDefault!),
+                          : _formatDuration(
+                              settings.disappearingMessagesDefault!),
                       trailing: Icon(
                         Icons.chevron_right_rounded,
                         color: colorScheme.onSurface.withAlpha(128),
                       ),
-                      onTap: () => _showDisappearingMessagesPicker(context, ref, settings.disappearingMessagesDefault),
+                      onTap: () => _showDisappearingMessagesPicker(
+                          context, ref, settings.disappearingMessagesDefault),
                     ),
                     _SecuritySwitch(
                       icon: Icons.done_all_rounded,
@@ -161,7 +170,9 @@ class SecuritySettingsScreen extends ConsumerWidget {
                       subtitle: 'Let others know when you\'ve read messages',
                       value: settings.sendReadReceipts,
                       onChanged: (value) {
-                        ref.read(settingsProvider.notifier).setSendReadReceipts(value);
+                        ref
+                            .read(settingsProvider.notifier)
+                            .setSendReadReceipts(value);
                       },
                     ),
                     _SecuritySwitch(
@@ -170,7 +181,9 @@ class SecuritySettingsScreen extends ConsumerWidget {
                       subtitle: 'Show when you\'re typing a message',
                       value: settings.sendTypingIndicators,
                       onChanged: (value) {
-                        ref.read(settingsProvider.notifier).setSendTypingIndicators(value);
+                        ref
+                            .read(settingsProvider.notifier)
+                            .setSendTypingIndicators(value);
                       },
                     ),
                   ],
@@ -182,11 +195,12 @@ class SecuritySettingsScreen extends ConsumerWidget {
                 _SecuritySection(
                   title: 'Contacts',
                   icon: Icons.people_outline_rounded,
-                  iconGradient: [colorScheme.tertiary ?? colorScheme.secondary, colorScheme.primary],
+                  iconGradient: [colorScheme.tertiary, colorScheme.primary],
                   children: [
                     Consumer(
                       builder: (context, ref, _) {
-                        final blockedCountAsync = ref.watch(blockedContactCountProvider);
+                        final blockedCountAsync =
+                            ref.watch(blockedContactCountProvider);
                         final blockedCount = blockedCountAsync.valueOrNull ?? 0;
                         return _SecurityTile(
                           icon: Icons.block_rounded,
@@ -196,20 +210,21 @@ class SecuritySettingsScreen extends ConsumerWidget {
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 2),
                                 decoration: BoxDecoration(
                                   color: colorScheme.surfaceContainerHighest,
                                   borderRadius: BorderRadius.circular(10),
                                 ),
                                 child: Text(
                                   '$blockedCount',
-                              style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                                color: colorScheme.onSurface.withAlpha(153),
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w600,
+                                    color: colorScheme.onSurface.withAlpha(153),
+                                  ),
+                                ),
                               ),
-                            ),
-                          ),
                               const SizedBox(width: 4),
                               Icon(
                                 Icons.chevron_right_rounded,
@@ -220,7 +235,9 @@ class SecuritySettingsScreen extends ConsumerWidget {
                           onTap: () {
                             Navigator.push(
                               context,
-                              MaterialPageRoute(builder: (_) => const BlockedContactsScreen()),
+                              MaterialPageRoute(
+                                  builder: (_) =>
+                                      const BlockedContactsScreen()),
                             ).then((_) {
                               // Refresh count when returning
                               ref.invalidate(blockedContactCountProvider);
@@ -243,12 +260,14 @@ class SecuritySettingsScreen extends ConsumerWidget {
                     _SecurityTile(
                       icon: Icons.preview_rounded,
                       title: 'Notification Preview',
-                      subtitle: _formatNotificationPreview(settings.notificationPreview),
+                      subtitle: _formatNotificationPreview(
+                          settings.notificationPreview),
                       trailing: Icon(
                         Icons.chevron_right_rounded,
                         color: colorScheme.onSurface.withAlpha(128),
                       ),
-                      onTap: () => _showNotificationPreviewPicker(context, ref, settings.notificationPreview),
+                      onTap: () => _showNotificationPreviewPicker(
+                          context, ref, settings.notificationPreview),
                     ),
                   ],
                 ),
@@ -259,7 +278,10 @@ class SecuritySettingsScreen extends ConsumerWidget {
                 _SecuritySection(
                   title: 'Advanced',
                   icon: Icons.tune_rounded,
-                  iconGradient: [colorScheme.onSurface.withAlpha(128), colorScheme.surfaceContainerHighest],
+                  iconGradient: [
+                    colorScheme.onSurface.withAlpha(128),
+                    colorScheme.surfaceContainerHighest
+                  ],
                   children: [
                     _SecuritySwitch(
                       icon: Icons.keyboard_hide_rounded,
@@ -267,7 +289,9 @@ class SecuritySettingsScreen extends ConsumerWidget {
                       subtitle: 'Request keyboard to not learn from typing',
                       value: settings.incognitoKeyboard,
                       onChanged: (value) {
-                        ref.read(settingsProvider.notifier).setIncognitoKeyboard(value);
+                        ref
+                            .read(settingsProvider.notifier)
+                            .setIncognitoKeyboard(value);
                       },
                     ),
                   ],
@@ -323,7 +347,8 @@ class SecuritySettingsScreen extends ConsumerWidget {
     );
   }
 
-  void _showTimeoutPicker(BuildContext context, WidgetRef ref, int currentTimeout) {
+  void _showTimeoutPicker(
+      BuildContext context, WidgetRef ref, int currentTimeout) {
     final options = [
       (0, 'Immediately'),
       (30, '30 seconds'),
@@ -366,14 +391,18 @@ class SecuritySettingsScreen extends ConsumerWidget {
               final isSelected = currentTimeout == option.$1;
               return ListTile(
                 leading: Icon(
-                  isSelected ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+                  isSelected
+                      ? Icons.radio_button_checked
+                      : Icons.radio_button_unchecked,
                   color: isSelected
                       ? Theme.of(context).colorScheme.primary
                       : Theme.of(context).colorScheme.onSurface.withAlpha(128),
                 ),
                 title: Text(option.$2),
                 onTap: () {
-                  ref.read(settingsProvider.notifier).setAppLockTimeout(option.$1);
+                  ref
+                      .read(settingsProvider.notifier)
+                      .setAppLockTimeout(option.$1);
                   Navigator.pop(context);
                 },
               );
@@ -384,7 +413,8 @@ class SecuritySettingsScreen extends ConsumerWidget {
     );
   }
 
-  void _showDisappearingMessagesPicker(BuildContext context, WidgetRef ref, int? currentDuration) {
+  void _showDisappearingMessagesPicker(
+      BuildContext context, WidgetRef ref, int? currentDuration) {
     final options = [
       (null, 'Off'),
       (300, '5 minutes'),
@@ -427,14 +457,18 @@ class SecuritySettingsScreen extends ConsumerWidget {
               final isSelected = currentDuration == option.$1;
               return ListTile(
                 leading: Icon(
-                  isSelected ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+                  isSelected
+                      ? Icons.radio_button_checked
+                      : Icons.radio_button_unchecked,
                   color: isSelected
                       ? Theme.of(context).colorScheme.primary
                       : Theme.of(context).colorScheme.onSurface.withAlpha(128),
                 ),
                 title: Text(option.$2),
                 onTap: () {
-                  ref.read(settingsProvider.notifier).setDisappearingMessagesDefault(option.$1);
+                  ref
+                      .read(settingsProvider.notifier)
+                      .setDisappearingMessagesDefault(option.$1);
                   Navigator.pop(context);
                 },
               );
@@ -445,10 +479,19 @@ class SecuritySettingsScreen extends ConsumerWidget {
     );
   }
 
-  void _showNotificationPreviewPicker(BuildContext context, WidgetRef ref, NotificationPreview current) {
+  void _showNotificationPreviewPicker(
+      BuildContext context, WidgetRef ref, NotificationPreview current) {
     final options = [
-      (NotificationPreview.full, 'Show sender and message', 'Full preview of notifications'),
-      (NotificationPreview.senderOnly, 'Show sender only', 'Hide message content'),
+      (
+        NotificationPreview.full,
+        'Show sender and message',
+        'Full preview of notifications'
+      ),
+      (
+        NotificationPreview.senderOnly,
+        'Show sender only',
+        'Hide message content'
+      ),
       (NotificationPreview.none, 'Hide all content', 'Show "New Message" only'),
     ];
 
@@ -485,7 +528,9 @@ class SecuritySettingsScreen extends ConsumerWidget {
               final isSelected = current == option.$1;
               return ListTile(
                 leading: Icon(
-                  isSelected ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+                  isSelected
+                      ? Icons.radio_button_checked
+                      : Icons.radio_button_unchecked,
                   color: isSelected
                       ? Theme.of(context).colorScheme.primary
                       : Theme.of(context).colorScheme.onSurface.withAlpha(128),
@@ -495,11 +540,14 @@ class SecuritySettingsScreen extends ConsumerWidget {
                   option.$3,
                   style: TextStyle(
                     fontSize: 12,
-                    color: Theme.of(context).colorScheme.onSurface.withAlpha(128),
+                    color:
+                        Theme.of(context).colorScheme.onSurface.withAlpha(128),
                   ),
                 ),
                 onTap: () {
-                  ref.read(settingsProvider.notifier).setNotificationPreview(option.$1);
+                  ref
+                      .read(settingsProvider.notifier)
+                      .setNotificationPreview(option.$1);
                   Navigator.pop(context);
                 },
               );

@@ -140,7 +140,6 @@ class _ScanTabState extends ConsumerState<_ScanTab> {
   bool _isScanning = false;
   bool _hasScanned = false;
   String? _scannedNodeId;
-  String? _scannedPubkey;
   String? _error;
 
   @override
@@ -200,11 +199,16 @@ class _ScanTabState extends ConsumerState<_ScanTab> {
       });
       return;
     }
+    if (pubkey.isEmpty) {
+      setState(() {
+        _error = 'Invalid public key in QR code';
+      });
+      return;
+    }
 
     setState(() {
       _hasScanned = true;
       _scannedNodeId = nodeId;
-      _scannedPubkey = pubkey;
     });
 
     _stopScanning();
@@ -215,15 +219,18 @@ class _ScanTabState extends ConsumerState<_ScanTab> {
 
     try {
       await ref.read(contactActionsProvider).addContact(
-        nodeId: _scannedNodeId!,
-        displayName: null,
-      );
+            nodeId: _scannedNodeId!,
+            displayName: null,
+          );
 
-      final conversation = await ref.read(chatActionsProvider).startConversation(_scannedNodeId!);
+      final conversation = await ref
+          .read(chatActionsProvider)
+          .startConversation(_scannedNodeId!);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Added ${_scannedNodeId!.substring(0, 8)}...')),
+          SnackBar(
+              content: Text('Added ${_scannedNodeId!.substring(0, 8)}...')),
         );
 
         Navigator.pop(context);
@@ -346,7 +353,6 @@ class _ScanTabState extends ConsumerState<_ScanTab> {
                           setState(() {
                             _hasScanned = false;
                             _scannedNodeId = null;
-                            _scannedPubkey = null;
                           });
                         },
                         child: const Text('Cancel'),
@@ -437,9 +443,10 @@ class _ManualTabState extends ConsumerState<_ManualTab> {
             controller: widget.controller,
             decoration: const InputDecoration(
               labelText: 'Node ID',
-              hintText: 'Enter UUID (e.g., 550e8400-e29b-41d4-a716-446655440000)',
+              hintText:
+                  'Enter UUID (e.g., 550e8400-e29b-41d4-a716-446655440000)',
             ),
-            maxLength: 64,  // Supports both UUID (36) and legacy hex (64)
+            maxLength: 64, // Supports both UUID (36) and legacy hex (64)
             style: const TextStyle(fontFamily: 'monospace'),
           ),
           const SizedBox(height: 16),
@@ -472,7 +479,9 @@ class _ManualTabState extends ConsumerState<_ManualTab> {
     // Validate node ID format (UUID or 64 hex characters)
     if (!NodeIdUtils.isValid(nodeId)) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Invalid node ID - must be UUID or 64 hex characters')),
+        const SnackBar(
+            content:
+                Text('Invalid node ID - must be UUID or 64 hex characters')),
       );
       return;
     }
@@ -484,16 +493,19 @@ class _ManualTabState extends ConsumerState<_ManualTab> {
 
       // Add contact
       await ref.read(contactActionsProvider).addContact(
-        nodeId: nodeId,
-        displayName: displayName.isEmpty ? null : displayName,
-      );
+            nodeId: nodeId,
+            displayName: displayName.isEmpty ? null : displayName,
+          );
 
       // Create/get conversation
-      final conversation = await ref.read(chatActionsProvider).startConversation(nodeId);
+      final conversation =
+          await ref.read(chatActionsProvider).startConversation(nodeId);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Added ${displayName.isEmpty ? nodeId.substring(0, 8) : displayName}')),
+          SnackBar(
+              content: Text(
+                  'Added ${displayName.isEmpty ? nodeId.substring(0, 8) : displayName}')),
         );
 
         // Navigate to chat
@@ -604,10 +616,13 @@ class _UsernameTabState extends ConsumerState<_UsernameTab> {
             ),
           ),
           const SizedBox(height: 8),
-          _buildTip(Icons.check_circle_outline, 'Usernames are 3-63 characters'),
-          _buildTip(Icons.check_circle_outline, 'Can contain letters, numbers, and underscores'),
+          _buildTip(
+              Icons.check_circle_outline, 'Usernames are 3-63 characters'),
+          _buildTip(Icons.check_circle_outline,
+              'Can contain letters, numbers, and underscores'),
           _buildTip(Icons.check_circle_outline, 'Must start with a letter'),
-          _buildTip(Icons.lock_outline, 'Crypto-names (like k5xq3v7b.cyx) resolve instantly'),
+          _buildTip(Icons.lock_outline,
+              'Crypto-names (like k5xq3v7b.cyx) resolve instantly'),
         ],
       ),
     );
@@ -641,7 +656,8 @@ class _UsernameTabState extends ConsumerState<_UsernameTab> {
             Row(
               children: [
                 CircleAvatar(
-                  backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+                  backgroundColor:
+                      Theme.of(context).colorScheme.primaryContainer,
                   child: Text(
                     record.name[0].toUpperCase(),
                     style: TextStyle(
@@ -759,12 +775,13 @@ class _UsernameTabState extends ConsumerState<_UsernameTab> {
     try {
       // Add contact
       await ref.read(contactActionsProvider).addContact(
-        nodeId: record.nodeId,
-        displayName: record.name,
-      );
+            nodeId: record.nodeId,
+            displayName: record.name,
+          );
 
       // Create/get conversation
-      final conversation = await ref.read(chatActionsProvider).startConversation(record.nodeId);
+      final conversation =
+          await ref.read(chatActionsProvider).startConversation(record.nodeId);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

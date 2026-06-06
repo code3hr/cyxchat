@@ -45,7 +45,8 @@ class _GroupChatScreenState extends ConsumerState<GroupChatScreen> {
   /// Listen for incoming group messages and refresh UI
   void _setupMessageListener() {
     // Direct stream subscription for reliable real-time updates
-    _messageSubscription = GroupService.instance.messageStream.listen((message) {
+    _messageSubscription =
+        GroupService.instance.messageStream.listen((message) {
       if (message.conversationId == widget.groupId && mounted) {
         ref.invalidate(groupMessagesProvider(widget.groupId));
         setState(() {});
@@ -67,7 +68,8 @@ class _GroupChatScreenState extends ConsumerState<GroupChatScreen> {
   Widget build(BuildContext context) {
     final groupAsync = ref.watch(groupProvider(widget.groupId));
     final messagesAsync = ref.watch(groupMessagesProvider(widget.groupId));
-    final pinnedCountAsync = ref.watch(pinnedMessagesCountProvider(widget.groupId));
+    final pinnedCountAsync =
+        ref.watch(pinnedMessagesCountProvider(widget.groupId));
 
     return Scaffold(
       appBar: AppBar(
@@ -102,7 +104,8 @@ class _GroupChatScreenState extends ConsumerState<GroupChatScreen> {
               Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (context) => GroupInfoScreen(groupId: widget.groupId),
+                  builder: (context) =>
+                      GroupInfoScreen(groupId: widget.groupId),
                 ),
               );
             },
@@ -244,11 +247,11 @@ class _GroupChatScreenState extends ConsumerState<GroupChatScreen> {
       }
 
       await ref.read(groupActionsProvider).sendFile(
-        groupId: widget.groupId,
-        filename: file.name,
-        fileData: bytes,
-        localPath: file.path,
-      );
+            groupId: widget.groupId,
+            filename: file.name,
+            fileData: bytes,
+            localPath: file.path,
+          );
     } catch (e) {
       _showError('Error picking file: $e');
     }
@@ -281,13 +284,13 @@ class _GroupChatScreenState extends ConsumerState<GroupChatScreen> {
 
       // TODO: Get actual image dimensions
       await ref.read(groupActionsProvider).sendImage(
-        groupId: widget.groupId,
-        filename: file.name,
-        imageData: bytes,
-        width: 800,
-        height: 600,
-        localPath: file.path,
-      );
+            groupId: widget.groupId,
+            filename: file.name,
+            imageData: bytes,
+            width: 800,
+            height: 600,
+            localPath: file.path,
+          );
     } catch (e) {
       _showError('Error picking image: $e');
     }
@@ -415,7 +418,8 @@ class _GroupChatScreenState extends ConsumerState<GroupChatScreen> {
       if (!success) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(isPinned ? 'Failed to unpin message' : 'Failed to pin message'),
+            content: Text(
+                isPinned ? 'Failed to unpin message' : 'Failed to pin message'),
             backgroundColor: Colors.red,
           ),
         );
@@ -490,20 +494,20 @@ class _GroupChatScreenState extends ConsumerState<GroupChatScreen> {
               ),
               const SizedBox(height: 8),
               ...otherGroups.map((group) => ListTile(
-                leading: CircleAvatar(
-                  backgroundColor: AppColors.primary.withOpacity(0.2),
-                  child: Text(
-                    group.name[0].toUpperCase(),
-                    style: TextStyle(color: AppColors.primary),
-                  ),
-                ),
-                title: Text(group.name),
-                subtitle: Text('${group.memberCount} members'),
-                onTap: () async {
-                  Navigator.pop(sheetContext);
-                  await _forwardToGroup(message, group.id);
-                },
-              )),
+                    leading: CircleAvatar(
+                      backgroundColor: AppColors.primary.withOpacity(0.2),
+                      child: Text(
+                        group.name[0].toUpperCase(),
+                        style: TextStyle(color: AppColors.primary),
+                      ),
+                    ),
+                    title: Text(group.name),
+                    subtitle: Text('${group.memberCount} members'),
+                    onTap: () async {
+                      Navigator.pop(sheetContext);
+                      await _forwardToGroup(message, group.id);
+                    },
+                  )),
               const SizedBox(height: 8),
             ],
           ),
@@ -625,14 +629,14 @@ class _GroupMessageBubble extends ConsumerWidget {
 
     // Check if sender is in group members
     if (group != null) {
-      final member = group!.getMember(message.senderId ?? '');
+      final member = group!.getMember(message.senderId);
       if (member != null) {
         return member.displayText;
       }
     }
 
     // Fallback to truncated node ID
-    final senderId = message.senderId ?? 'Unknown';
+    final senderId = message.senderId;
     if (senderId.length > 8) {
       return senderId.substring(0, 8);
     }
@@ -641,7 +645,7 @@ class _GroupMessageBubble extends ConsumerWidget {
 
   Color _getSenderColor() {
     // Generate consistent color based on sender ID
-    final senderId = message.senderId ?? 'Unknown';
+    final senderId = message.senderId;
     final hash = senderId.hashCode;
     final colors = [
       Colors.blue,
@@ -694,9 +698,8 @@ class _GroupMessageBubble extends ConsumerWidget {
               ),
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               decoration: BoxDecoration(
-                color: isOutgoing
-                    ? AppColors.primary
-                    : AppColors.bgDarkSecondary,
+                color:
+                    isOutgoing ? AppColors.primary : AppColors.bgDarkSecondary,
                 borderRadius: BorderRadius.only(
                   topLeft: const Radius.circular(16),
                   topRight: const Radius.circular(16),
@@ -767,9 +770,7 @@ class _GroupMessageBubble extends ConsumerWidget {
                     Text(
                       message.content,
                       style: TextStyle(
-                        color: isOutgoing
-                            ? Colors.white
-                            : AppColors.textDark,
+                        color: isOutgoing ? Colors.white : AppColors.textDark,
                       ),
                     ),
                   const SizedBox(height: 4),
@@ -893,7 +894,8 @@ class _GroupMessageBubble extends ConsumerWidget {
               // Pin/Unpin (admin only)
               if (isAdmin && !message.isDeleted)
                 ListTile(
-                  leading: Icon(isPinned ? Icons.push_pin : Icons.push_pin_outlined),
+                  leading:
+                      Icon(isPinned ? Icons.push_pin : Icons.push_pin_outlined),
                   title: Text(isPinned ? 'Unpin' : 'Pin'),
                   onTap: () {
                     Navigator.pop(sheetContext);
@@ -914,10 +916,12 @@ class _GroupMessageBubble extends ConsumerWidget {
               if ((message.isOutgoing || isAdmin) && !message.isDeleted)
                 ListTile(
                   leading: Icon(Icons.delete_outline, color: AppColors.error),
-                  title: Text('Delete', style: TextStyle(color: AppColors.error)),
+                  title:
+                      Text('Delete', style: TextStyle(color: AppColors.error)),
                   onTap: () {
                     Navigator.pop(sheetContext);
-                    _showDeleteConfirmation(context, isAdmin && !message.isOutgoing);
+                    _showDeleteConfirmation(
+                        context, isAdmin && !message.isOutgoing);
                   },
                 ),
               const SizedBox(height: 8),
@@ -947,7 +951,8 @@ class _GroupMessageBubble extends ConsumerWidget {
                   Navigator.pop(dialogContext);
                   onDelete(message, true); // Delete for everyone
                 },
-                child: Text('Delete for everyone', style: TextStyle(color: AppColors.error)),
+                child: Text('Delete for everyone',
+                    style: TextStyle(color: AppColors.error)),
               ),
             TextButton(
               onPressed: () {
@@ -1049,7 +1054,8 @@ class _MessageInput extends StatelessWidget {
               },
             ),
             ListTile(
-              leading: const Icon(Icons.insert_drive_file, color: Colors.orange),
+              leading:
+                  const Icon(Icons.insert_drive_file, color: Colors.orange),
               title: const Text('File', style: TextStyle(color: Colors.white)),
               onTap: () {
                 Navigator.pop(context);
@@ -1058,7 +1064,8 @@ class _MessageInput extends StatelessWidget {
             ),
             ListTile(
               leading: const Icon(Icons.photo_library, color: Colors.purple),
-              title: const Text('Media Gallery', style: TextStyle(color: Colors.white)),
+              title: const Text('Media Gallery',
+                  style: TextStyle(color: Colors.white)),
               onTap: () {
                 Navigator.pop(context);
                 onOpenGallery?.call();

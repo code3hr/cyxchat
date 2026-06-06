@@ -38,7 +38,8 @@ class QueueService {
     }
 
     // Check queue size limit
-    final countResult = await db.rawQuery('SELECT COUNT(*) as count FROM offline_queue');
+    final countResult =
+        await db.rawQuery('SELECT COUNT(*) as count FROM offline_queue');
     final currentCount = Sqflite.firstIntValue(countResult) ?? 0;
     if (currentCount >= maxQueueSize) {
       // Remove oldest expired message to make room
@@ -182,8 +183,8 @@ class QueueService {
   Future<QueueStats> getStats() async {
     final db = await DatabaseService.instance.database;
     final now = DateTime.now();
-    final expiryThreshold = now.subtract(QueuedMessage.messageTTL).millisecondsSinceEpoch;
-    final in24h = now.add(const Duration(hours: 24)).millisecondsSinceEpoch;
+    final expiryThreshold =
+        now.subtract(QueuedMessage.messageTTL).millisecondsSinceEpoch;
 
     // Total queued (not expired)
     final totalResult = await db.rawQuery(
@@ -207,7 +208,10 @@ class QueueService {
     final failedPermanently = Sqflite.firstIntValue(expiredResult) ?? 0;
 
     // Expiring within 24h
-    final expiringThreshold = now.subtract(QueuedMessage.messageTTL).add(const Duration(hours: 24)).millisecondsSinceEpoch;
+    final expiringThreshold = now
+        .subtract(QueuedMessage.messageTTL)
+        .add(const Duration(hours: 24))
+        .millisecondsSinceEpoch;
     final expiringResult = await db.rawQuery(
       'SELECT COUNT(*) as count FROM offline_queue WHERE created_at >= ? AND created_at < ?',
       [expiryThreshold, expiringThreshold],
@@ -249,7 +253,8 @@ class QueueService {
   /// Get count of queued messages
   Future<int> getQueueCount() async {
     final db = await DatabaseService.instance.database;
-    final result = await db.rawQuery('SELECT COUNT(*) as count FROM offline_queue');
+    final result =
+        await db.rawQuery('SELECT COUNT(*) as count FROM offline_queue');
     return Sqflite.firstIntValue(result) ?? 0;
   }
 

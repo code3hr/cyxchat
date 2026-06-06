@@ -2,12 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:qr_flutter/qr_flutter.dart';
-import '../main.dart';
 import '../providers/identity_provider.dart';
 import '../providers/dns_provider.dart';
 import '../providers/settings_provider.dart';
 import '../providers/network_provider.dart';
-import '../providers/connection_provider.dart';
 import '../providers/file_provider.dart';
 import '../providers/chat_provider.dart';
 import '../providers/contact_provider.dart';
@@ -107,11 +105,15 @@ class SettingsScreen extends ConsumerWidget {
                       subtitle: 'Colors, fonts, and chat appearance',
                       trailing: Icon(
                         Icons.chevron_right_rounded,
-                        color: Theme.of(context).colorScheme.onSurface.withAlpha(153),
+                        color: Theme.of(context)
+                            .colorScheme
+                            .onSurface
+                            .withAlpha(153),
                       ),
                       onTap: () => Navigator.push(
                         context,
-                        MaterialPageRoute(builder: (_) => const AppearanceSettingsScreen()),
+                        MaterialPageRoute(
+                            builder: (_) => const AppearanceSettingsScreen()),
                       ),
                     ),
                   ],
@@ -123,7 +125,10 @@ class SettingsScreen extends ConsumerWidget {
                 _SettingsSection(
                   title: 'Privacy & Security',
                   icon: Icons.shield_rounded,
-                  iconGradient: [colorScheme.primary, colorScheme.primary.withAlpha(180)],
+                  iconGradient: [
+                    colorScheme.primary,
+                    colorScheme.primary.withAlpha(180)
+                  ],
                   children: [
                     // Security settings link
                     _SettingsTile(
@@ -136,7 +141,8 @@ class SettingsScreen extends ConsumerWidget {
                       ),
                       onTap: () => Navigator.push(
                         context,
-                        MaterialPageRoute(builder: (_) => const SecuritySettingsScreen()),
+                        MaterialPageRoute(
+                            builder: (_) => const SecuritySettingsScreen()),
                       ),
                     ),
                     // Onion routing hop count selector
@@ -168,7 +174,7 @@ class SettingsScreen extends ConsumerWidget {
                 _SettingsSection(
                   title: 'Storage',
                   icon: Icons.storage_rounded,
-                  iconGradient: [colorScheme.tertiary ?? colorScheme.secondary, colorScheme.error],
+                  iconGradient: [colorScheme.tertiary, colorScheme.error],
                   children: [
                     _SettingsTile(
                       icon: Icons.folder_rounded,
@@ -207,7 +213,8 @@ class SettingsScreen extends ConsumerWidget {
                       ),
                       onTap: () => Navigator.push(
                         context,
-                        MaterialPageRoute(builder: (_) => const LogViewerScreen()),
+                        MaterialPageRoute(
+                            builder: (_) => const LogViewerScreen()),
                       ),
                     ),
                     const _LogCountTile(),
@@ -220,7 +227,10 @@ class SettingsScreen extends ConsumerWidget {
                 _SettingsSection(
                   title: 'About',
                   icon: Icons.info_outline_rounded,
-                  iconGradient: [colorScheme.onSurface.withAlpha(128), colorScheme.surfaceContainerHighest],
+                  iconGradient: [
+                    colorScheme.onSurface.withAlpha(128),
+                    colorScheme.surfaceContainerHighest
+                  ],
                   children: [
                     _SettingsTile(
                       icon: Icons.menu_book_rounded,
@@ -232,7 +242,8 @@ class SettingsScreen extends ConsumerWidget {
                       ),
                       onTap: () => Navigator.push(
                         context,
-                        MaterialPageRoute(builder: (_) => const UserGuideScreen()),
+                        MaterialPageRoute(
+                            builder: (_) => const UserGuideScreen()),
                       ),
                     ),
                     _SettingsTile(
@@ -259,7 +270,10 @@ class SettingsScreen extends ConsumerWidget {
                 _SettingsSection(
                   title: 'Danger Zone',
                   icon: Icons.warning_rounded,
-                  iconGradient: [colorScheme.error, colorScheme.error.withAlpha(180)],
+                  iconGradient: [
+                    colorScheme.error,
+                    colorScheme.error.withAlpha(180)
+                  ],
                   isDestructive: true,
                   children: [
                     _SettingsTile(
@@ -312,7 +326,9 @@ class SettingsScreen extends ConsumerWidget {
             children: [
               Text(
                 'This will permanently delete:',
-                style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withAlpha(153)),
+                style: TextStyle(
+                    color:
+                        Theme.of(context).colorScheme.onSurface.withAlpha(153)),
               ),
               const SizedBox(height: 12),
               _ResetWarningItem(text: 'All your messages'),
@@ -445,7 +461,10 @@ class _ProfileCard extends ConsumerWidget {
             height: 52,
             decoration: BoxDecoration(
               gradient: LinearGradient(
-                colors: [Theme.of(context).colorScheme.primary, Theme.of(context).colorScheme.secondary],
+                colors: [
+                  Theme.of(context).colorScheme.primary,
+                  Theme.of(context).colorScheme.secondary
+                ],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
@@ -488,9 +507,11 @@ class _ProfileCard extends ConsumerWidget {
                 GestureDetector(
                   onTap: () => _showNodeIdDialog(context, identity),
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                     decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                      color:
+                          Theme.of(context).colorScheme.surfaceContainerHighest,
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: Row(
@@ -501,11 +522,19 @@ class _ProfileCard extends ConsumerWidget {
                           style: TextStyle(
                             fontFamily: 'monospace',
                             fontSize: 10,
-                            color: Theme.of(context).colorScheme.onSurface.withAlpha(153),
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurface
+                                .withAlpha(153),
                           ),
                         ),
                         const SizedBox(width: 4),
-                        Icon(Icons.copy_rounded, size: 10, color: Theme.of(context).colorScheme.onSurface.withAlpha(153)),
+                        Icon(Icons.copy_rounded,
+                            size: 10,
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurface
+                                .withAlpha(153)),
                       ],
                     ),
                   ),
@@ -594,7 +623,8 @@ class _ProfileCard extends ConsumerWidget {
               width: double.infinity,
               child: ElevatedButton.icon(
                 onPressed: () {
-                  Clipboard.setData(ClipboardData(text: NodeIdUtils.toDisplayFormat(identity.nodeId)));
+                  Clipboard.setData(ClipboardData(
+                      text: NodeIdUtils.toDisplayFormat(identity.nodeId)));
                   Navigator.pop(context);
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
@@ -714,7 +744,8 @@ class _ProfileCardLoading extends StatelessWidget {
                   width: 120,
                   height: 20,
                   decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                    color:
+                        Theme.of(context).colorScheme.surfaceContainerHighest,
                     borderRadius: BorderRadius.circular(6),
                   ),
                 ),
@@ -723,7 +754,8 @@ class _ProfileCardLoading extends StatelessWidget {
                   width: 80,
                   height: 16,
                   decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                    color:
+                        Theme.of(context).colorScheme.surfaceContainerHighest,
                     borderRadius: BorderRadius.circular(6),
                   ),
                 ),
@@ -879,6 +911,7 @@ class _SettingsTile extends StatelessWidget {
   }
 }
 
+// ignore: unused_element
 class _SettingsSwitch extends StatelessWidget {
   final IconData icon;
   final String title;
@@ -971,7 +1004,9 @@ class _StatusChip extends StatelessWidget {
             width: 6,
             height: 6,
             decoration: BoxDecoration(
-              color: isActive ? Theme.of(context).colorScheme.secondary : Theme.of(context).colorScheme.onSurface.withAlpha(153),
+              color: isActive
+                  ? Theme.of(context).colorScheme.secondary
+                  : Theme.of(context).colorScheme.onSurface.withAlpha(153),
               shape: BoxShape.circle,
             ),
           ),
@@ -981,7 +1016,9 @@ class _StatusChip extends StatelessWidget {
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w500,
-              color: isActive ? Theme.of(context).colorScheme.secondary : Theme.of(context).colorScheme.onSurface.withAlpha(153),
+              color: isActive
+                  ? Theme.of(context).colorScheme.secondary
+                  : Theme.of(context).colorScheme.onSurface.withAlpha(153),
             ),
           ),
         ],
@@ -1001,7 +1038,6 @@ class _UsernameSection extends ConsumerStatefulWidget {
 class _UsernameSectionState extends ConsumerState<_UsernameSection> {
   final _usernameController = TextEditingController();
   bool _isRegistering = false;
-  bool _isCheckingName = false;
   String? _error;
   String? _registeredName;
 
@@ -1078,7 +1114,11 @@ class _UsernameSectionState extends ConsumerState<_UsernameSection> {
             'Register a username so others can find you easily',
             style: TextStyle(
               fontSize: 13,
-              color: Theme.of(context).colorScheme.onSurface.withAlpha(153).withOpacity(0.7),
+              color: Theme.of(context)
+                  .colorScheme
+                  .onSurface
+                  .withAlpha(153)
+                  .withOpacity(0.7),
             ),
           ),
           const SizedBox(height: 16),
@@ -1087,7 +1127,8 @@ class _UsernameSectionState extends ConsumerState<_UsernameSection> {
               color: Theme.of(context).colorScheme.surfaceContainerHighest,
               borderRadius: BorderRadius.circular(14),
               border: _error != null
-                  ? Border.all(color: Theme.of(context).colorScheme.error, width: 1)
+                  ? Border.all(
+                      color: Theme.of(context).colorScheme.error, width: 1)
                   : null,
             ),
             child: Row(
@@ -1096,7 +1137,11 @@ class _UsernameSectionState extends ConsumerState<_UsernameSection> {
                 Icon(
                   Icons.alternate_email_rounded,
                   size: 20,
-                  color: Theme.of(context).colorScheme.onSurface.withAlpha(153).withOpacity(0.6),
+                  color: Theme.of(context)
+                      .colorScheme
+                      .onSurface
+                      .withAlpha(153)
+                      .withOpacity(0.6),
                 ),
                 Expanded(
                   child: TextField(
@@ -1104,7 +1149,11 @@ class _UsernameSectionState extends ConsumerState<_UsernameSection> {
                     decoration: InputDecoration(
                       hintText: 'username',
                       hintStyle: TextStyle(
-                        color: Theme.of(context).colorScheme.onSurface.withAlpha(153).withOpacity(0.4),
+                        color: Theme.of(context)
+                            .colorScheme
+                            .onSurface
+                            .withAlpha(153)
+                            .withOpacity(0.4),
                       ),
                       border: InputBorder.none,
                       contentPadding: const EdgeInsets.symmetric(
@@ -1126,9 +1175,13 @@ class _UsernameSectionState extends ConsumerState<_UsernameSection> {
                   ),
                 ),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.secondary.withOpacity(0.1),
+                    color: Theme.of(context)
+                        .colorScheme
+                        .secondary
+                        .withOpacity(0.1),
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Text(
@@ -1162,7 +1215,8 @@ class _UsernameSectionState extends ConsumerState<_UsernameSection> {
                 height: 24,
                 child: CircularProgressIndicator(
                   strokeWidth: 2.5,
-                  valueColor: AlwaysStoppedAnimation(Theme.of(context).colorScheme.secondary),
+                  valueColor: AlwaysStoppedAnimation(
+                      Theme.of(context).colorScheme.secondary),
                 ),
               ),
             )
@@ -1191,14 +1245,17 @@ class _UsernameSectionState extends ConsumerState<_UsernameSection> {
             'Usernames are 3-63 characters, must start with a letter, and can contain letters, numbers, and underscores.',
             style: TextStyle(
               fontSize: 12,
-              color: Theme.of(context).colorScheme.onSurface.withAlpha(153).withOpacity(0.5),
+              color: Theme.of(context)
+                  .colorScheme
+                  .onSurface
+                  .withAlpha(153)
+                  .withOpacity(0.5),
             ),
           ),
         ],
       ),
     );
   }
-
 
   Future<void> _registerUsername() async {
     final username = _usernameController.text.trim().toLowerCase();
@@ -1215,7 +1272,6 @@ class _UsernameSectionState extends ConsumerState<_UsernameSection> {
     }
 
     setState(() {
-      _isCheckingName = true;
       _isRegistering = true;
       _error = null;
     });
@@ -1225,7 +1281,6 @@ class _UsernameSectionState extends ConsumerState<_UsernameSection> {
       final identity = IdentityService.instance.currentIdentity;
       if (identity == null) {
         setState(() {
-          _isCheckingName = false;
           _isRegistering = false;
           _error = 'Identity not available';
         });
@@ -1241,14 +1296,11 @@ class _UsernameSectionState extends ConsumerState<_UsernameSection> {
       // If name exists and belongs to someone else, reject
       if (existingRecord != null && existingRecord.nodeId != identity.nodeId) {
         setState(() {
-          _isCheckingName = false;
           _isRegistering = false;
           _error = 'Username "$username" is already taken';
         });
         return;
       }
-
-      setState(() => _isCheckingName = false);
 
       // Proceed with registration
       final success = await dnsProvider.register(username);
@@ -1280,7 +1332,6 @@ class _UsernameSectionState extends ConsumerState<_UsernameSection> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _isCheckingName = false;
         _isRegistering = false;
         _error = 'Error: ${e.toString()}';
       });
@@ -1324,7 +1375,9 @@ class _NetworkStatusTile extends ConsumerWidget {
       trailing: _StatusChip(
         label: peerCount > 0
             ? '$peerCount Peer${peerCount > 1 ? 's' : ''}'
-            : (isOnline ? 'Online' : (isInitialized ? 'Connecting' : 'Offline')),
+            : (isOnline
+                ? 'Online'
+                : (isInitialized ? 'Connecting' : 'Offline')),
         isActive: isOnline,
       ),
       onTap: () {
@@ -1393,7 +1446,8 @@ class _NetworkInfoRow extends StatelessWidget {
         children: [
           Text(
             label,
-            style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withAlpha(153)),
+            style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurface.withAlpha(153)),
           ),
           Text(
             value,
@@ -1436,7 +1490,9 @@ class _ServerConfigTileState extends ConsumerState<_ServerConfigTile> {
           trailing: _StatusChip(
             label: isOnline
                 ? 'Connected'
-                : (isInitialized ? 'Connecting' : (hasServer ? 'Offline' : 'Not set')),
+                : (isInitialized
+                    ? 'Connecting'
+                    : (hasServer ? 'Offline' : 'Not set')),
             isActive: isOnline,
           ),
           onTap: () => _showServerDialog(context),
@@ -1456,21 +1512,27 @@ class _ServerConfigTileState extends ConsumerState<_ServerConfigTile> {
                           height: 24,
                           child: CircularProgressIndicator(
                             strokeWidth: 2.5,
-                            valueColor: AlwaysStoppedAnimation(Theme.of(context).colorScheme.secondary),
+                            valueColor: AlwaysStoppedAnimation(
+                                Theme.of(context).colorScheme.secondary),
                           ),
                         ),
                       ),
                     )
                   : ElevatedButton.icon(
-                      onPressed: () => isInitialized ? _disconnect() : _connect(),
+                      onPressed: () =>
+                          isInitialized ? _disconnect() : _connect(),
                       icon: Icon(
-                        isInitialized ? Icons.link_off_rounded : Icons.link_rounded,
+                        isInitialized
+                            ? Icons.link_off_rounded
+                            : Icons.link_rounded,
                         size: 18,
                       ),
                       label: Text(isInitialized ? 'Disconnect' : 'Connect'),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: isInitialized
-                            ? Theme.of(context).colorScheme.surfaceContainerHighest
+                            ? Theme.of(context)
+                                .colorScheme
+                                .surfaceContainerHighest
                             : Theme.of(context).colorScheme.secondary,
                         foregroundColor: isInitialized
                             ? Theme.of(context).colorScheme.onSurface
@@ -1496,7 +1558,10 @@ class _ServerConfigTileState extends ConsumerState<_ServerConfigTile> {
                   Icon(
                     Icons.public_rounded,
                     size: 16,
-                    color: Theme.of(context).colorScheme.secondary.withOpacity(0.8),
+                    color: Theme.of(context)
+                        .colorScheme
+                        .secondary
+                        .withOpacity(0.8),
                   ),
                   const SizedBox(width: 8),
                   Text(
@@ -1504,7 +1569,10 @@ class _ServerConfigTileState extends ConsumerState<_ServerConfigTile> {
                     style: TextStyle(
                       fontSize: 12,
                       fontFamily: 'monospace',
-                      color: Theme.of(context).colorScheme.onSurface.withAlpha(153),
+                      color: Theme.of(context)
+                          .colorScheme
+                          .onSurface
+                          .withAlpha(153),
                     ),
                   ),
                 ],
@@ -1512,8 +1580,7 @@ class _ServerConfigTileState extends ConsumerState<_ServerConfigTile> {
             ),
           ),
         // Server registry status
-        if (isInitialized)
-          _ServerRegistryStatus(),
+        if (isInitialized) _ServerRegistryStatus(),
       ],
     );
   }
@@ -1527,11 +1594,12 @@ class _ServerConfigTileState extends ConsumerState<_ServerConfigTile> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(success
-                ? 'Connected to server'
-                : 'Failed to connect'),
+            content:
+                Text(success ? 'Connected to server' : 'Failed to connect'),
             behavior: SnackBarBehavior.floating,
-            backgroundColor: success ? Theme.of(context).colorScheme.secondary : Theme.of(context).colorScheme.error,
+            backgroundColor: success
+                ? Theme.of(context).colorScheme.secondary
+                : Theme.of(context).colorScheme.error,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),
             ),
@@ -1571,7 +1639,8 @@ class _ServerConfigTileState extends ConsumerState<_ServerConfigTile> {
             Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.secondary.withOpacity(0.15),
+                color:
+                    Theme.of(context).colorScheme.secondary.withOpacity(0.15),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Icon(
@@ -1592,7 +1661,11 @@ class _ServerConfigTileState extends ConsumerState<_ServerConfigTile> {
               'Enter the address of your CyxChat server for P2P discovery and relay.',
               style: TextStyle(
                 fontSize: 13,
-                color: Theme.of(context).colorScheme.onSurface.withAlpha(153).withOpacity(0.7),
+                color: Theme.of(context)
+                    .colorScheme
+                    .onSurface
+                    .withAlpha(153)
+                    .withOpacity(0.7),
               ),
             ),
             const SizedBox(height: 16),
@@ -1619,7 +1692,11 @@ class _ServerConfigTileState extends ConsumerState<_ServerConfigTile> {
                   Icon(
                     Icons.info_outline_rounded,
                     size: 18,
-                    color: Theme.of(context).colorScheme.onSurface.withAlpha(153).withOpacity(0.7),
+                    color: Theme.of(context)
+                        .colorScheme
+                        .onSurface
+                        .withAlpha(153)
+                        .withOpacity(0.7),
                   ),
                   const SizedBox(width: 10),
                   Expanded(
@@ -1627,7 +1704,11 @@ class _ServerConfigTileState extends ConsumerState<_ServerConfigTile> {
                       'Format: IP:PORT (e.g., 192.168.1.100:7777)',
                       style: TextStyle(
                         fontSize: 12,
-                        color: Theme.of(context).colorScheme.onSurface.withAlpha(153).withOpacity(0.7),
+                        color: Theme.of(context)
+                            .colorScheme
+                            .onSurface
+                            .withAlpha(153)
+                            .withOpacity(0.7),
                       ),
                     ),
                   ),
@@ -1712,7 +1793,10 @@ class _ServerRegistryStatus extends ConsumerWidget {
           children: [
             Row(
               children: [
-                Icon(Icons.dns_rounded, size: 14, color: Theme.of(context).colorScheme.onSurface.withAlpha(153)),
+                Icon(Icons.dns_rounded,
+                    size: 14,
+                    color:
+                        Theme.of(context).colorScheme.onSurface.withAlpha(153)),
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
@@ -1722,7 +1806,10 @@ class _ServerRegistryStatus extends ConsumerWidget {
                     style: TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.w600,
-                      color: Theme.of(context).colorScheme.onSurface.withAlpha(153),
+                      color: Theme.of(context)
+                          .colorScheme
+                          .onSurface
+                          .withAlpha(153),
                     ),
                   ),
                 ),
@@ -1730,19 +1817,28 @@ class _ServerRegistryStatus extends ConsumerWidget {
                   onTap: () => _showAddServerDialog(context, ref),
                   borderRadius: BorderRadius.circular(12),
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                     decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.secondary.withOpacity(0.15),
+                      color: Theme.of(context)
+                          .colorScheme
+                          .secondary
+                          .withOpacity(0.15),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.add, size: 12, color: Theme.of(context).colorScheme.secondary),
+                        Icon(Icons.add,
+                            size: 12,
+                            color: Theme.of(context).colorScheme.secondary),
                         const SizedBox(width: 2),
                         Text(
                           'Add',
-                          style: TextStyle(fontSize: 10, color: Theme.of(context).colorScheme.secondary, fontWeight: FontWeight.w600),
+                          style: TextStyle(
+                              fontSize: 10,
+                              color: Theme.of(context).colorScheme.secondary,
+                              fontWeight: FontWeight.w600),
                         ),
                       ],
                     ),
@@ -1762,9 +1858,16 @@ class _ServerRegistryStatus extends ConsumerWidget {
                   child: Row(
                     children: [
                       Icon(
-                        isHealthy ? Icons.check_circle : Icons.radio_button_unchecked,
+                        isHealthy
+                            ? Icons.check_circle
+                            : Icons.radio_button_unchecked,
                         size: 12,
-                        color: isHealthy ? Theme.of(context).colorScheme.secondary : Theme.of(context).colorScheme.onSurface.withAlpha(153),
+                        color: isHealthy
+                            ? Theme.of(context).colorScheme.secondary
+                            : Theme.of(context)
+                                .colorScheme
+                                .onSurface
+                                .withAlpha(153),
                       ),
                       const SizedBox(width: 6),
                       Expanded(
@@ -1780,21 +1883,33 @@ class _ServerRegistryStatus extends ConsumerWidget {
                       if (isSeed)
                         Container(
                           margin: const EdgeInsets.only(right: 6),
-                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 4, vertical: 1),
                           decoration: BoxDecoration(
-                            color: Theme.of(context).colorScheme.secondary.withOpacity(0.1),
+                            color: Theme.of(context)
+                                .colorScheme
+                                .secondary
+                                .withOpacity(0.1),
                             borderRadius: BorderRadius.circular(4),
                           ),
                           child: Text(
                             'SEED',
-                            style: TextStyle(fontSize: 8, color: Theme.of(context).colorScheme.secondary, fontWeight: FontWeight.w600),
+                            style: TextStyle(
+                                fontSize: 8,
+                                color: Theme.of(context).colorScheme.secondary,
+                                fontWeight: FontWeight.w600),
                           ),
                         ),
                       Text(
                         latency > 0 ? '${latency}ms' : state,
                         style: TextStyle(
                           fontSize: 10,
-                          color: isHealthy ? Theme.of(context).colorScheme.secondary : Theme.of(context).colorScheme.onSurface.withAlpha(153),
+                          color: isHealthy
+                              ? Theme.of(context).colorScheme.secondary
+                              : Theme.of(context)
+                                  .colorScheme
+                                  .onSurface
+                                  .withAlpha(153),
                         ),
                       ),
                     ],
@@ -1806,7 +1921,12 @@ class _ServerRegistryStatus extends ConsumerWidget {
                 padding: const EdgeInsets.only(top: 6),
                 child: Text(
                   'No servers registered',
-                  style: TextStyle(fontSize: 11, color: Theme.of(context).colorScheme.onSurface.withAlpha(153)),
+                  style: TextStyle(
+                      fontSize: 11,
+                      color: Theme.of(context)
+                          .colorScheme
+                          .onSurface
+                          .withAlpha(153)),
                 ),
               ),
           ],
@@ -1828,10 +1948,12 @@ class _ServerRegistryStatus extends ConsumerWidget {
             Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.secondary.withOpacity(0.15),
+                color:
+                    Theme.of(context).colorScheme.secondary.withOpacity(0.15),
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: Icon(Icons.add_circle_outline, color: Theme.of(context).colorScheme.secondary, size: 20),
+              child: Icon(Icons.add_circle_outline,
+                  color: Theme.of(context).colorScheme.secondary, size: 20),
             ),
             const SizedBox(width: 12),
             const Expanded(child: Text('Add Server')),
@@ -1843,7 +1965,10 @@ class _ServerRegistryStatus extends ConsumerWidget {
           children: [
             Text(
               'Enter the address of a CyxChat server (ip:port).',
-              style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurface.withAlpha(153)),
+              style: TextStyle(
+                  fontSize: 13,
+                  color:
+                      Theme.of(context).colorScheme.onSurface.withAlpha(153)),
             ),
             const SizedBox(height: 16),
             TextField(
@@ -1851,9 +1976,15 @@ class _ServerRegistryStatus extends ConsumerWidget {
               autofocus: true,
               decoration: InputDecoration(
                 hintText: '192.168.1.100:7777',
-                hintStyle: TextStyle(color: Theme.of(context).colorScheme.onSurface.withAlpha(153).withOpacity(0.5)),
+                hintStyle: TextStyle(
+                    color: Theme.of(context)
+                        .colorScheme
+                        .onSurface
+                        .withAlpha(153)
+                        .withOpacity(0.5)),
                 filled: true,
-                fillColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+                fillColor:
+                    Theme.of(context).colorScheme.surfaceContainerHighest,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                   borderSide: BorderSide.none,
@@ -1877,19 +2008,26 @@ class _ServerRegistryStatus extends ConsumerWidget {
                   SnackBar(
                     content: const Text('Enter a valid address (ip:port)'),
                     behavior: SnackBarBehavior.floating,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12)),
                   ),
                 );
                 return;
               }
-              final result = ref.read(connectionNotifierProvider).addServer(addr);
+              final result =
+                  ref.read(connectionNotifierProvider).addServer(addr);
               Navigator.pop(context);
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
-                  content: Text(result == 0 ? 'Server added: $addr' : 'Failed to add server'),
+                  content: Text(result == 0
+                      ? 'Server added: $addr'
+                      : 'Failed to add server'),
                   behavior: SnackBarBehavior.floating,
-                  backgroundColor: result == 0 ? Theme.of(context).colorScheme.secondary : Theme.of(context).colorScheme.error,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  backgroundColor: result == 0
+                      ? Theme.of(context).colorScheme.secondary
+                      : Theme.of(context).colorScheme.error,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
                 ),
               );
             },
@@ -1928,7 +2066,9 @@ class _FastFileTransferTile extends ConsumerWidget {
                 child: Icon(
                   Icons.bolt_rounded,
                   size: 20,
-                  color: isEnabled ? Colors.orange : Theme.of(context).colorScheme.onSurface,
+                  color: isEnabled
+                      ? Colors.orange
+                      : Theme.of(context).colorScheme.onSurface,
                 ),
               ),
               const SizedBox(width: 14),
@@ -1949,7 +2089,10 @@ class _FastFileTransferTile extends ConsumerWidget {
                       'Use direct P2P after recipient accepts',
                       style: TextStyle(
                         fontSize: 13,
-                        color: Theme.of(context).colorScheme.onSurface.withAlpha(110),
+                        color: Theme.of(context)
+                            .colorScheme
+                            .onSurface
+                            .withAlpha(110),
                       ),
                     ),
                   ],
@@ -1958,14 +2101,18 @@ class _FastFileTransferTile extends ConsumerWidget {
               Switch(
                 value: isEnabled,
                 onChanged: (value) {
-                  ref.read(settingsProvider.notifier).setDirectFileTransfer(value);
+                  ref
+                      .read(settingsProvider.notifier)
+                      .setDirectFileTransfer(value);
                   // Apply to file provider immediately
                   ref.read(fileActionsProvider).setDirectMode(value);
                 },
                 activeColor: Colors.orange,
                 activeTrackColor: Colors.orange.withOpacity(0.3),
-                inactiveThumbColor: Theme.of(context).colorScheme.onSurface.withAlpha(153),
-                inactiveTrackColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+                inactiveThumbColor:
+                    Theme.of(context).colorScheme.onSurface.withAlpha(153),
+                inactiveTrackColor:
+                    Theme.of(context).colorScheme.surfaceContainerHighest,
               ),
             ],
           ),
@@ -1996,7 +2143,11 @@ class _FastFileTransferTile extends ConsumerWidget {
                       'Direct P2P starts only after the recipient accepts. The peer can see your IP during fast transfers.',
                       style: TextStyle(
                         fontSize: 12,
-                        color: Theme.of(context).colorScheme.onSurface.withAlpha(153).withOpacity(0.8),
+                        color: Theme.of(context)
+                            .colorScheme
+                            .onSurface
+                            .withAlpha(153)
+                            .withOpacity(0.8),
                       ),
                     ),
                   ),
@@ -2034,7 +2185,9 @@ class _PresenceSyncTile extends ConsumerWidget {
             child: Icon(
               Icons.circle_rounded,
               size: 20,
-              color: isEnabled ? Colors.green : Theme.of(context).colorScheme.onSurface,
+              color: isEnabled
+                  ? Colors.green
+                  : Theme.of(context).colorScheme.onSurface,
             ),
           ),
           const SizedBox(width: 14),
@@ -2054,7 +2207,10 @@ class _PresenceSyncTile extends ConsumerWidget {
                       ? 'Contact online status synced from server'
                       : 'Contact online status not synced',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Theme.of(context).colorScheme.onSurface.withAlpha(153),
+                        color: Theme.of(context)
+                            .colorScheme
+                            .onSurface
+                            .withAlpha(153),
                       ),
                 ),
               ],
@@ -2063,7 +2219,9 @@ class _PresenceSyncTile extends ConsumerWidget {
           Switch(
             value: isEnabled,
             onChanged: (value) async {
-              await ref.read(settingsProvider.notifier).setPresenceSyncEnabled(value);
+              await ref
+                  .read(settingsProvider.notifier)
+                  .setPresenceSyncEnabled(value);
 
               // Enable/disable presence sync
               try {
@@ -2113,7 +2271,9 @@ class _VideoCallsTile extends ConsumerWidget {
                 child: Icon(
                   Icons.videocam_rounded,
                   size: 20,
-                  color: isEnabled ? Colors.orange : Theme.of(context).colorScheme.onSurface,
+                  color: isEnabled
+                      ? Colors.orange
+                      : Theme.of(context).colorScheme.onSurface,
                 ),
               ),
               const SizedBox(width: 14),
@@ -2134,7 +2294,10 @@ class _VideoCallsTile extends ConsumerWidget {
                       'Enable video call functionality',
                       style: TextStyle(
                         fontSize: 13,
-                        color: Theme.of(context).colorScheme.onSurface.withAlpha(110),
+                        color: Theme.of(context)
+                            .colorScheme
+                            .onSurface
+                            .withAlpha(110),
                       ),
                     ),
                   ],
@@ -2143,12 +2306,16 @@ class _VideoCallsTile extends ConsumerWidget {
               Switch(
                 value: isEnabled,
                 onChanged: (value) {
-                  ref.read(settingsProvider.notifier).setVideoCallsEnabled(value);
+                  ref
+                      .read(settingsProvider.notifier)
+                      .setVideoCallsEnabled(value);
                 },
                 activeColor: Colors.orange,
                 activeTrackColor: Colors.orange.withOpacity(0.3),
-                inactiveThumbColor: Theme.of(context).colorScheme.onSurface.withAlpha(153),
-                inactiveTrackColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+                inactiveThumbColor:
+                    Theme.of(context).colorScheme.onSurface.withAlpha(153),
+                inactiveTrackColor:
+                    Theme.of(context).colorScheme.surfaceContainerHighest,
               ),
             ],
           ),
@@ -2194,7 +2361,11 @@ class _VideoCallsTile extends ConsumerWidget {
                     'Video calls are end-to-end encrypted but the peer can see your IP address. This is necessary for real-time communication.',
                     style: TextStyle(
                       fontSize: 12,
-                      color: Theme.of(context).colorScheme.onSurface.withAlpha(153).withOpacity(0.8),
+                      color: Theme.of(context)
+                          .colorScheme
+                          .onSurface
+                          .withAlpha(153)
+                          .withOpacity(0.8),
                     ),
                   ),
                 ],
@@ -2219,9 +2390,8 @@ class _LogCountTile extends StatelessWidget {
         final errorCount = LogService.instance.logs
             .where((log) => log.level == 'ERROR')
             .length;
-        final warnCount = LogService.instance.logs
-            .where((log) => log.level == 'WARN')
-            .length;
+        final warnCount =
+            LogService.instance.logs.where((log) => log.level == 'WARN').length;
 
         return Padding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
@@ -2242,13 +2412,17 @@ class _LogCountTile extends StatelessWidget {
                 _LogStat(
                   label: 'Errors',
                   count: errorCount,
-                  color: errorCount > 0 ? Theme.of(context).colorScheme.error : Theme.of(context).colorScheme.onSurface.withAlpha(153),
+                  color: errorCount > 0
+                      ? Theme.of(context).colorScheme.error
+                      : Theme.of(context).colorScheme.onSurface.withAlpha(153),
                 ),
                 const SizedBox(width: 16),
                 _LogStat(
                   label: 'Warnings',
                   count: warnCount,
-                  color: warnCount > 0 ? Colors.orange : Theme.of(context).colorScheme.onSurface.withAlpha(153),
+                  color: warnCount > 0
+                      ? Colors.orange
+                      : Theme.of(context).colorScheme.onSurface.withAlpha(153),
                 ),
                 const Spacer(),
                 TextButton(
@@ -2265,7 +2439,8 @@ class _LogCountTile extends StatelessWidget {
                     );
                   },
                   style: TextButton.styleFrom(
-                    foregroundColor: Theme.of(context).colorScheme.onSurface.withAlpha(153),
+                    foregroundColor:
+                        Theme.of(context).colorScheme.onSurface.withAlpha(153),
                     padding: const EdgeInsets.symmetric(horizontal: 8),
                   ),
                   child: const Text('Clear'),
@@ -2307,7 +2482,11 @@ class _LogStat extends StatelessWidget {
           label,
           style: TextStyle(
             fontSize: 10,
-            color: Theme.of(context).colorScheme.onSurface.withAlpha(153).withOpacity(0.7),
+            color: Theme.of(context)
+                .colorScheme
+                .onSurface
+                .withAlpha(153)
+                .withOpacity(0.7),
           ),
         ),
       ],
@@ -2342,7 +2521,8 @@ class _OnionHopSelector extends ConsumerWidget {
                 width: 40,
                 height: 40,
                 decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.primary.withOpacity(0.15),
+                  color:
+                      Theme.of(context).colorScheme.primary.withOpacity(0.15),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Icon(
@@ -2369,14 +2549,18 @@ class _OnionHopSelector extends ConsumerWidget {
                       '$currentHops hops · ${settings.hopPayloadCapacity} max payload',
                       style: TextStyle(
                         fontSize: 13,
-                        color: Theme.of(context).colorScheme.onSurface.withAlpha(110),
+                        color: Theme.of(context)
+                            .colorScheme
+                            .onSurface
+                            .withAlpha(110),
                       ),
                     ),
                   ],
                 ),
               ),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
                   color: Theme.of(context).colorScheme.secondary.withAlpha(38),
                   borderRadius: BorderRadius.circular(12),
@@ -2422,7 +2606,9 @@ class _OnionHopSelector extends ConsumerWidget {
                 return Expanded(
                   child: GestureDetector(
                     onTap: () {
-                      ref.read(settingsProvider.notifier).setOnionHopCount(option.hops);
+                      ref
+                          .read(settingsProvider.notifier)
+                          .setOnionHopCount(option.hops);
                       // Apply to C library immediately
                       ref.read(chatActionsProvider).setHopCount(option.hops);
                     },
@@ -2431,11 +2617,18 @@ class _OnionHopSelector extends ConsumerWidget {
                       padding: const EdgeInsets.symmetric(vertical: 12),
                       decoration: BoxDecoration(
                         color: isSelected
-                            ? Theme.of(context).colorScheme.primary.withOpacity(0.2)
+                            ? Theme.of(context)
+                                .colorScheme
+                                .primary
+                                .withOpacity(0.2)
                             : Colors.transparent,
                         borderRadius: BorderRadius.circular(8),
                         border: isSelected
-                            ? Border.all(color: Theme.of(context).colorScheme.primary.withOpacity(0.5))
+                            ? Border.all(
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .primary
+                                    .withOpacity(0.5))
                             : null,
                       ),
                       child: Column(
@@ -2447,7 +2640,10 @@ class _OnionHopSelector extends ConsumerWidget {
                               fontWeight: FontWeight.w600,
                               color: isSelected
                                   ? Theme.of(context).colorScheme.primary
-                                  : Theme.of(context).colorScheme.onSurface.withAlpha(153),
+                                  : Theme.of(context)
+                                      .colorScheme
+                                      .onSurface
+                                      .withAlpha(153),
                             ),
                           ),
                           const SizedBox(height: 2),
@@ -2456,8 +2652,15 @@ class _OnionHopSelector extends ConsumerWidget {
                             style: TextStyle(
                               fontSize: 10,
                               color: isSelected
-                                  ? Theme.of(context).colorScheme.primary.withOpacity(0.8)
-                                  : Theme.of(context).colorScheme.onSurface.withAlpha(153).withOpacity(0.6),
+                                  ? Theme.of(context)
+                                      .colorScheme
+                                      .primary
+                                      .withOpacity(0.8)
+                                  : Theme.of(context)
+                                      .colorScheme
+                                      .onSurface
+                                      .withAlpha(153)
+                                      .withOpacity(0.6),
                             ),
                           ),
                           const SizedBox(height: 2),
@@ -2467,8 +2670,15 @@ class _OnionHopSelector extends ConsumerWidget {
                               fontSize: 10,
                               fontWeight: FontWeight.w500,
                               color: isSelected
-                                  ? Theme.of(context).colorScheme.primary.withOpacity(0.7)
-                                  : Theme.of(context).colorScheme.onSurface.withAlpha(153).withOpacity(0.5),
+                                  ? Theme.of(context)
+                                      .colorScheme
+                                      .primary
+                                      .withOpacity(0.7)
+                                  : Theme.of(context)
+                                      .colorScheme
+                                      .onSurface
+                                      .withAlpha(153)
+                                      .withOpacity(0.5),
                             ),
                           ),
                         ],
@@ -2505,7 +2715,11 @@ class _OnionHopSelector extends ConsumerWidget {
                     'More hops = better anonymity but smaller message size',
                     style: TextStyle(
                       fontSize: 12,
-                      color: Theme.of(context).colorScheme.onSurface.withAlpha(153).withOpacity(0.8),
+                      color: Theme.of(context)
+                          .colorScheme
+                          .onSurface
+                          .withAlpha(153)
+                          .withOpacity(0.8),
                     ),
                   ),
                 ),

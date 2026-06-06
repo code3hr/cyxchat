@@ -9,7 +9,8 @@ import 'log_service.dart';
 /// notifies listeners when the device regains connectivity, allowing the
 /// app to automatically reconnect to the bootstrap server.
 class NetworkMonitorService {
-  static final NetworkMonitorService _instance = NetworkMonitorService._internal();
+  static final NetworkMonitorService _instance =
+      NetworkMonitorService._internal();
   static NetworkMonitorService get instance => _instance;
 
   NetworkMonitorService._internal();
@@ -28,7 +29,8 @@ class NetworkMonitorService {
   List<ConnectivityResult> get currentStatus => _currentStatus;
 
   /// Check if currently connected to any network
-  bool get isConnected => _currentStatus.isNotEmpty &&
+  bool get isConnected =>
+      _currentStatus.isNotEmpty &&
       !_currentStatus.contains(ConnectivityResult.none);
 
   /// Start monitoring network changes
@@ -42,7 +44,8 @@ class NetworkMonitorService {
     try {
       _currentStatus = await _connectivity.checkConnectivity();
       _wasOffline = !isConnected;
-      log.info('Network monitor started: ${_statusString()}', source: 'Network');
+      log.info('Network monitor started: ${_statusString()}',
+          source: 'Network');
     } catch (e) {
       log.warning('Failed to get initial connectivity: $e', source: 'Network');
       _currentStatus = [ConnectivityResult.none];
@@ -69,14 +72,13 @@ class NetworkMonitorService {
     final previousStatus = _currentStatus;
     _currentStatus = results;
 
-    final wasConnected = previousStatus.isNotEmpty &&
-        !previousStatus.contains(ConnectivityResult.none);
     final nowConnected = isConnected;
 
-    log.debug('Connectivity changed: ${_statusString(previousStatus)} -> ${_statusString()}',
+    log.debug(
+        'Connectivity changed: ${_statusString(previousStatus)} -> ${_statusString()}',
         source: 'Network');
 
-    if (!wasConnected && nowConnected) {
+    if (_wasOffline && nowConnected) {
       // Just came back online
       log.info('Network restored: ${_statusString()}', source: 'Network');
       _wasOffline = false;
@@ -86,7 +88,7 @@ class NetworkMonitorService {
         log.info('Triggering automatic reconnection...', source: 'Network');
         onNetworkRestored!();
       }
-    } else if (wasConnected && !nowConnected) {
+    } else if (!_wasOffline && !nowConnected) {
       // Just went offline
       log.warning('Network lost', source: 'Network');
       _wasOffline = true;
