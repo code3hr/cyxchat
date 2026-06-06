@@ -304,6 +304,7 @@ class VoicePlayerProvider extends ChangeNotifier {
   final AudioPlayer _player = AudioPlayer();
   VoicePlaybackState _state = VoicePlaybackState.stopped;
   String? _currentFileId;
+  String? _currentTempFilePath;
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
   double _playbackSpeed = 1.0;
@@ -331,6 +332,7 @@ class VoicePlayerProvider extends ChangeNotifier {
         _state = VoicePlaybackState.stopped;
         _position = Duration.zero;
         _currentFileId = null;
+        unawaited(_deleteCurrentTempFile());
         notifyListeners();
       }
     });
@@ -361,6 +363,7 @@ class VoicePlayerProvider extends ChangeNotifier {
       final tempDir = await getTemporaryDirectory();
       final tempFile = File('${tempDir.path}/playback_$fileId.m4a');
       await tempFile.writeAsBytes(data);
+      _currentTempFilePath = tempFile.path;
 
       // Load and play
       final audioDuration = await _player.setFilePath(tempFile.path);
@@ -373,6 +376,7 @@ class VoicePlayerProvider extends ChangeNotifier {
 
       debugPrint('VoicePlayer: Playing $fileId');
     } catch (e) {
+      await _deleteCurrentTempFile();
       _state = VoicePlaybackState.error;
       notifyListeners();
       debugPrint('VoicePlayer: Error playing: $e');
@@ -400,6 +404,7 @@ class VoicePlayerProvider extends ChangeNotifier {
   /// Stop playback
   Future<void> stop() async {
     await _player.stop();
+    await _deleteCurrentTempFile();
     _state = VoicePlaybackState.stopped;
     _position = Duration.zero;
     _currentFileId = null;
@@ -429,10 +434,26 @@ class VoicePlayerProvider extends ChangeNotifier {
     }
   }
 
+  Future<void> _deleteCurrentTempFile() async {
+    final path = _currentTempFilePath;
+    _currentTempFilePath = null;
+    if (path == null) return;
+
+    try {
+      final file = File(path);
+      if (await file.exists()) {
+        await file.delete();
+      }
+    } catch (e) {
+      debugPrint('VoicePlayer: Could not delete temp playback file: $e');
+    }
+  }
+
   @override
   void dispose() {
     _positionSub?.cancel();
     _stateSub?.cancel();
+    unawaited(_deleteCurrentTempFile());
     _player.dispose();
     super.dispose();
   }

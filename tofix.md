@@ -46,11 +46,12 @@ This file tracks the core chat-app readiness work. Keep each fix small, auditabl
 - [x] Windows app build stabilization: direct elevated MSBuild of `runner\cyxchat.vcxproj` completes and produces `runner\Debug\cyxchat.exe`, avoiding the unreliable `flutter.bat` wrapper path.
 - [x] Focused Dart coverage: service-level Flutter tests now cover persisted message status/media metadata round-trips, direct file transfer delivered/failed updates, emitted status updates, and direct unread-to-read handling.
 - [x] Call/voice lifecycle coverage: Flutter tests cover incoming call reject/busy behavior, voice message metadata JSON escaping, and stable voice duration formatting; voice metadata now uses structured JSON encoding.
+- [x] Voice playback temp cleanup: playback temp files are tracked and removed on stop, completion, failed load, and provider disposal.
 
 ## Next Fixes
 
 1. Device-backed audio/video integration audit
-   - Validate microphone/camera acquisition, active-recording disposal, playback temp-file cleanup, and WebRTC connected/disconnected transitions on Windows.
+   - Validate microphone/camera acquisition, active-recording disposal, and WebRTC connected/disconnected transitions on Windows.
    - Add narrow adapter seams for native/device APIs where tests cannot exercise behavior without real hardware.
 
 ## Verification Baseline
