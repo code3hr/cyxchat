@@ -51,18 +51,34 @@ typedef _GroupMediaCallback = Void Function(
     Size dataLen,
     Pointer<Void> userData);
 
-/// Native callback type for group invite
-typedef _GroupInviteCallback = Void Function(
-    Pointer<Void> ctx,
-    Pointer<Void> invite,
-    Pointer<Void> userData);
-
-/// Native callback type for member join
-typedef _MemberJoinCallback = Void Function(
+/// Native callback type for group media transfer progress
+typedef _GroupMediaProgressCallback = Void Function(
     Pointer<Void> ctx,
     Pointer<Uint8> groupId,
-    Pointer<Uint8> member,
+    Pointer<Uint8> msgId,
+    Pointer<Uint8> fileId,
+    Uint32 chunksDone,
+    Uint32 chunksTotal,
+    Int32 isOutgoing,
     Pointer<Void> userData);
+
+/// Native callback type for group media transfer errors
+typedef _GroupMediaErrorCallback = Void Function(
+    Pointer<Void> ctx,
+    Pointer<Uint8> groupId,
+    Pointer<Uint8> msgId,
+    Pointer<Uint8> fileId,
+    Int32 error,
+    Int32 isOutgoing,
+    Pointer<Void> userData);
+
+/// Native callback type for group invite
+typedef _GroupInviteCallback = Void Function(
+    Pointer<Void> ctx, Pointer<Void> invite, Pointer<Void> userData);
+
+/// Native callback type for member join
+typedef _MemberJoinCallback = Void Function(Pointer<Void> ctx,
+    Pointer<Uint8> groupId, Pointer<Uint8> member, Pointer<Void> userData);
 
 /// Native callback type for member leave
 typedef _MemberLeaveCallback = Void Function(
@@ -1896,6 +1912,8 @@ class CyxChatBindings {
   /// Group callback storage (prevent GC)
   NativeCallable<_GroupMessageCallback>? _onGroupMessage;
   NativeCallable<_GroupMediaCallback>? _onGroupMedia;
+  NativeCallable<_GroupMediaProgressCallback>? _onGroupMediaProgress;
+  NativeCallable<_GroupMediaErrorCallback>? _onGroupMediaError;
   NativeCallable<_GroupInviteCallback>? _onGroupInvite;
   NativeCallable<_MemberJoinCallback>? _onMemberJoin;
   NativeCallable<_MemberLeaveCallback>? _onMemberLeave;
@@ -1905,13 +1923,20 @@ class CyxChatBindings {
   NativeCallable<_GroupDeliveryFailedCallback>? _onGroupDeliveryFailed;
 
   /// Dart callbacks for group events
-  void Function(String groupId, String from, String msgId, String text)? onGroupMessage;
+  void Function(String groupId, String from, String msgId, String text)?
+      onGroupMessage;
   void Function(GroupMediaMetadata media)? onGroupMedia;
-  void Function(String groupId, String groupName, String inviter)? onGroupInvite;
+  void Function(String groupId, String msgId, String fileId, int chunksDone,
+      int chunksTotal, bool isOutgoing)? onGroupMediaProgress;
+  void Function(String groupId, String msgId, String fileId, int error,
+      bool isOutgoing)? onGroupMediaError;
+  void Function(String groupId, String groupName, String inviter)?
+      onGroupInvite;
   void Function(String groupId, String memberId)? onMemberJoin;
   void Function(String groupId, String memberId, bool wasKicked)? onMemberLeave;
   void Function(String groupId, int newVersion)? onKeyUpdate;
-  void Function(String groupId, int newVersion, bool success, int failedCount)? onKeyDistComplete;
+  void Function(String groupId, int newVersion, bool success, int failedCount)?
+      onKeyDistComplete;
   void Function(String groupId, String msgId, int ackedCount, int totalCount)?
       onGroupDelivery;
   void Function(String groupId, String msgId, int failedCount)?
@@ -1942,6 +1967,25 @@ class CyxChatBindings {
     _native.cyxchat_group_set_on_media(
       _groupCtx!,
       _onGroupMedia!.nativeFunction,
+      nullptr,
+    );
+
+    _onGroupMediaProgress =
+        NativeCallable<_GroupMediaProgressCallback>.listener(
+      _handleGroupMediaProgress,
+    );
+    _native.cyxchat_group_set_on_media_progress(
+      _groupCtx!,
+      _onGroupMediaProgress!.nativeFunction,
+      nullptr,
+    );
+
+    _onGroupMediaError = NativeCallable<_GroupMediaErrorCallback>.listener(
+      _handleGroupMediaError,
+    );
+    _native.cyxchat_group_set_on_media_error(
+      _groupCtx!,
+      _onGroupMediaError!.nativeFunction,
       nullptr,
     );
 
@@ -2020,6 +2064,8 @@ class CyxChatBindings {
   void groupCleanupCallbacks() {
     _onGroupMessage?.close();
     _onGroupMedia?.close();
+    _onGroupMediaProgress?.close();
+    _onGroupMediaError?.close();
     _onGroupInvite?.close();
     _onMemberJoin?.close();
     _onMemberLeave?.close();
@@ -2029,6 +2075,8 @@ class CyxChatBindings {
     _onGroupDeliveryFailed?.close();
     _onGroupMessage = null;
     _onGroupMedia = null;
+    _onGroupMediaProgress = null;
+    _onGroupMediaError = null;
     _onGroupInvite = null;
     _onMemberJoin = null;
     _onMemberLeave = null;
@@ -2106,6 +2154,48 @@ class CyxChatBindings {
       timestampMs: value.timestamp,
       data: payload == null ? null : Uint8List.fromList(payload),
     ));
+  }
+
+  /// Handle group media transfer progress
+  void _handleGroupMediaProgress(
+    Pointer<Void> ctx,
+    Pointer<Uint8> groupId,
+    Pointer<Uint8> msgId,
+    Pointer<Uint8> fileId,
+    int chunksDone,
+    int chunksTotal,
+    int isOutgoing,
+    Pointer<Void> userData,
+  ) {
+    if (onGroupMediaProgress == null) return;
+    onGroupMediaProgress!(
+      _ptrToHex(groupId, 8),
+      _ptrToHex(msgId, 8),
+      _ptrToHex(fileId, 8),
+      chunksDone,
+      chunksTotal,
+      isOutgoing != 0,
+    );
+  }
+
+  /// Handle group media transfer error
+  void _handleGroupMediaError(
+    Pointer<Void> ctx,
+    Pointer<Uint8> groupId,
+    Pointer<Uint8> msgId,
+    Pointer<Uint8> fileId,
+    int error,
+    int isOutgoing,
+    Pointer<Void> userData,
+  ) {
+    if (onGroupMediaError == null) return;
+    onGroupMediaError!(
+      _ptrToHex(groupId, 8),
+      _ptrToHex(msgId, 8),
+      _ptrToHex(fileId, 8),
+      error,
+      isOutgoing != 0,
+    );
   }
 
   /// Handle incoming group invite
@@ -4612,6 +4702,22 @@ late final cyxchat_conn_get_peer_pubkey = _lib.lookupFunction<      Int32 Functi
           Pointer<Void>,
           Pointer<NativeFunction<_GroupMediaCallback>>,
           Pointer<Void>)>('cyxchat_group_set_on_media');
+
+  late final cyxchat_group_set_on_media_progress = _lib.lookupFunction<
+      Void Function(Pointer<Void>,
+          Pointer<NativeFunction<_GroupMediaProgressCallback>>, Pointer<Void>),
+      void Function(
+          Pointer<Void>,
+          Pointer<NativeFunction<_GroupMediaProgressCallback>>,
+          Pointer<Void>)>('cyxchat_group_set_on_media_progress');
+
+  late final cyxchat_group_set_on_media_error = _lib.lookupFunction<
+      Void Function(Pointer<Void>,
+          Pointer<NativeFunction<_GroupMediaErrorCallback>>, Pointer<Void>),
+      void Function(
+          Pointer<Void>,
+          Pointer<NativeFunction<_GroupMediaErrorCallback>>,
+          Pointer<Void>)>('cyxchat_group_set_on_media_error');
 
   late final cyxchat_group_set_on_invite = _lib.lookupFunction<
       Void Function(Pointer<Void>, Pointer<NativeFunction<_GroupInviteCallback>>, Pointer<Void>),

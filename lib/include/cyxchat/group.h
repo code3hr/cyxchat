@@ -140,6 +140,27 @@ typedef void (*cyxchat_on_group_media_t)(
     void *user_data
 );
 
+typedef void (*cyxchat_on_group_media_progress_t)(
+    cyxchat_group_ctx_t *ctx,
+    const cyxchat_group_id_t *group_id,
+    const cyxchat_msg_id_t *msg_id,
+    const cyxchat_file_id_t *file_id,
+    uint32_t chunks_done,
+    uint32_t chunks_total,
+    int is_outgoing,
+    void *user_data
+);
+
+typedef void (*cyxchat_on_group_media_error_t)(
+    cyxchat_group_ctx_t *ctx,
+    const cyxchat_group_id_t *group_id,
+    const cyxchat_msg_id_t *msg_id,
+    const cyxchat_file_id_t *file_id,
+    cyxchat_error_t error,
+    int is_outgoing,
+    void *user_data
+);
+
 typedef void (*cyxchat_on_group_invite_t)(
     cyxchat_group_ctx_t *ctx,
     const cyxchat_group_invite_t *invite,
@@ -473,6 +494,18 @@ CYXCHAT_API void cyxchat_group_set_on_message(
 CYXCHAT_API void cyxchat_group_set_on_media(
     cyxchat_group_ctx_t *ctx,
     cyxchat_on_group_media_t callback,
+    void *user_data
+);
+
+CYXCHAT_API void cyxchat_group_set_on_media_progress(
+    cyxchat_group_ctx_t *ctx,
+    cyxchat_on_group_media_progress_t callback,
+    void *user_data
+);
+
+CYXCHAT_API void cyxchat_group_set_on_media_error(
+    cyxchat_group_ctx_t *ctx,
+    cyxchat_on_group_media_error_t callback,
     void *user_data
 );
 

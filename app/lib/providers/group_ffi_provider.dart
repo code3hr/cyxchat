@@ -127,6 +127,43 @@ class GroupDeliveryEvent {
         timestamp = timestamp ?? DateTime.now();
 }
 
+/// Group media transfer progress or error from native chunk transport
+class GroupMediaTransferEvent {
+  final String groupId;
+  final String msgId;
+  final String fileId;
+  final bool isOutgoing;
+  final int chunksDone;
+  final int chunksTotal;
+  final int? error;
+  final DateTime timestamp;
+
+  GroupMediaTransferEvent.progress({
+    required this.groupId,
+    required this.msgId,
+    required this.fileId,
+    required this.isOutgoing,
+    required this.chunksDone,
+    required this.chunksTotal,
+    DateTime? timestamp,
+  })  : error = null,
+        timestamp = timestamp ?? DateTime.now();
+
+  GroupMediaTransferEvent.error({
+    required this.groupId,
+    required this.msgId,
+    required this.fileId,
+    required this.isOutgoing,
+    required this.error,
+    DateTime? timestamp,
+  })  : chunksDone = 0,
+        chunksTotal = 0,
+        timestamp = timestamp ?? DateTime.now();
+
+  bool get failed => error != null;
+  double get progress => chunksTotal > 0 ? chunksDone / chunksTotal : 0.0;
+}
+
 /// Result of FFI group operations
 class GroupFFIResult {
   final bool success;
@@ -173,6 +210,8 @@ class GroupFFIProvider extends ChangeNotifier {
       StreamController<KeyDistProgress>.broadcast();
   final _deliveryController = StreamController<GroupDeliveryEvent>.broadcast();
   final _mediaController = StreamController<GroupMediaReceived>.broadcast();
+  final _mediaTransferController =
+      StreamController<GroupMediaTransferEvent>.broadcast();
 
   // Getters
   bool get initialized => _initialized;
@@ -200,6 +239,10 @@ class GroupFFIProvider extends ChangeNotifier {
 
   /// Stream of group delivery ACK events
   Stream<GroupDeliveryEvent> get deliveryStream => _deliveryController.stream;
+
+  /// Stream of group media chunk transfer progress/error events
+  Stream<GroupMediaTransferEvent> get mediaTransferStream =>
+      _mediaTransferController.stream;
 
   /// Get pending invites
   List<GroupInvite> get pendingInvites => _pendingInvites.values.toList();
@@ -1038,6 +1081,8 @@ class GroupFFIProvider extends ChangeNotifier {
     _bindings.onGroupDelivery = _onGroupDelivery;
     _bindings.onGroupDeliveryFailed = _onGroupDeliveryFailed;
     _bindings.onGroupMedia = _onGroupMedia;
+    _bindings.onGroupMediaProgress = _onGroupMediaProgress;
+    _bindings.onGroupMediaError = _onGroupMediaError;
 
     // Register native callbacks
     _bindings.groupSetupCallbacks();
@@ -1070,9 +1115,39 @@ class GroupFFIProvider extends ChangeNotifier {
     _mediaController.add(GroupMediaReceived(metadata: media));
   }
 
+  void _onGroupMediaProgress(String groupId, String msgId, String fileId,
+      int chunksDone, int chunksTotal, bool isOutgoing) {
+    _mediaTransferController.add(GroupMediaTransferEvent.progress(
+      groupId: groupId,
+      msgId: msgId,
+      fileId: fileId,
+      isOutgoing: isOutgoing,
+      chunksDone: chunksDone,
+      chunksTotal: chunksTotal,
+    ));
+    notifyListeners();
+  }
+
+  void _onGroupMediaError(
+      String groupId, String msgId, String fileId, int error, bool isOutgoing) {
+    final log = LogService.instance;
+    log.warning('Group media transfer $msgId failed: $error',
+        source: 'GroupFFI');
+
+    _mediaTransferController.add(GroupMediaTransferEvent.error(
+      groupId: groupId,
+      msgId: msgId,
+      fileId: fileId,
+      isOutgoing: isOutgoing,
+      error: error,
+    ));
+    notifyListeners();
+  }
+
   void _onGroupInvite(String groupId, String groupName, String inviter) {
     final log = LogService.instance;
-    log.info('Received invite to "$groupName" from ${inviter.substring(0, 8)}...',
+    log.info(
+        'Received invite to "$groupName" from ${inviter.substring(0, 8)}...',
         source: 'GroupFFI');
 
     final invite = GroupInvite(
@@ -1231,6 +1306,7 @@ class GroupFFIProvider extends ChangeNotifier {
     _keyDistCompleteController.close();
     _deliveryController.close();
     _mediaController.close();
+    _mediaTransferController.close();
     super.dispose();
   }
 }

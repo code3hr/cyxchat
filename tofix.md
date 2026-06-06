@@ -38,11 +38,11 @@ This file tracks the core chat-app readiness work. Keep each fix small, auditabl
 - [x] Inline group media payload delivery: small group file/image/voice payloads are encrypted into the group media packet and forwarded through the existing incoming media persistence path.
 - [x] Chunked group media payload delivery: larger group file/image/voice payloads are queued as encrypted group chunks from `cyxchat_group_poll`, assembled by receivers, and persisted by updating the pending media row when complete.
 - [x] Group media missing-chunk recovery: receivers request stalled missing chunks with extended group file ACKs, and senders retain completed payloads briefly to answer targeted retransmission requests.
+- [x] Group media transfer visibility: native group media progress/error callbacks are exposed through Dart FFI and GroupFFIProvider emits transfer progress/error stream events.
 
 ## Next Fixes
 
 1. Group media transfer hardening
-   - Add progress/error callbacks for large group media transfer state.
    - Add focused native tests for chunk assembly, duplicate chunks, missing-chunk requests, and completion callback behavior.
 
 2. Production verification

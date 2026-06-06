@@ -159,6 +159,12 @@ struct cyxchat_conn_ctx {
 static void send_announce_to_peer(cyxchat_conn_ctx_t *ctx,
                                    const cyxwiz_node_id_t *peer_id);
 static int is_discovery_message(uint8_t type);
+static void fire_progress_event(cyxchat_conn_ctx_t *ctx,
+                                const cyxwiz_node_id_t *peer_id,
+                                cyxchat_conn_event_t event,
+                                uint8_t retry_num,
+                                uint8_t retry_max,
+                                cyxchat_conn_fail_t fail_reason);
 
 static uint64_t get_time_ms(void)
 {
