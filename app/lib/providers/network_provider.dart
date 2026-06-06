@@ -104,6 +104,16 @@ final retryStateProvider =
 /// Provider for connection actions
 final connectionActionsProvider = Provider((ref) => ConnectionActions(ref));
 
+@visibleForTesting
+String resolveBootstrapServer({
+  String? override,
+  required AppSettings settings,
+}) {
+  if (override != null && override.isNotEmpty) return override;
+  if (settings.bootstrapServer.isNotEmpty) return settings.bootstrapServer;
+  return SettingsDefaults.bootstrapServer;
+}
+
 /// Connection actions helper class
 class ConnectionActions {
   final Ref _ref;
@@ -196,8 +206,10 @@ class ConnectionActions {
       return false;
     }
     final settings = _ref.read(settingsProvider);
-    final bootstrap = bootstrapServer ??
-        (settings.bootstrapServer.isNotEmpty ? settings.bootstrapServer : '');
+    final bootstrap = resolveBootstrapServer(
+      override: bootstrapServer,
+      settings: settings,
+    );
     final nodeIdBytes = NodeIdUtils.toBytesAsList(identity.nodeId);
 
     log.info('Connecting to network...', source: 'Network');

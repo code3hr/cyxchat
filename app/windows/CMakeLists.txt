@@ -87,6 +87,34 @@ if(PLUGIN_BUNDLED_LIBRARIES)
     COMPONENT Runtime)
 endif()
 
+# Bundle the native CyxChat FFI library built by the C core project. Without
+# this, Windows app builds can keep running an old cyxchat.dll from a previous
+# manual copy.
+set(CYXCHAT_NATIVE_BUILD_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../lib/build")
+install(CODE "
+  if(\"\${CMAKE_INSTALL_CONFIG_NAME}\" STREQUAL \"Debug\")
+    set(_cyxchat_native_config_dir \"${CYXCHAT_NATIVE_BUILD_DIR}/Debug\")
+  else()
+    set(_cyxchat_native_config_dir \"${CYXCHAT_NATIVE_BUILD_DIR}/Release\")
+  endif()
+
+  if(NOT EXISTS \"\${_cyxchat_native_config_dir}/cyxchat.dll\")
+    message(FATAL_ERROR \"Missing native CyxChat DLL: \${_cyxchat_native_config_dir}/cyxchat.dll\")
+  endif()
+
+  file(INSTALL
+    DESTINATION \"${INSTALL_BUNDLE_LIB_DIR}\"
+    TYPE FILE
+    FILES \"\${_cyxchat_native_config_dir}/cyxchat.dll\")
+
+  if(EXISTS \"\${_cyxchat_native_config_dir}/cyxchat.pdb\")
+    file(INSTALL
+      DESTINATION \"${INSTALL_BUNDLE_LIB_DIR}\"
+      TYPE FILE
+      FILES \"\${_cyxchat_native_config_dir}/cyxchat.pdb\")
+  endif()
+  " COMPONENT Runtime)
+
 # Copy the native assets provided by the build.dart from all packages.
 set(NATIVE_ASSETS_DIR "${PROJECT_BUILD_DIR}native_assets/windows/")
 install(DIRECTORY "${NATIVE_ASSETS_DIR}"
