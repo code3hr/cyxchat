@@ -360,7 +360,10 @@ if(CYXCHAT_BUILD_TESTS)
         ${CYXWIZ_INCLUDE_DIR}
         ${SODIUM_INCLUDE_DIRS} ${SODIUM_INCLUDE_DIR}
     )
-    target_compile_definitions(test_cyxchat PRIVATE CYXCHAT_STATIC CYXWIZ_HAS_CRYPTO)
+    target_compile_definitions(test_cyxchat PRIVATE CYXCHAT_STATIC CYXWIZ_HAS_CRYPTO CYXCHAT_TESTING)
+    if(TARGET cyxchat_static)
+        target_compile_definitions(cyxchat_static PRIVATE CYXCHAT_TESTING)
+    endif()
 
     if(WIN32)
         target_compile_definitions(test_cyxchat PRIVATE _CRT_SECURE_NO_WARNINGS SODIUM_STATIC)

@@ -1479,6 +1479,25 @@ CYXCHAT_API size_t cyxchat_group_get_media_count(
     int media_type
 );
 
+#ifdef CYXCHAT_TESTING
+typedef struct {
+    int metadata_prepared;
+    int missing_request_count;
+    int duplicate_ignored;
+    int completed;
+    size_t completed_len;
+    int media_callback_count;
+    int progress_callback_count;
+    uint32_t last_progress_done;
+    uint32_t last_progress_total;
+    int error_callback_count;
+} cyxchat_group_media_test_result_t;
+
+int cyxchat_group_test_media_chunk_flow(
+    cyxchat_group_media_test_result_t *result
+);
+#endif
+
 #ifdef __cplusplus
 }
 #endif

@@ -4913,6 +4913,285 @@ void cyxchat_group_handle_message(
     }
 }
 
+#ifdef CYXCHAT_TESTING
+typedef struct {
+    cyxchat_group_media_test_result_t *result;
+    const uint8_t *expected_data;
+    size_t expected_len;
+} cyxchat_group_media_test_state_t;
+
+static void test_group_media_on_media(
+    cyxchat_group_ctx_t *ctx,
+    const cyxchat_group_media_t *media,
+    const uint8_t *data,
+    size_t data_len,
+    void *user_data
+) {
+    (void)ctx;
+    (void)media;
+    cyxchat_group_media_test_state_t *state =
+        (cyxchat_group_media_test_state_t *)user_data;
+    state->result->media_callback_count++;
+    if (data_len > 0) {
+        state->result->completed_len = data_len;
+        state->result->completed =
+            data &&
+            data_len == state->expected_len &&
+            memcmp(data, state->expected_data, state->expected_len) == 0;
+    }
+}
+
+static void test_group_media_on_progress(
+    cyxchat_group_ctx_t *ctx,
+    const cyxchat_group_id_t *group_id,
+    const cyxchat_msg_id_t *msg_id,
+    const cyxchat_file_id_t *file_id,
+    uint32_t chunks_done,
+    uint32_t chunks_total,
+    int is_outgoing,
+    void *user_data
+) {
+    (void)ctx;
+    (void)group_id;
+    (void)msg_id;
+    (void)file_id;
+    (void)is_outgoing;
+    cyxchat_group_media_test_state_t *state =
+        (cyxchat_group_media_test_state_t *)user_data;
+    state->result->progress_callback_count++;
+    state->result->last_progress_done = chunks_done;
+    state->result->last_progress_total = chunks_total;
+}
+
+static void test_group_media_on_error(
+    cyxchat_group_ctx_t *ctx,
+    const cyxchat_group_id_t *group_id,
+    const cyxchat_msg_id_t *msg_id,
+    const cyxchat_file_id_t *file_id,
+    cyxchat_error_t error,
+    int is_outgoing,
+    void *user_data
+) {
+    (void)ctx;
+    (void)group_id;
+    (void)msg_id;
+    (void)file_id;
+    (void)error;
+    (void)is_outgoing;
+    cyxchat_group_media_test_state_t *state =
+        (cyxchat_group_media_test_state_t *)user_data;
+    state->result->error_callback_count++;
+}
+
+static int test_group_media_send_chunk(
+    cyxchat_group_ctx_t *ctx,
+    const cyxwiz_node_id_t *sender_id,
+    const cyxchat_group_media_t *media,
+    const uint8_t group_key[32],
+    uint32_t key_version,
+    uint32_t chunk_index,
+    uint32_t chunk_count,
+    const uint8_t *chunk_data,
+    size_t chunk_len
+) {
+    uint8_t encrypted[GROUP_MEDIA_CHUNK_DATA_MAX + CYXCHAT_CRYPTO_OVERHEAD];
+    size_t encrypted_len = 0;
+    if (cyxwiz_crypto_encrypt(chunk_data, chunk_len, group_key,
+                              encrypted, &encrypted_len) != CYXWIZ_OK) {
+        return 0;
+    }
+
+    uint8_t wire[GROUP_MEDIA_CHUNK_WIRE_MAX];
+    cyxchat_msg_id_t msg_id;
+    cyxchat_group_id_t group_id;
+    memcpy(msg_id.bytes, media->msg_id, CYXCHAT_MSG_ID_SIZE);
+    memcpy(group_id.bytes, media->group_id, CYXCHAT_GROUP_ID_SIZE);
+
+    size_t wire_len = serialize_group_media_chunk(
+        wire, sizeof(wire), &msg_id, &group_id, sender_id,
+        key_version, media->file_id, chunk_index, chunk_count,
+        encrypted, encrypted_len
+    );
+    if (wire_len == 0) {
+        return 0;
+    }
+
+    cyxchat_group_handle_message(
+        ctx, sender_id, CYXCHAT_MSG_GROUP_FILE_CHUNK, wire, wire_len
+    );
+    return 1;
+}
+
+int cyxchat_group_test_media_chunk_flow(
+    cyxchat_group_media_test_result_t *result
+) {
+    if (!result) {
+        return 0;
+    }
+    memset(result, 0, sizeof(*result));
+
+    cyxchat_group_ctx_t *ctx = (cyxchat_group_ctx_t *)calloc(1, sizeof(*ctx));
+    if (!ctx) {
+        return 0;
+    }
+
+    cyxwiz_node_id_t receiver_id;
+    cyxwiz_node_id_t sender_id;
+    for (size_t i = 0; i < CYXCHAT_NODE_ID_SIZE; i++) {
+        receiver_id.bytes[i] = (uint8_t)(0x20 + i);
+        sender_id.bytes[i] = (uint8_t)(0x80 + i);
+    }
+    ctx->local_id = receiver_id;
+
+    cyxchat_group_t *group = &ctx->groups[0];
+    ctx->group_count = 1;
+    for (size_t i = 0; i < CYXCHAT_GROUP_ID_SIZE; i++) {
+        group->group_id.bytes[i] = (uint8_t)(0xA0 + i);
+    }
+    for (size_t i = 0; i < sizeof(group->group_key); i++) {
+        group->group_key[i] = (uint8_t)(0xC0 + i);
+    }
+    group->key_version = 7;
+    group->member_count = 2;
+    group->members[0].node_id = receiver_id;
+    group->members[0].role = CYXCHAT_ROLE_OWNER;
+    group->members[1].node_id = sender_id;
+    group->members[1].role = CYXCHAT_ROLE_MEMBER;
+
+    uint8_t media_data[(CYXCHAT_CHUNK_SIZE * 2) + 5];
+    for (size_t i = 0; i < sizeof(media_data); i++) {
+        media_data[i] = (uint8_t)(i * 3U + 1U);
+    }
+    uint32_t chunk_count = (uint32_t)(
+        (sizeof(media_data) + GROUP_MEDIA_CHUNK_DATA_MAX - 1) /
+        GROUP_MEDIA_CHUNK_DATA_MAX
+    );
+
+    cyxchat_group_media_t media;
+    memset(&media, 0, sizeof(media));
+    memcpy(media.group_id, group->group_id.bytes, CYXCHAT_GROUP_ID_SIZE);
+    memcpy(media.sender_id, sender_id.bytes, CYXCHAT_NODE_ID_SIZE);
+    for (size_t i = 0; i < CYXCHAT_MSG_ID_SIZE; i++) {
+        media.msg_id[i] = (uint8_t)(0x30 + i);
+        media.file_id[i] = (uint8_t)(0x50 + i);
+    }
+    media.media_type = CYXCHAT_MEDIA_TYPE_DOCUMENT;
+    media.file_size = sizeof(media_data);
+    media.timestamp = 123456;
+    snprintf(media.filename, sizeof(media.filename), "chunked.bin");
+    snprintf(media.mime_type, sizeof(media.mime_type), "application/octet-stream");
+
+    cyxchat_group_media_test_state_t state;
+    state.result = result;
+    state.expected_data = media_data;
+    state.expected_len = sizeof(media_data);
+    ctx->on_media = test_group_media_on_media;
+    ctx->on_media_data = &state;
+    ctx->on_media_progress = test_group_media_on_progress;
+    ctx->on_media_progress_data = &state;
+    ctx->on_media_error = test_group_media_on_error;
+    ctx->on_media_error_data = &state;
+
+    uint8_t plaintext[GROUP_MEDIA_MAX_PLAINTEXT];
+    size_t plaintext_len = serialize_group_media_plaintext(
+        plaintext, sizeof(plaintext), &media, NULL, 0
+    );
+    if (plaintext_len == 0) {
+        free(ctx);
+        return 0;
+    }
+
+    uint8_t encrypted[GROUP_MEDIA_MAX_PLAINTEXT + CYXCHAT_CRYPTO_OVERHEAD];
+    size_t encrypted_len = 0;
+    if (cyxwiz_crypto_encrypt(plaintext, plaintext_len, group->group_key,
+                              encrypted, &encrypted_len) != CYXWIZ_OK) {
+        free(ctx);
+        return 0;
+    }
+
+    cyxchat_msg_id_t msg_id;
+    cyxchat_group_id_t group_id;
+    memcpy(msg_id.bytes, media.msg_id, CYXCHAT_MSG_ID_SIZE);
+    memcpy(group_id.bytes, media.group_id, CYXCHAT_GROUP_ID_SIZE);
+
+    uint8_t wire[56 + GROUP_MEDIA_MAX_PLAINTEXT + CYXCHAT_CRYPTO_OVERHEAD];
+    size_t wire_len = serialize_group_media(
+        wire, sizeof(wire), CYXCHAT_MSG_GROUP_FILE, &msg_id,
+        CYXCHAT_FLAG_ENCRYPTED, &group_id, group->key_version,
+        encrypted, encrypted_len, &sender_id
+    );
+    if (wire_len == 0) {
+        free(ctx);
+        return 0;
+    }
+
+    cyxchat_group_handle_message(
+        ctx, &sender_id, CYXCHAT_MSG_GROUP_FILE, wire, wire_len
+    );
+
+    result->metadata_prepared =
+        ctx->media_rx[0].active &&
+        ctx->media_rx[0].chunk_count == chunk_count &&
+        ctx->media_rx[0].chunks_received == 0;
+    if (!result->metadata_prepared) {
+        media_transfer_free_all(ctx);
+        free(ctx);
+        return 1;
+    }
+
+    size_t second_offset = GROUP_MEDIA_CHUNK_DATA_MAX;
+    if (!test_group_media_send_chunk(
+            ctx, &sender_id, &media, group->group_key, group->key_version,
+            1, chunk_count, media_data + second_offset,
+            GROUP_MEDIA_CHUNK_DATA_MAX
+        )) {
+        media_transfer_free_all(ctx);
+        free(ctx);
+        return 0;
+    }
+    uint32_t after_first_chunk = ctx->media_rx[0].chunks_received;
+    if (!test_group_media_send_chunk(
+            ctx, &sender_id, &media, group->group_key, group->key_version,
+            1, chunk_count, media_data + second_offset,
+            GROUP_MEDIA_CHUNK_DATA_MAX
+        )) {
+        media_transfer_free_all(ctx);
+        free(ctx);
+        return 0;
+    }
+    result->duplicate_ignored =
+        ctx->media_rx[0].active &&
+        ctx->media_rx[0].chunks_received == after_first_chunk;
+
+    media_rx_poll(ctx, ctx->media_rx[0].updated_at_ms + GROUP_MEDIA_RX_STALL_MS + 1);
+    result->missing_request_count = ctx->media_rx[0].request_count;
+
+    if (!test_group_media_send_chunk(
+            ctx, &sender_id, &media, group->group_key, group->key_version,
+            0, chunk_count, media_data, GROUP_MEDIA_CHUNK_DATA_MAX
+        )) {
+        media_transfer_free_all(ctx);
+        free(ctx);
+        return 0;
+    }
+
+    size_t third_offset = GROUP_MEDIA_CHUNK_DATA_MAX * 2;
+    size_t third_len = sizeof(media_data) - third_offset;
+    if (!test_group_media_send_chunk(
+            ctx, &sender_id, &media, group->group_key, group->key_version,
+            2, chunk_count, media_data + third_offset, third_len
+        )) {
+        media_transfer_free_all(ctx);
+        free(ctx);
+        return 0;
+    }
+
+    media_transfer_free_all(ctx);
+    free(ctx);
+    return 1;
+}
+#endif
+
 /* ============================================================
  * Utilities
  * ============================================================ */

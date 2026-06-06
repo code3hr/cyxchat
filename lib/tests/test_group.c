@@ -42,10 +42,32 @@ int test_group(void) {
         TEST_ASSERT(err == CYXCHAT_ERR_INVALID, "Invalid hex chars should fail");
     }
 
-    /* Note: Full group tests require cyxchat_ctx_t which needs onion context */
-    /* These tests would be integration tests */
+    /* Test group media chunk receive hardening */
+    {
+        cyxchat_group_media_test_result_t result;
+        int ok = cyxchat_group_test_media_chunk_flow(&result);
 
-    printf("    (Group context tests require full integration)\n");
+        TEST_ASSERT(ok == 1, "Group media chunk test helper should run");
+        TEST_ASSERT(result.metadata_prepared == 1,
+                    "Metadata should prepare chunk receive state");
+        TEST_ASSERT(result.duplicate_ignored == 1,
+                    "Duplicate media chunks should not advance progress");
+        TEST_ASSERT(result.missing_request_count == 1,
+                    "Stalled receive should request the first missing chunk");
+        TEST_ASSERT(result.completed == 1,
+                    "Chunk assembly should deliver the original payload");
+        TEST_ASSERT(result.completed_len == (CYXCHAT_CHUNK_SIZE * 2) + 5,
+                    "Completion callback should report the full payload length");
+        TEST_ASSERT(result.media_callback_count == 2,
+                    "Media callback should fire for metadata and completion");
+        TEST_ASSERT(result.progress_callback_count == 4,
+                    "Progress should fire for prepare and each unique chunk");
+        TEST_ASSERT(result.last_progress_done == 3 &&
+                    result.last_progress_total == 3,
+                    "Final progress should report all chunks received");
+        TEST_ASSERT(result.error_callback_count == 0,
+                    "Successful chunk flow should not emit errors");
+    }
 
     return errors;
 }
