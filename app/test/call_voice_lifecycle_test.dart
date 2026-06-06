@@ -1,9 +1,11 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:cyxchat/providers/call_provider.dart';
 import 'package:cyxchat/providers/voice_provider.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:record/record.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -127,5 +129,57 @@ void main() {
         '03:07',
       );
     });
+
+    test('active recording dispose stops recorder and deletes temp file',
+        () async {
+      final tempDir = await Directory.systemTemp.createTemp('cyx_voice_test_');
+      final recorder = _FakeVoiceRecorderBackend();
+      final provider = VoiceRecorderProvider(
+        recorder: recorder,
+        tempDirectoryProvider: () async => tempDir,
+      );
+
+      try {
+        expect(await provider.startRecording(), isTrue);
+        final recordedPath = recorder.startedPath;
+        expect(recordedPath, isNotNull);
+        expect(await File(recordedPath!).exists(), isTrue);
+
+        provider.dispose();
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+
+        expect(recorder.stopCalls, 1);
+        expect(recorder.disposeCalls, 1);
+        expect(await File(recordedPath).exists(), isFalse);
+      } finally {
+        await tempDir.delete(recursive: true);
+      }
+    });
   });
+}
+
+class _FakeVoiceRecorderBackend implements VoiceRecorderBackend {
+  String? startedPath;
+  int stopCalls = 0;
+  int disposeCalls = 0;
+
+  @override
+  Future<bool> hasPermission() async => true;
+
+  @override
+  Future<void> start(RecordConfig config, {required String path}) async {
+    startedPath = path;
+    await File(path).writeAsBytes(const [1, 2, 3]);
+  }
+
+  @override
+  Future<String?> stop() async {
+    stopCalls++;
+    return startedPath;
+  }
+
+  @override
+  Future<void> dispose() async {
+    disposeCalls++;
+  }
 }

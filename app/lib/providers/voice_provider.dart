@@ -52,9 +52,41 @@ class VoiceMessageInfo {
   }
 }
 
+typedef VoiceTempDirectoryProvider = Future<Directory> Function();
+
+@visibleForTesting
+abstract class VoiceRecorderBackend {
+  Future<bool> hasPermission();
+
+  Future<void> start(RecordConfig config, {required String path});
+
+  Future<String?> stop();
+
+  Future<void> dispose();
+}
+
+class AudioRecorderBackend implements VoiceRecorderBackend {
+  final AudioRecorder _recorder = AudioRecorder();
+
+  @override
+  Future<bool> hasPermission() => _recorder.hasPermission();
+
+  @override
+  Future<void> start(RecordConfig config, {required String path}) {
+    return _recorder.start(config, path: path);
+  }
+
+  @override
+  Future<String?> stop() => _recorder.stop();
+
+  @override
+  Future<void> dispose() => _recorder.dispose();
+}
+
 /// Voice recorder provider
 class VoiceRecorderProvider extends ChangeNotifier {
-  final AudioRecorder _recorder = AudioRecorder();
+  final VoiceRecorderBackend _recorder;
+  final VoiceTempDirectoryProvider _tempDirectoryProvider;
   VoiceRecordingState _state = VoiceRecordingState.idle;
   Duration _recordingDuration = Duration.zero;
   Timer? _durationTimer;
@@ -69,6 +101,12 @@ class VoiceRecorderProvider extends ChangeNotifier {
   String? get errorMessage => _errorMessage;
   bool get isRecording => _state == VoiceRecordingState.recording;
   bool get isProcessing => _state == VoiceRecordingState.processing;
+
+  VoiceRecorderProvider({
+    VoiceRecorderBackend? recorder,
+    VoiceTempDirectoryProvider? tempDirectoryProvider,
+  })  : _recorder = recorder ?? AudioRecorderBackend(),
+        _tempDirectoryProvider = tempDirectoryProvider ?? getTemporaryDirectory;
 
   /// Check and request microphone permission
   Future<bool> checkPermission() async {
@@ -126,7 +164,7 @@ class VoiceRecorderProvider extends ChangeNotifier {
 
     try {
       // Get temp directory for recording
-      final tempDir = await getTemporaryDirectory();
+      final tempDir = await _tempDirectoryProvider();
       final timestamp = DateTime.now().millisecondsSinceEpoch;
       _tempFilePath = '${tempDir.path}/voice_$timestamp.m4a';
       debugPrint('VoiceRecorder: Will record to $_tempFilePath');
@@ -163,6 +201,7 @@ class VoiceRecorderProvider extends ChangeNotifier {
           'VoiceRecorder: Recording started successfully, state=$_state');
       return true;
     } catch (e, stackTrace) {
+      await _deleteTempRecordingFile();
       _state = VoiceRecordingState.error;
       _errorMessage = 'Failed to start recording: $e';
       notifyListeners();
@@ -201,6 +240,7 @@ class VoiceRecorderProvider extends ChangeNotifier {
       debugPrint(
           'VoiceRecorder: Recorder stopped, path=$path, tempFilePath=$_tempFilePath');
       if (path == null || _tempFilePath == null) {
+        await _deleteTempRecordingFile();
         _state = VoiceRecordingState.error;
         _errorMessage = 'Recording failed - no file created';
         notifyListeners();
@@ -210,6 +250,7 @@ class VoiceRecorderProvider extends ChangeNotifier {
       // Read file data
       final file = File(_tempFilePath!);
       if (!await file.exists()) {
+        await _deleteTempRecordingFile();
         _state = VoiceRecordingState.error;
         _errorMessage = 'Recording file not found';
         notifyListeners();
@@ -245,6 +286,7 @@ class VoiceRecorderProvider extends ChangeNotifier {
         sizeBytes: data.length,
       );
     } catch (e) {
+      await _deleteTempRecordingFile();
       _state = VoiceRecordingState.error;
       _errorMessage = 'Failed to process recording: $e';
       notifyListeners();
@@ -259,29 +301,42 @@ class VoiceRecorderProvider extends ChangeNotifier {
       return;
     }
 
+    await _cleanupActiveRecording(notify: true);
+    debugPrint('VoiceRecorder: Recording cancelled');
+  }
+
+  Future<void> _cleanupActiveRecording({required bool notify}) async {
     _durationTimer?.cancel();
     _durationTimer = null;
 
     try {
       await _recorder.stop();
-
-      // Delete temp file if exists
-      if (_tempFilePath != null) {
-        final file = File(_tempFilePath!);
-        if (await file.exists()) {
-          await file.delete();
-        }
-      }
     } catch (e) {
       debugPrint('VoiceRecorder: Error cancelling: $e');
     }
+    await _deleteTempRecordingFile();
 
     _state = VoiceRecordingState.idle;
-    _tempFilePath = null;
     _recordingDuration = Duration.zero;
     _errorMessage = null;
-    notifyListeners();
-    debugPrint('VoiceRecorder: Recording cancelled');
+    if (notify) {
+      notifyListeners();
+    }
+  }
+
+  Future<void> _deleteTempRecordingFile() async {
+    final path = _tempFilePath;
+    _tempFilePath = null;
+    if (path == null) return;
+
+    try {
+      final file = File(path);
+      if (await file.exists()) {
+        await file.delete();
+      }
+    } catch (e) {
+      debugPrint('VoiceRecorder: Could not delete temp file: $e');
+    }
   }
 
   /// Format duration for display
@@ -293,8 +348,17 @@ class VoiceRecorderProvider extends ChangeNotifier {
 
   @override
   void dispose() {
-    _durationTimer?.cancel();
-    _recorder.dispose();
+    unawaited(() async {
+      if (_state == VoiceRecordingState.recording ||
+          _state == VoiceRecordingState.processing) {
+        await _cleanupActiveRecording(notify: false);
+      } else {
+        _durationTimer?.cancel();
+        _durationTimer = null;
+        await _deleteTempRecordingFile();
+      }
+      await _recorder.dispose();
+    }());
     super.dispose();
   }
 }

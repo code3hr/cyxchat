@@ -48,12 +48,13 @@ This file tracks the core chat-app readiness work. Keep each fix small, auditabl
 - [x] Call/voice lifecycle coverage: Flutter tests cover incoming call reject/busy behavior, voice message metadata JSON escaping, and stable voice duration formatting; voice metadata now uses structured JSON encoding.
 - [x] Voice playback temp cleanup: playback temp files are tracked and removed on stop, completion, failed load, and provider disposal.
 - [x] Call ended-window hardening: a delayed post-call idle reset no longer clears a newer incoming call, and incoming offers are accepted after the previous call has ended.
+- [x] Voice recorder disposal hardening: recorder access now goes through a narrow backend seam, and active recording disposal stops the recorder, clears timers, deletes temp files, and disposes native resources.
 
 ## Next Fixes
 
 1. Device-backed audio/video integration audit
-   - Validate microphone/camera acquisition and active-recording disposal on Windows.
-   - Add narrow adapter seams for native/device APIs where tests cannot exercise behavior without real hardware.
+   - Validate microphone/camera acquisition on Windows.
+   - Add narrow adapter seams for remaining native/device APIs where tests cannot exercise behavior without real hardware.
 
 ## Verification Baseline
 
