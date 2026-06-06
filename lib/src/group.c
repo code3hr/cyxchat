@@ -6198,7 +6198,7 @@ cyxchat_error_t cyxchat_group_pin_message(
                             ctx->on_admin_action_data);
     }
 
-    CYXWIZ_INFO("Pinned message in group");
+    CYXWIZ_INFO("Pinned message in group (%d members)", sent_count);
 
     return CYXCHAT_OK;
 }
@@ -6329,7 +6329,7 @@ cyxchat_error_t cyxchat_group_unpin_message(
                             ctx->on_admin_action_data);
     }
 
-    CYXWIZ_INFO("Unpinned message in group");
+    CYXWIZ_INFO("Unpinned message in group (%d members)", sent_count);
 
     return CYXCHAT_OK;
 }
