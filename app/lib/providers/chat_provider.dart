@@ -10,6 +10,18 @@ import '../services/identity_service.dart';
 import '../utils/node_id_utils.dart';
 import 'settings_provider.dart';
 
+/// Message status values must match cyxchat_msg_status_t in
+/// lib/include/cyxchat/types.h.
+@visibleForTesting
+class NativeMessageStatus {
+  static const pending = 0;
+  static const sending = 1;
+  static const sent = 2;
+  static const delivered = 3;
+  static const read = 4;
+  static const failed = 5;
+}
+
 /// Received message from native layer
 class ReceivedMessage {
   final String fromNodeId;
@@ -145,8 +157,8 @@ class AckData {
     required this.status,
   });
 
-  bool get isDelivered => status == 1;
-  bool get isRead => status == 2;
+  bool get isRead => status == NativeMessageStatus.read;
+  bool get isDelivered => status == NativeMessageStatus.delivered;
 }
 
 /// Parsed reaction data
@@ -483,7 +495,7 @@ class ChatProvider extends ChangeNotifier {
   Future<bool> sendAck({
     required String toPeerId,
     required String msgId,
-    int status = 1,
+    int status = NativeMessageStatus.delivered,
   }) async {
     if (!_initialized) return false;
 
@@ -507,7 +519,11 @@ class ChatProvider extends ChangeNotifier {
     required String toPeerId,
     required String msgId,
   }) {
-    return sendAck(toPeerId: toPeerId, msgId: msgId, status: 2);
+    return sendAck(
+      toPeerId: toPeerId,
+      msgId: msgId,
+      status: NativeMessageStatus.read,
+    );
   }
 
   /// Send typing indicator

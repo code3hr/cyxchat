@@ -118,7 +118,6 @@ String resolveBootstrapServer({
 class ConnectionActions {
   final Ref _ref;
   Timer? _retryTimer;
-  StreamSubscription? _ackTimeoutSubscription;
   StreamSubscription? _callSignalSubscription;
   final Map<String, _CallSignalFragmentBuffer> _callSignalFragments = {};
   static const RetryConfig _defaultConfig = RetryConfig();
@@ -292,20 +291,6 @@ class ConnectionActions {
           messageId,
           recipientId,
           data,
-        );
-      });
-
-      // Subscribe to ACK timeouts to enqueue messages
-      _ackTimeoutSubscription?.cancel();
-      _ackTimeoutSubscription = chatProvider.ackTimeoutStream.listen((timeout) {
-        log.warning(
-          'ACK timeout for message ${timeout.localMsgId}, enqueueing for retry',
-          source: 'Network',
-        );
-        queueProvider.addToQueue(
-          messageId: timeout.localMsgId,
-          recipientId: timeout.recipientId,
-          content: timeout.content,
         );
       });
 
@@ -664,8 +649,6 @@ class ConnectionActions {
     _ref.read(queueNotifierProvider).onDisconnected();
 
     // Cancel ACK timeout subscription
-    _ackTimeoutSubscription?.cancel();
-    _ackTimeoutSubscription = null;
     _callSignalSubscription?.cancel();
     _callSignalSubscription = null;
     _callSignalFragments.clear();
