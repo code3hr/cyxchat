@@ -131,6 +131,7 @@ typedef void (*cyxchat_on_group_message_t)(
     void *user_data
 );
 
+/* data is valid only for the duration of the callback; copy it if retained. */
 typedef void (*cyxchat_on_group_media_t)(
     cyxchat_group_ctx_t *ctx,
     const cyxchat_group_media_t *media,

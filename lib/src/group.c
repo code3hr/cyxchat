@@ -23,8 +23,9 @@
 /* Wire format constants for group messages */
 #define GROUP_WIRE_MAX_PAYLOAD    200   /* Max payload after encryption overhead */
 #define GROUP_MAX_ENCRYPTED_TEXT  120   /* Max text per packet after encryption */
+#define GROUP_MEDIA_INLINE_MAX    512   /* Small inline payloads; larger media stays metadata-only */
 #define GROUP_MEDIA_MAX_PLAINTEXT \
-    (CYXCHAT_FILE_ID_SIZE + 1 + 8 + 4 + 2 + 2 + 4 + 8 + 1 + 1 + CYXCHAT_MAX_FILENAME + CYXCHAT_MAX_MIME_TYPE)
+    (CYXCHAT_FILE_ID_SIZE + 1 + 8 + 4 + 2 + 2 + 4 + 8 + 1 + 1 + CYXCHAT_MAX_FILENAME + CYXCHAT_MAX_MIME_TYPE + 4 + GROUP_MEDIA_INLINE_MAX)
 
 /* Crypto overhead: nonce(24) + auth_tag(16) = 40 bytes */
 #define CYXCHAT_CRYPTO_OVERHEAD   40
@@ -659,14 +660,18 @@ static size_t deserialize_group_media(
 static size_t serialize_group_media_plaintext(
     uint8_t *out,
     size_t out_size,
-    const cyxchat_group_media_t *media
+    const cyxchat_group_media_t *media,
+    const uint8_t *payload,
+    size_t payload_len
 ) {
     size_t filename_len = bounded_cstr_len(media->filename, CYXCHAT_MAX_FILENAME - 1);
     size_t mime_len = bounded_cstr_len(media->mime_type, CYXCHAT_MAX_MIME_TYPE - 1);
     size_t required = CYXCHAT_FILE_ID_SIZE + 1 + 8 + 4 + 2 + 2 + 4 + 8 + 1 + 1 +
-                      filename_len + mime_len;
+                      filename_len + mime_len + 4 + payload_len;
 
     if (required > out_size || filename_len > 255 || mime_len > 255) return 0;
+    if (payload_len > GROUP_MEDIA_INLINE_MAX) return 0;
+    if (payload_len > 0 && !payload) return 0;
 
     size_t offset = 0;
     memcpy(out + offset, media->file_id, CYXCHAT_FILE_ID_SIZE);
@@ -684,6 +689,11 @@ static size_t serialize_group_media_plaintext(
     offset += filename_len;
     memcpy(out + offset, media->mime_type, mime_len);
     offset += mime_len;
+    write_u32_be(out, &offset, (uint32_t)payload_len);
+    if (payload_len > 0) {
+        memcpy(out + offset, payload, payload_len);
+        offset += payload_len;
+    }
 
     return offset;
 }
@@ -691,10 +701,14 @@ static size_t serialize_group_media_plaintext(
 static int deserialize_group_media_plaintext(
     const uint8_t *in,
     size_t len,
-    cyxchat_group_media_t *media
+    cyxchat_group_media_t *media,
+    const uint8_t **payload_out,
+    size_t *payload_len_out
 ) {
     const size_t fixed_len = CYXCHAT_FILE_ID_SIZE + 1 + 8 + 4 + 2 + 2 + 4 + 8 + 1 + 1;
     if (len < fixed_len) return 0;
+    if (payload_out) *payload_out = NULL;
+    if (payload_len_out) *payload_len_out = 0;
 
     size_t offset = 0;
     memcpy(media->file_id, in + offset, CYXCHAT_FILE_ID_SIZE);
@@ -722,6 +736,23 @@ static int deserialize_group_media_plaintext(
         memcpy(media->mime_type, in + offset, mime_len);
     }
     media->mime_type[mime_len] = '\0';
+    offset += mime_len;
+
+    if (len == offset) {
+        return 1;
+    }
+    if (len < offset + 4) return 0;
+
+    size_t payload_len = read_u32_be(in, &offset);
+    if (payload_len > GROUP_MEDIA_INLINE_MAX) return 0;
+    if (len < offset + payload_len) return 0;
+
+    if (payload_len > 0 && payload_out) {
+        *payload_out = in + offset;
+    }
+    if (payload_len_out) {
+        *payload_len_out = payload_len;
+    }
 
     return 1;
 }
@@ -3384,13 +3415,15 @@ static void handle_group_media(
     memcpy(media.group_id, group_id.bytes, CYXCHAT_GROUP_ID_SIZE);
     memcpy(media.sender_id, sender_id.bytes, 32);
 
-    if (!deserialize_group_media_plaintext(plaintext, pt_len, &media)) {
+    const uint8_t *payload = NULL;
+    size_t payload_len = 0;
+    if (!deserialize_group_media_plaintext(plaintext, pt_len, &media, &payload, &payload_len)) {
         CYXWIZ_WARN("Invalid decrypted group media metadata");
         return;
     }
 
     if (ctx->on_media) {
-        ctx->on_media(ctx, &media, NULL, 0, ctx->on_media_data);
+        ctx->on_media(ctx, &media, payload, payload_len, ctx->on_media_data);
     }
 
     cyxwiz_onion_ctx_t *onion = cyxchat_get_onion(ctx->chat_ctx);
@@ -6332,7 +6365,9 @@ static cyxchat_error_t broadcast_group_media_metadata(
     cyxchat_group_ctx_t *ctx,
     cyxchat_group_t *group,
     const cyxchat_group_id_t *group_id,
-    const cyxchat_group_media_t *media
+    const cyxchat_group_media_t *media,
+    const uint8_t *payload,
+    size_t payload_len
 ) {
     if (!cyxchat_group_can_send(ctx, group_id, &ctx->local_id)) {
         CYXWIZ_WARN("Media send blocked: who_can_send=%d, not permitted", group->who_can_send);
@@ -6341,7 +6376,7 @@ static cyxchat_error_t broadcast_group_media_metadata(
 
     uint8_t plaintext[GROUP_MEDIA_MAX_PLAINTEXT];
     size_t pt_len = serialize_group_media_plaintext(
-        plaintext, sizeof(plaintext), media
+        plaintext, sizeof(plaintext), media, payload, payload_len
     );
     if (pt_len == 0) {
         CYXWIZ_ERROR("Failed to serialize group media metadata");
@@ -6467,9 +6502,13 @@ cyxchat_error_t cyxchat_group_send_file(
     CYXWIZ_INFO("Sending file to group: %s (%zu bytes, type=%d)",
                 filename, data_len, media.media_type);
 
-    (void)data;
     (void)thumbnail;
-    return broadcast_group_media_metadata(ctx, group, group_id, &media);
+    const uint8_t *inline_payload = data_len <= GROUP_MEDIA_INLINE_MAX ? data : NULL;
+    size_t inline_len = inline_payload ? data_len : 0;
+    if (inline_len == 0) {
+        CYXWIZ_WARN("Group file payload exceeds inline limit; sending metadata only");
+    }
+    return broadcast_group_media_metadata(ctx, group, group_id, &media, inline_payload, inline_len);
 }
 
 cyxchat_error_t cyxchat_group_send_voice(
@@ -6526,8 +6565,12 @@ cyxchat_error_t cyxchat_group_send_voice(
     CYXWIZ_INFO("Sending voice message to group: %zu bytes, %u ms",
                 audio_len, duration_ms);
 
-    (void)audio_data;
-    return broadcast_group_media_metadata(ctx, group, group_id, &media);
+    const uint8_t *inline_payload = audio_len <= GROUP_MEDIA_INLINE_MAX ? audio_data : NULL;
+    size_t inline_len = inline_payload ? audio_len : 0;
+    if (inline_len == 0) {
+        CYXWIZ_WARN("Group voice payload exceeds inline limit; sending metadata only");
+    }
+    return broadcast_group_media_metadata(ctx, group, group_id, &media, inline_payload, inline_len);
 }
 
 cyxchat_error_t cyxchat_group_send_image(
@@ -6586,8 +6629,12 @@ cyxchat_error_t cyxchat_group_send_image(
     CYXWIZ_INFO("Sending image to group: %s (%ux%u, %zu bytes)",
                 filename ? filename : "unnamed", width, height, image_len);
 
-    (void)image_data;
-    return broadcast_group_media_metadata(ctx, group, group_id, &media);
+    const uint8_t *inline_payload = image_len <= GROUP_MEDIA_INLINE_MAX ? image_data : NULL;
+    size_t inline_len = inline_payload ? image_len : 0;
+    if (inline_len == 0) {
+        CYXWIZ_WARN("Group image payload exceeds inline limit; sending metadata only");
+    }
+    return broadcast_group_media_metadata(ctx, group, group_id, &media, inline_payload, inline_len);
 }
 
 cyxchat_error_t cyxchat_group_get_media(
