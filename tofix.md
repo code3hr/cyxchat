@@ -26,40 +26,46 @@ This file tracks the core chat-app readiness work. Keep each fix small, auditabl
 - [x] Read receipts: marking a direct conversation read sends privacy-aware read receipts for unread inbound messages with known native IDs.
 - [x] Native message ID persistence: direct text native IDs are stored with messages and restored on chat service connect for ACK/read/edit/delete/reply mapping.
 - [x] Call signaling hardening: early remote ICE candidates are buffered until remote SDP is ready, and stale call signals are ignored unless they match the active peer/state.
+- [x] Verification baseline: use focused Dart analyzer checks on touched Dart files until app-scope analysis is stable.
 
 ## Next Fixes
 
-1. Verification baseline
-   - Get a reliable `flutter analyze` or `dart analyze` path.
-   - Add a repeatable command note once the working command is found.
-
-2. Media persistence
+1. Media persistence
    - Add a cleanup policy for orphaned app-support media files after message/conversation deletion.
 
-3. Non-text retry
+2. Non-text retry
    - Consider a clearer UI label for media retries while the replacement transfer is still in progress.
 
-4. Read receipts
+3. Read receipts
    - Add retry/backoff if sending a read receipt fails while the peer is temporarily unreachable.
 
-5. Native message ID persistence
+4. Native message ID persistence
    - Audit native ID persistence for direct media and group messages once their native ACK paths are surfaced.
 
-6. Group message status
+5. Group message status
    - Surface native group ACK state in Dart.
    - Update outgoing group message delivery status from group ACK callbacks.
 
-7. Group media and voice audit
+6. Group media and voice audit
    - Check whether group media has the same persistence/status/retry gaps as direct media.
    - Fix with shared helpers only if it reduces real duplication.
 
-8. Production verification
+7. Production verification
    - Run app-level analyzer/build.
    - Run C tests where native protocol behavior changed.
    - Add focused Dart tests for message status and media metadata when test harness is stable.
+
+## Verification Baseline
+
+- Format touched Dart files with `D:\Flutter\flutter\bin\cache\dart-sdk\bin\dart.exe format <files>`.
+- Analyze touched Dart files with `D:\Flutter\flutter\bin\cache\dart-sdk\bin\dart.exe analyze <files>`.
+- In the current sandbox, analyzer process spawning requires an elevated run; use the same command elevated when the sandbox reports `CreateFile failed 5`.
+- Treat app-scope analysis as unresolved until the command below stops hanging/crashing.
 
 ## Known Verification Caveat
 
 - `dart analyze` via `D:\Flutter\flutter\bin\dart.bat` hung in PowerShell.
 - Direct `D:\Flutter\flutter\bin\cache\dart-sdk\bin\dart.exe format ...` works.
-- Direct analyzer was blocked once by sandbox process-spawn permissions, then timed out when elevated.
+- Direct `D:\Flutter\flutter\bin\cache\dart-sdk\bin\dart.exe analyze <file>` works for focused checks when elevated if sandbox process spawning is blocked.
+- Direct `D:\Flutter\flutter\bin\cache\dart-sdk\bin\dart.exe analyze .` from `app\` crashed with `FileSystemException: writeFrom failed` / `Bad state: The analysis server crashed unexpectedly`.
+- `D:\Flutter\flutter\bin\flutter.bat analyze --no-pub` from `app\` hung and was interrupted.
