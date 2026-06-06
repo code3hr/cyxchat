@@ -49,12 +49,13 @@ This file tracks the core chat-app readiness work. Keep each fix small, auditabl
 - [x] Voice playback temp cleanup: playback temp files are tracked and removed on stop, completion, failed load, and provider disposal.
 - [x] Call ended-window hardening: a delayed post-call idle reset no longer clears a newer incoming call, and incoming offers are accepted after the previous call has ended.
 - [x] Voice recorder disposal hardening: recorder access now goes through a narrow backend seam, and active recording disposal stops the recorder, clears timers, deletes temp files, and disposes native resources.
+- [x] Desktop call permission hardening: audio/video calls bypass mobile `permission_handler` prompts on desktop and let WebRTC device acquisition report real microphone/camera errors.
 
 ## Next Fixes
 
-1. Device-backed audio/video integration audit
-   - Validate microphone/camera acquisition on Windows.
-   - Add narrow adapter seams for remaining native/device APIs where tests cannot exercise behavior without real hardware.
+1. Windows hardware smoke verification
+   - Run the Windows app and validate microphone/camera acquisition with real devices.
+   - If hardware acquisition fails, add the smallest adapter or error-path fix around the observed failure.
 
 ## Verification Baseline
 

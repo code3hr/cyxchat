@@ -11,6 +11,16 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   group('call lifecycle', () {
+    test('desktop permission check does not require permission plugin channel',
+        () async {
+      final provider = CallProvider();
+
+      expect(await provider.checkPermissions(video: true), isTrue);
+      expect(provider.state.status, CallStatus.idle);
+
+      provider.dispose();
+    }, skip: !(Platform.isWindows || Platform.isLinux || Platform.isMacOS));
+
     test('rejecting an incoming call sends reject and returns to idle',
         () async {
       final provider = CallProvider();

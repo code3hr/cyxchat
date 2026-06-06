@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
@@ -150,29 +151,42 @@ class CallProvider extends ChangeNotifier {
 
   /// Check camera and microphone permissions
   Future<bool> checkPermissions({required bool video}) async {
-    final micStatus = await Permission.microphone.request();
-    if (!micStatus.isGranted) {
-      _state = _state.copyWith(
-        status: CallStatus.failed,
-        errorMessage: 'Microphone permission denied',
-      );
-      notifyListeners();
-      return false;
+    if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+      return true;
     }
 
-    if (video) {
-      final camStatus = await Permission.camera.request();
-      if (!camStatus.isGranted) {
+    try {
+      final micStatus = await Permission.microphone.request();
+      if (!micStatus.isGranted) {
         _state = _state.copyWith(
           status: CallStatus.failed,
-          errorMessage: 'Camera permission denied',
+          errorMessage: 'Microphone permission denied',
         );
         notifyListeners();
         return false;
       }
-    }
 
-    return true;
+      if (video) {
+        final camStatus = await Permission.camera.request();
+        if (!camStatus.isGranted) {
+          _state = _state.copyWith(
+            status: CallStatus.failed,
+            errorMessage: 'Camera permission denied',
+          );
+          notifyListeners();
+          return false;
+        }
+      }
+
+      return true;
+    } catch (e) {
+      _state = _state.copyWith(
+        status: CallStatus.failed,
+        errorMessage: 'Media permission check failed: $e',
+      );
+      notifyListeners();
+      return false;
+    }
   }
 
   /// Start an outgoing call
