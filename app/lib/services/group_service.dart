@@ -77,6 +77,11 @@ class GroupService {
       provider.keyUpdateStream.listen(_handleKeyUpdate),
     );
 
+    // Subscribe to native delivery ACK tracking
+    _subscriptions.add(
+      provider.deliveryStream.listen(_handleDeliveryEvent),
+    );
+
     // Subscribe to group invites
     _subscriptions.add(
       provider.inviteStream.listen(_handleGroupInvite),
@@ -1060,6 +1065,40 @@ class GroupService {
 
     _messageController.add(message);
     return message;
+  }
+
+  /// Handle native delivery status updates for outgoing group messages
+  Future<void> _handleDeliveryEvent(GroupDeliveryEvent event) async {
+    final status =
+        event.delivered ? MessageStatus.delivered : MessageStatus.failed;
+    final db = await DatabaseService.instance.database;
+
+    final rows = await db.query(
+      'messages',
+      where: 'id = ? AND conversation_id = ? AND is_outgoing = 1',
+      whereArgs: [event.msgId, event.groupId],
+      limit: 1,
+    );
+    if (rows.isEmpty) {
+      _log.warning('Delivery update for unknown group message ${event.msgId}',
+          source: 'GroupService');
+      return;
+    }
+
+    final message = Message.fromMap(rows.first);
+    if (message.status == MessageStatus.read || message.status == status) {
+      return;
+    }
+
+    final updated = message.copyWith(status: status);
+    await db.update(
+      'messages',
+      {'status': status.index},
+      where: 'id = ?',
+      whereArgs: [event.msgId],
+    );
+
+    _messageController.add(updated);
   }
 
   /// Mark group messages as read

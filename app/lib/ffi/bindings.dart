@@ -80,6 +80,24 @@ typedef _KeyDistCompleteCallback = Void Function(
     Size failedCount,
     Pointer<Void> userData);
 
+/// Native callback type for group delivery success
+typedef _GroupDeliveryCallback = Void Function(
+    Pointer<Void> ctx,
+    Pointer<Uint8> groupId,
+    Pointer<Uint8> msgId,
+    Size ackedCount,
+    Size totalCount,
+    Pointer<Void> userData);
+
+/// Native callback type for group delivery failure
+typedef _GroupDeliveryFailedCallback = Void Function(
+    Pointer<Void> ctx,
+    Pointer<Uint8> groupId,
+    Pointer<Uint8> msgId,
+    Pointer<Uint8> failedMembers,
+    Size failedCount,
+    Pointer<Void> userData);
+
 /// Native callback type for connection progress
 typedef _ConnProgressCallback = Void Function(
     Pointer<Uint8> peerId,
@@ -1798,6 +1816,8 @@ class CyxChatBindings {
   NativeCallable<_MemberLeaveCallback>? _onMemberLeave;
   NativeCallable<_KeyUpdateCallback>? _onKeyUpdate;
   NativeCallable<_KeyDistCompleteCallback>? _onKeyDistComplete;
+  NativeCallable<_GroupDeliveryCallback>? _onGroupDelivery;
+  NativeCallable<_GroupDeliveryFailedCallback>? _onGroupDeliveryFailed;
 
   /// Dart callbacks for group events
   void Function(String groupId, String from, String msgId, String text)? onGroupMessage;
@@ -1806,6 +1826,10 @@ class CyxChatBindings {
   void Function(String groupId, String memberId, bool wasKicked)? onMemberLeave;
   void Function(String groupId, int newVersion)? onKeyUpdate;
   void Function(String groupId, int newVersion, bool success, int failedCount)? onKeyDistComplete;
+  void Function(String groupId, String msgId, int ackedCount, int totalCount)?
+      onGroupDelivery;
+  void Function(String groupId, String msgId, int failedCount)?
+      onGroupDeliveryFailed;
 
   /// Pending invites storage (by group ID hex)
   final Map<String, Pointer<Void>> _pendingInvites = {};
@@ -1873,6 +1897,26 @@ class CyxChatBindings {
       _onKeyDistComplete!.nativeFunction,
       nullptr,
     );
+
+    // Group delivery callbacks
+    _onGroupDelivery = NativeCallable<_GroupDeliveryCallback>.listener(
+      _handleGroupDelivery,
+    );
+    _native.cyxchat_group_set_on_delivery(
+      _groupCtx!,
+      _onGroupDelivery!.nativeFunction,
+      nullptr,
+    );
+
+    _onGroupDeliveryFailed =
+        NativeCallable<_GroupDeliveryFailedCallback>.listener(
+      _handleGroupDeliveryFailed,
+    );
+    _native.cyxchat_group_set_on_delivery_failed(
+      _groupCtx!,
+      _onGroupDeliveryFailed!.nativeFunction,
+      nullptr,
+    );
   }
 
   /// Clean up group callbacks
@@ -1883,12 +1927,16 @@ class CyxChatBindings {
     _onMemberLeave?.close();
     _onKeyUpdate?.close();
     _onKeyDistComplete?.close();
+    _onGroupDelivery?.close();
+    _onGroupDeliveryFailed?.close();
     _onGroupMessage = null;
     _onGroupInvite = null;
     _onMemberJoin = null;
     _onMemberLeave = null;
     _onKeyUpdate = null;
     _onKeyDistComplete = null;
+    _onGroupDelivery = null;
+    _onGroupDeliveryFailed = null;
     _pendingInvites.clear();
   }
 
@@ -2054,6 +2102,41 @@ class CyxChatBindings {
     if (onKeyDistComplete == null) return;
     final groupIdHex = _ptrToHex(groupId, 8);
     onKeyDistComplete!(groupIdHex, newVersion, success != 0, failedCount);
+  }
+
+  /// Handle group message delivery success
+  void _handleGroupDelivery(
+    Pointer<Void> ctx,
+    Pointer<Uint8> groupId,
+    Pointer<Uint8> msgId,
+    int ackedCount,
+    int totalCount,
+    Pointer<Void> userData,
+  ) {
+    if (onGroupDelivery == null) return;
+    onGroupDelivery!(
+      _ptrToHex(groupId, 8),
+      _ptrToHex(msgId, 8),
+      ackedCount,
+      totalCount,
+    );
+  }
+
+  /// Handle group message delivery failure
+  void _handleGroupDeliveryFailed(
+    Pointer<Void> ctx,
+    Pointer<Uint8> groupId,
+    Pointer<Uint8> msgId,
+    Pointer<Uint8> failedMembers,
+    int failedCount,
+    Pointer<Void> userData,
+  ) {
+    if (onGroupDeliveryFailed == null) return;
+    onGroupDeliveryFailed!(
+      _ptrToHex(groupId, 8),
+      _ptrToHex(msgId, 8),
+      failedCount,
+    );
   }
 
   // ============================================================
@@ -4393,6 +4476,16 @@ late final cyxchat_conn_get_peer_pubkey = _lib.lookupFunction<      Int32 Functi
       Void Function(Pointer<Void>, Pointer<NativeFunction<_KeyDistCompleteCallback>>, Pointer<Void>),
       void Function(Pointer<Void>, Pointer<NativeFunction<_KeyDistCompleteCallback>>, Pointer<Void>)>(
       'cyxchat_group_set_on_key_dist_complete');
+
+  late final cyxchat_group_set_on_delivery = _lib.lookupFunction<
+      Void Function(Pointer<Void>, Pointer<NativeFunction<_GroupDeliveryCallback>>, Pointer<Void>),
+      void Function(Pointer<Void>, Pointer<NativeFunction<_GroupDeliveryCallback>>, Pointer<Void>)>(
+      'cyxchat_group_set_on_delivery');
+
+  late final cyxchat_group_set_on_delivery_failed = _lib.lookupFunction<
+      Void Function(Pointer<Void>, Pointer<NativeFunction<_GroupDeliveryFailedCallback>>, Pointer<Void>),
+      void Function(Pointer<Void>, Pointer<NativeFunction<_GroupDeliveryFailedCallback>>, Pointer<Void>)>(
+      'cyxchat_group_set_on_delivery_failed');
 
   // Group admin permissions and restrictions (Phase 1)
   late final cyxchat_group_set_admin_permissions = _lib.lookupFunction<

@@ -201,6 +201,10 @@ struct cyxchat_group_ctx {
     /* Delivery failure callback */
     cyxchat_on_group_delivery_failed_t on_delivery_failed;
     void *on_delivery_failed_data;
+
+    /* Delivery success callback */
+    cyxchat_on_group_delivery_t on_delivery;
+    void *on_delivery_data;
 };
 
 /* ============================================================
@@ -378,11 +382,17 @@ static void pending_grp_check_timeouts(cyxchat_group_ctx_t *ctx, uint64_t now_ms
             }
         }
 
-        if (failed_count > 0 && ctx->on_delivery_failed) {
-            CYXWIZ_WARN("Group message delivery failed for %zu members", failed_count);
-            ctx->on_delivery_failed(ctx, &slot->group_id, &slot->msg_id,
-                                    failed, failed_count,
-                                    ctx->on_delivery_failed_data);
+        if (failed_count > 0) {
+            if (ctx->on_delivery_failed) {
+                CYXWIZ_WARN("Group message delivery failed for %zu members", failed_count);
+                ctx->on_delivery_failed(ctx, &slot->group_id, &slot->msg_id,
+                                        failed, failed_count,
+                                        ctx->on_delivery_failed_data);
+            }
+        } else if (ctx->on_delivery) {
+            ctx->on_delivery(ctx, &slot->group_id, &slot->msg_id,
+                             slot->member_count, slot->member_count,
+                             ctx->on_delivery_data);
         }
 
         pending_grp_free(slot);
@@ -2803,6 +2813,17 @@ void cyxchat_group_set_on_delivery_failed(
     }
 }
 
+void cyxchat_group_set_on_delivery(
+    cyxchat_group_ctx_t *ctx,
+    cyxchat_on_group_delivery_t callback,
+    void *user_data
+) {
+    if (ctx) {
+        ctx->on_delivery = callback;
+        ctx->on_delivery_data = user_data;
+    }
+}
+
 /* ============================================================
  * Key Distribution Progress Query
  * ============================================================ */
@@ -3710,6 +3731,11 @@ static void handle_group_text_ack(
     }
     if (all_acked) {
         CYXWIZ_INFO("All group members ACKed message");
+        if (ctx->on_delivery) {
+            ctx->on_delivery(ctx, &slot->group_id, &slot->msg_id,
+                             slot->member_count, slot->member_count,
+                             ctx->on_delivery_data);
+        }
         pending_grp_free(slot);
     }
 }

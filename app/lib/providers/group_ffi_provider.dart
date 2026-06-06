@@ -81,6 +81,37 @@ class KeyDistProgress {
   bool get inProgress => !complete && total > 0;
 }
 
+/// Group message delivery status from native ACK tracking
+class GroupDeliveryEvent {
+  final String groupId;
+  final String msgId;
+  final bool delivered;
+  final int ackedCount;
+  final int totalCount;
+  final int failedCount;
+  final DateTime timestamp;
+
+  GroupDeliveryEvent.delivered({
+    required this.groupId,
+    required this.msgId,
+    required this.ackedCount,
+    required this.totalCount,
+    DateTime? timestamp,
+  })  : delivered = true,
+        failedCount = 0,
+        timestamp = timestamp ?? DateTime.now();
+
+  GroupDeliveryEvent.failed({
+    required this.groupId,
+    required this.msgId,
+    required this.failedCount,
+    DateTime? timestamp,
+  })  : delivered = false,
+        ackedCount = 0,
+        totalCount = 0,
+        timestamp = timestamp ?? DateTime.now();
+}
+
 /// Result of FFI group operations
 class GroupFFIResult {
   final bool success;
@@ -125,6 +156,7 @@ class GroupFFIProvider extends ChangeNotifier {
   final _keyUpdateController = StreamController<KeyUpdateEvent>.broadcast();
   final _keyDistCompleteController =
       StreamController<KeyDistProgress>.broadcast();
+  final _deliveryController = StreamController<GroupDeliveryEvent>.broadcast();
 
   // Getters
   bool get initialized => _initialized;
@@ -146,6 +178,9 @@ class GroupFFIProvider extends ChangeNotifier {
   /// Stream of key distribution completion events
   Stream<KeyDistProgress> get keyDistCompleteStream =>
       _keyDistCompleteController.stream;
+
+  /// Stream of group delivery ACK events
+  Stream<GroupDeliveryEvent> get deliveryStream => _deliveryController.stream;
 
   /// Get pending invites
   List<GroupInvite> get pendingInvites => _pendingInvites.values.toList();
@@ -979,6 +1014,8 @@ class GroupFFIProvider extends ChangeNotifier {
     _bindings.onMemberLeave = _onMemberLeave;
     _bindings.onKeyUpdate = _onKeyUpdate;
     _bindings.onKeyDistComplete = _onKeyDistComplete;
+    _bindings.onGroupDelivery = _onGroupDelivery;
+    _bindings.onGroupDeliveryFailed = _onGroupDeliveryFailed;
 
     // Register native callbacks
     _bindings.groupSetupCallbacks();
@@ -1081,6 +1118,40 @@ class GroupFFIProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  void _onGroupDelivery(
+    String groupId,
+    String msgId,
+    int ackedCount,
+    int totalCount,
+  ) {
+    final log = LogService.instance;
+    log.info(
+      'Group message $msgId delivered to $ackedCount/$totalCount members',
+      source: 'GroupFFI',
+    );
+
+    _deliveryController.add(GroupDeliveryEvent.delivered(
+      groupId: groupId,
+      msgId: msgId,
+      ackedCount: ackedCount,
+      totalCount: totalCount,
+    ));
+    notifyListeners();
+  }
+
+  void _onGroupDeliveryFailed(String groupId, String msgId, int failedCount) {
+    final log = LogService.instance;
+    log.warning('Group message $msgId failed for $failedCount members',
+        source: 'GroupFFI');
+
+    _deliveryController.add(GroupDeliveryEvent.failed(
+      groupId: groupId,
+      msgId: msgId,
+      failedCount: failedCount,
+    ));
+    notifyListeners();
+  }
+
   void _startPolling() {
     _pollTimer?.cancel();
     _pollTimer = Timer.periodic(_pollInterval, (_) => _poll());
@@ -1124,6 +1195,7 @@ class GroupFFIProvider extends ChangeNotifier {
     _memberEventController.close();
     _keyUpdateController.close();
     _keyDistCompleteController.close();
+    _deliveryController.close();
     super.dispose();
   }
 }

@@ -161,6 +161,15 @@ typedef void (*cyxchat_on_group_delivery_failed_t)(
     void *user_data
 );
 
+typedef void (*cyxchat_on_group_delivery_t)(
+    cyxchat_group_ctx_t *ctx,
+    const cyxchat_group_id_t *group_id,
+    const cyxchat_msg_id_t *msg_id,
+    size_t acked_count,
+    size_t total_count,
+    void *user_data
+);
+
 typedef void (*cyxchat_on_group_key_update_t)(
     cyxchat_group_ctx_t *ctx,
     const cyxchat_group_id_t *group_id,
@@ -479,6 +488,12 @@ CYXCHAT_API void cyxchat_group_set_on_key_update(
 CYXCHAT_API void cyxchat_group_set_on_delivery_failed(
     cyxchat_group_ctx_t *ctx,
     cyxchat_on_group_delivery_failed_t callback,
+    void *user_data
+);
+
+CYXCHAT_API void cyxchat_group_set_on_delivery(
+    cyxchat_group_ctx_t *ctx,
+    cyxchat_on_group_delivery_t callback,
     void *user_data
 );
 
