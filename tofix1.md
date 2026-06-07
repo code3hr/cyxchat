@@ -90,10 +90,15 @@ Native routing pads UUID node IDs to 32 bytes, so server-side searches should in
 
 ## Current Next Step
 
-- Start with evidence, not rewrites:
-  - Check Oracle logs for the two node IDs.
-  - Run one PC instance with `INSTANCE_ID=pc_live`.
-  - Ask the mobile device to connect/message/call the PC instance while we tail logs.
+- Validate the first Oracle server patch with live Android traffic:
+  - Server source of truth on this PC: `D:\Dev\conspiracy\tools\cyxchat-server.c`.
+  - Deployed to Oracle on 2026-06-07.
+  - Changed peer expiry from 5 seconds to 180 seconds.
+  - Fixed scheduled queue delivery to scan all `MAX_PEERS` slots instead of only `g_peer_count`.
+  - Refresh sender activity when a known peer sends a `CYXWIZ_UDP_RELAY_PKT`.
+  - Oracle service verified active on UDP `7777` after restart.
+  - Oracle backups: `/home/ubuntu/cyxchat-server..bak` and `/home/ubuntu/cyxchat-server.c..bak`.
+  - Next live check: send A -> B and B -> A while tailing `/home/ubuntu/server.log`; confirm no false peer expiry during active use.
 
 ## Done Criteria For Each Fix
 
