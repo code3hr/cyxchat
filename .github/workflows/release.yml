@@ -214,9 +214,11 @@ jobs:
         working-directory: cyxchat/app
         run: |
           flutter create --platforms=macos --no-pub .
-          sed -i '' 's/platform :osx, .*/platform :osx, "10.15"/' macos/Podfile
-          sed -i '' 's/MACOSX_DEPLOYMENT_TARGET = 10.14/MACOSX_DEPLOYMENT_TARGET = 10.15/g' macos/Runner.xcodeproj/project.pbxproj
           flutter pub get --enforce-lockfile
+          if [ -f macos/Podfile ]; then
+            sed -i '' 's/platform :osx, .*/platform :osx, "10.15"/' macos/Podfile
+          fi
+          sed -i '' 's/MACOSX_DEPLOYMENT_TARGET = 10.14/MACOSX_DEPLOYMENT_TARGET = 10.15/g' macos/Runner.xcodeproj/project.pbxproj
           flutter build macos --release
 
       - name: Bundle native library
