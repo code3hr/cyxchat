@@ -107,6 +107,15 @@ install(CODE "
     TYPE FILE
     FILES \"\${_cyxchat_native_config_dir}/cyxchat.dll\")
 
+  foreach(_cyxchat_dependency IN ITEMS libsodium.dll miniupnpc.dll)
+    if(EXISTS \"\${_cyxchat_native_config_dir}/\${_cyxchat_dependency}\")
+      file(INSTALL
+        DESTINATION \"${INSTALL_BUNDLE_LIB_DIR}\"
+        TYPE FILE
+        FILES \"\${_cyxchat_native_config_dir}/\${_cyxchat_dependency}\")
+    endif()
+  endforeach()
+
   if(EXISTS \"\${_cyxchat_native_config_dir}/cyxchat.pdb\")
     file(INSTALL
       DESTINATION \"${INSTALL_BUNDLE_LIB_DIR}\"
