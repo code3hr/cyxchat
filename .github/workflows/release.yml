@@ -13,8 +13,9 @@ permissions:
   contents: write
 
 env:
-  FLUTTER_CHANNEL: stable
+  FLUTTER_VERSION: '3.38.5'
   ANDROID_NDK_VERSION: '27.0.12077973'
+  ANDROID_COMPILE_SDK: '36'
   ANDROID_API_LEVEL: '23'
   LIBSODIUM_VERSION: '1.0.20'
 
@@ -29,12 +30,12 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          channel: ${{ env.FLUTTER_CHANNEL }}
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
 
       - name: Install dependencies
         working-directory: app
-        run: flutter pub get
+        run: flutter pub get --enforce-lockfile
 
       - name: Analyze
         working-directory: app
@@ -64,7 +65,7 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          channel: ${{ env.FLUTTER_CHANNEL }}
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
 
       - name: Install native dependencies
@@ -124,7 +125,7 @@ jobs:
         shell: pwsh
         working-directory: cyxchat/app
         run: |
-          flutter pub get
+          flutter pub get --enforce-lockfile
           flutter build windows --release
 
       - name: Copy runtime dependencies
@@ -176,7 +177,7 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          channel: ${{ env.FLUTTER_CHANNEL }}
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
 
       - name: Build CyxWiz
@@ -212,10 +213,10 @@ jobs:
       - name: Build Flutter macOS app
         working-directory: cyxchat/app
         run: |
-          flutter create --platforms=macos .
+          flutter create --platforms=macos --no-pub .
           sed -i '' 's/platform :osx, .*/platform :osx, "10.15"/' macos/Podfile
           sed -i '' 's/MACOSX_DEPLOYMENT_TARGET = 10.14/MACOSX_DEPLOYMENT_TARGET = 10.15/g' macos/Runner.xcodeproj/project.pbxproj
-          flutter pub get
+          flutter pub get --enforce-lockfile
           flutter build macos --release
 
       - name: Bundle native library
@@ -272,13 +273,14 @@ jobs:
 
       - name: Install Android NDK
         run: |
+          yes | sdkmanager --install "platforms;android-${{ env.ANDROID_COMPILE_SDK }}" "build-tools;36.0.0"
           yes | sdkmanager --install "ndk;${{ env.ANDROID_NDK_VERSION }}"
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/${{ env.ANDROID_NDK_VERSION }}" >> "$GITHUB_ENV"
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          channel: ${{ env.FLUTTER_CHANNEL }}
+          flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
 
       - name: Install native build dependencies
@@ -384,7 +386,7 @@ jobs:
       - name: Build Flutter Android artifacts
         working-directory: cyxchat/app
         run: |
-          flutter pub get
+          flutter pub get --enforce-lockfile
           flutter build apk --release
           flutter build appbundle --release
 

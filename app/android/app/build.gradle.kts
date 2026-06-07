@@ -7,7 +7,7 @@ plugins {
 
 android {
     namespace = "com.example.cyxchat"
-    compileSdk = 35  // Override for plugin compatibility (record_android, flutter_plugin_android_lifecycle)
+    compileSdk = 36  // Override for plugin compatibility (connectivity_plus, record_android)
     ndkVersion = "27.0.12077973"  // Override for plugin compatibility
 
     compileOptions {
