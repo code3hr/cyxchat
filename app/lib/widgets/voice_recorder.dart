@@ -72,25 +72,34 @@ class _VoiceRecorderState extends State<VoiceRecorder>
     final activeColor = widget.activeColor ?? Colors.red;
     final inactiveColor = widget.inactiveColor ?? colorScheme.primary;
 
-    if (_isRecording) {
-      return _buildRecordingUI(colorScheme, activeColor);
-    }
-
     return GestureDetector(
+      behavior: HitTestBehavior.opaque,
       onLongPressStart: (_) => _startRecording(),
-      onLongPressEnd: (_) => _stopRecording(),
-      child: Container(
-        width: 48,
-        height: 48,
-        decoration: BoxDecoration(
-          color: inactiveColor.withOpacity(0.1),
-          shape: BoxShape.circle,
-        ),
-        child: Icon(
-          Icons.mic,
-          color: inactiveColor,
-        ),
-      ),
+      onLongPressEnd: (_) {
+        if (_isRecording) {
+          _stopRecording();
+        }
+      },
+      onLongPressMoveUpdate: (details) {
+        if (!_isRecording) return;
+        setState(() {
+          _dragOffset = details.localOffsetFromOrigin;
+        });
+      },
+      child: _isRecording
+          ? _buildRecordingUI(colorScheme, activeColor)
+          : Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: inactiveColor.withOpacity(0.1),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.mic,
+                color: inactiveColor,
+              ),
+            ),
     );
   }
 
@@ -98,89 +107,81 @@ class _VoiceRecorderState extends State<VoiceRecorder>
     final durationStr = _formatDuration(_recordingDurationMs);
     final isCancelling = _dragOffset.dx < _cancelThreshold;
 
-    return GestureDetector(
-      onLongPressEnd: (_) => _stopRecording(),
-      onLongPressMoveUpdate: (details) {
-        setState(() {
-          _dragOffset = details.localOffsetFromOrigin;
-        });
-      },
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          // Cancel indicator
-          AnimatedOpacity(
-            opacity: isCancelling ? 1.0 : 0.5,
-            duration: const Duration(milliseconds: 100),
-            child: Text(
-              '< Slide to cancel',
-              style: TextStyle(
-                color: isCancelling ? Colors.red : colorScheme.onSurface,
-                fontSize: 12,
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // Cancel indicator
+        AnimatedOpacity(
+          opacity: isCancelling ? 1.0 : 0.5,
+          duration: const Duration(milliseconds: 100),
+          child: Text(
+            '< Slide to cancel',
+            style: TextStyle(
+              color: isCancelling ? Colors.red : colorScheme.onSurface,
+              fontSize: 12,
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        // Duration
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: Colors.red.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 8,
+                height: 8,
+                decoration: const BoxDecoration(
+                  color: Colors.red,
+                  shape: BoxShape.circle,
+                ),
               ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          // Duration
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            decoration: BoxDecoration(
-              color: Colors.red.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 8,
-                  height: 8,
-                  decoration: const BoxDecoration(
-                    color: Colors.red,
-                    shape: BoxShape.circle,
-                  ),
+              const SizedBox(width: 8),
+              Text(
+                durationStr,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w500,
+                  color: Colors.red,
                 ),
-                const SizedBox(width: 8),
-                Text(
-                  durationStr,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w500,
-                    color: Colors.red,
-                  ),
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
-          const SizedBox(width: 12),
-          // Mic button (pulsing)
-          AnimatedBuilder(
-            animation: _pulseAnimation,
-            builder: (context, child) {
-              return Transform.scale(
-                scale: _pulseAnimation.value,
-                child: Container(
-                  width: 48,
-                  height: 48,
-                  decoration: BoxDecoration(
-                    color: activeColor,
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: activeColor.withOpacity(0.4),
-                        blurRadius: 12,
-                        spreadRadius: 2,
-                      ),
-                    ],
-                  ),
-                  child: const Icon(
-                    Icons.mic,
-                    color: Colors.white,
-                  ),
+        ),
+        const SizedBox(width: 12),
+        // Mic button (pulsing)
+        AnimatedBuilder(
+          animation: _pulseAnimation,
+          builder: (context, child) {
+            return Transform.scale(
+              scale: _pulseAnimation.value,
+              child: Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: activeColor,
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color: activeColor.withOpacity(0.4),
+                      blurRadius: 12,
+                      spreadRadius: 2,
+                    ),
+                  ],
                 ),
-              );
-            },
-          ),
-        ],
-      ),
+                child: const Icon(
+                  Icons.mic,
+                  color: Colors.white,
+                ),
+              ),
+            );
+          },
+        ),
+      ],
     );
   }
 
