@@ -18,6 +18,7 @@ Native routing pads UUID node IDs to 32 bytes, so server-side searches should in
 ## Reported Symptoms
 
 - Messages from A to B can be delayed or never appear on B.
+- Messaging can become one-way, where one device receives but the other direction does not.
 - UI can stay on "establishing connection" even while some messages still pass.
 - Android inactive/background app does not reliably show notifications.
 - Audio calls and video calls do not work reliably.
@@ -58,6 +59,7 @@ Native routing pads UUID node IDs to 32 bytes, so server-side searches should in
 
 4. Message-delivery fix
    - Prove whether lost messages are failing before send, at native retry, at relay/direct route, at ACK clearing, or at receiver polling/persistence.
+   - Validate both directions independently; A -> B and B -> A must both deliver.
    - Add focused logging only where the path lacks evidence.
    - Fix the smallest broken layer, then add a regression test where practical.
    - Done when A/B logs show message ID sent, routed, received, persisted, displayed, and ACKed.
