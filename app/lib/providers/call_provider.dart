@@ -111,7 +111,7 @@ class CallProvider extends ChangeNotifier {
   int _callGeneration = 0;
 
   // Callbacks for signaling (set by network layer)
-  void Function(String peerId, int type, String payload)? onSendSignal;
+  Future<bool> Function(String peerId, int type, String payload)? onSendSignal;
   void Function()? onIncomingCall;
   void Function()? onCallConnected;
   void Function()? onCallEnded;
@@ -230,7 +230,7 @@ class CallProvider extends ChangeNotifier {
       await _peerConnection!.setLocalDescription(offer);
 
       // Send offer via signaling
-      _sendSignal(
+      final sent = await _sendSignal(
           peerId,
           CallSignalingType.offer,
           jsonEncode({
@@ -238,6 +238,9 @@ class CallProvider extends ChangeNotifier {
             'type': offer.type,
             'video': video,
           }));
+      if (!sent) {
+        throw Exception('Call offer could not be sent');
+      }
       _startCallTimeout(_outgoingCallTimeout, CallEndReason.noAnswer);
 
       debugPrint('CallProvider: Sent offer to $peerId');
@@ -264,7 +267,7 @@ class CallProvider extends ChangeNotifier {
   }) async {
     if (_state.isActive) {
       // Already in a call, send busy signal
-      _sendSignal(peerId, CallSignalingType.busy, '');
+      await _sendSignal(peerId, CallSignalingType.busy, '');
       return;
     }
 
@@ -309,7 +312,7 @@ class CallProvider extends ChangeNotifier {
     // Check permissions
     if (!await checkPermissions(video: video)) {
       _cancelCallTimeout();
-      _sendSignal(peerId, CallSignalingType.reject, '');
+      await _sendSignal(peerId, CallSignalingType.reject, '');
       _resetPendingSignaling();
       onCallEnded?.call();
       return false;
@@ -336,13 +339,16 @@ class CallProvider extends ChangeNotifier {
       final answer = await _peerConnection!.createAnswer();
       await _peerConnection!.setLocalDescription(answer);
 
-      _sendSignal(
+      final sent = await _sendSignal(
           peerId,
           CallSignalingType.answer,
           jsonEncode({
             'sdp': answer.sdp,
             'type': answer.type,
           }));
+      if (!sent) {
+        throw Exception('Call answer could not be sent');
+      }
 
       debugPrint('CallProvider: Sent answer to $peerId');
       return true;
@@ -368,7 +374,7 @@ class CallProvider extends ChangeNotifier {
     debugPrint('CallProvider: Rejecting call from $peerId');
     _cancelCallTimeout();
 
-    _sendSignal(peerId, CallSignalingType.reject, '');
+    await _sendSignal(peerId, CallSignalingType.reject, '');
 
     _resetPendingSignaling();
     _state = const CallState(status: CallStatus.idle);
@@ -490,7 +496,7 @@ class CallProvider extends ChangeNotifier {
 
     final peerId = _state.peerId;
     if (peerId != null) {
-      _sendSignal(peerId, CallSignalingType.end, '');
+      unawaited(_sendSignal(peerId, CallSignalingType.end, ''));
     }
 
     _endCallInternal(reason);
@@ -597,14 +603,14 @@ class CallProvider extends ChangeNotifier {
     // Handle ICE candidates
     _peerConnection!.onIceCandidate = (candidate) {
       if (_state.peerId != null && candidate.candidate != null) {
-        _sendSignal(
+        unawaited(_sendSignal(
             _state.peerId!,
             CallSignalingType.ice,
             jsonEncode({
               'candidate': candidate.candidate,
               'sdpMid': candidate.sdpMid,
               'sdpMLineIndex': candidate.sdpMLineIndex,
-            }));
+            })));
       }
     };
 
@@ -657,8 +663,24 @@ class CallProvider extends ChangeNotifier {
     onCallConnected?.call();
   }
 
-  void _sendSignal(String peerId, int type, String payload) {
-    onSendSignal?.call(peerId, type, payload);
+  Future<bool> _sendSignal(String peerId, int type, String payload) async {
+    final sender = onSendSignal;
+    if (sender == null) {
+      debugPrint('CallProvider: No signaling sender registered');
+      return false;
+    }
+    try {
+      final sent = await sender(peerId, type, payload);
+      if (!sent) {
+        debugPrint(
+          'CallProvider: Failed to send signal type 0x${type.toRadixString(16)} to $peerId',
+        );
+      }
+      return sent;
+    } catch (e) {
+      debugPrint('CallProvider: Signaling send threw: $e');
+      return false;
+    }
   }
 
   void _startCallTimeout(Duration timeout, CallEndReason reason) {
@@ -667,7 +689,7 @@ class CallProvider extends ChangeNotifier {
       if (!_state.isActive || _state.status == CallStatus.connected) return;
       debugPrint('CallProvider: Call timed out: $reason');
       if (_state.status == CallStatus.outgoing && _state.peerId != null) {
-        _sendSignal(_state.peerId!, CallSignalingType.end, '');
+        unawaited(_sendSignal(_state.peerId!, CallSignalingType.end, ''));
       }
       _endCallInternal(reason);
     });

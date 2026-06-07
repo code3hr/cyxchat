@@ -25,8 +25,9 @@ void main() {
         () async {
       final provider = CallProvider();
       final sentSignals = <({String peerId, int type, String payload})>[];
-      provider.onSendSignal = (peerId, type, payload) {
+      provider.onSendSignal = (peerId, type, payload) async {
         sentSignals.add((peerId: peerId, type: type, payload: payload));
+        return true;
       };
 
       await provider.handleOffer(
@@ -55,8 +56,9 @@ void main() {
         () async {
       final provider = CallProvider();
       final sentSignals = <({String peerId, int type, String payload})>[];
-      provider.onSendSignal = (peerId, type, payload) {
+      provider.onSendSignal = (peerId, type, payload) async {
         sentSignals.add((peerId: peerId, type: type, payload: payload));
+        return true;
       };
 
       await provider.handleOffer(

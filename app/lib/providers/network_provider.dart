@@ -281,7 +281,7 @@ class ConnectionActions {
       // Wire call signaling to chat layer
       final callProvider = _ref.read(callNotifierProvider);
       callProvider.onSendSignal = (peerId, type, payload) {
-        chatProvider.sendCallSignal(
+        return chatProvider.sendCallSignal(
           toPeerId: peerId,
           type: type,
           payload: payload,

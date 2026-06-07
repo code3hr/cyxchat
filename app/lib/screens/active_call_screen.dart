@@ -25,6 +25,7 @@ class _ActiveCallScreenState extends ConsumerState<ActiveCallScreen> {
   final RTCVideoRenderer _remoteRenderer = RTCVideoRenderer();
   bool _showControls = true;
   bool _localVideoMinimized = true;
+  bool _closing = false;
   Offset _localVideoPosition = const Offset(16, 100);
 
   @override
@@ -71,9 +72,11 @@ class _ActiveCallScreenState extends ConsumerState<ActiveCallScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) => _updateStreams());
 
     // Handle call ended
-    if (callState.status == CallStatus.ended || callState.status == CallStatus.idle) {
+    if (callState.status == CallStatus.ended ||
+        callState.status == CallStatus.failed ||
+        callState.status == CallStatus.idle) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) Navigator.of(context).pop();
+        _closeCallScreen();
       });
     }
 
@@ -162,7 +165,9 @@ class _ActiveCallScreenState extends ConsumerState<ActiveCallScreen> {
               ),
 
               // Local video (PiP, draggable)
-              if (widget.isVideo && callProvider.localStream != null && !callState.isCameraOff)
+              if (widget.isVideo &&
+                  callProvider.localStream != null &&
+                  !callState.isCameraOff)
                 Positioned(
                   left: _localVideoPosition.dx,
                   top: _localVideoPosition.dy,
@@ -175,7 +180,8 @@ class _ActiveCallScreenState extends ConsumerState<ActiveCallScreen> {
                         );
                       });
                     },
-                    onTap: () => setState(() => _localVideoMinimized = !_localVideoMinimized),
+                    onTap: () => setState(
+                        () => _localVideoMinimized = !_localVideoMinimized),
                     child: Container(
                       width: _localVideoMinimized ? 100 : 150,
                       height: _localVideoMinimized ? 150 : 200,
@@ -187,7 +193,8 @@ class _ActiveCallScreenState extends ConsumerState<ActiveCallScreen> {
                       child: RTCVideoView(
                         _localRenderer,
                         mirror: true,
-                        objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+                        objectFit:
+                            RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
                       ),
                     ),
                   ),
@@ -230,8 +237,12 @@ class _ActiveCallScreenState extends ConsumerState<ActiveCallScreen> {
                         // Camera toggle (video calls only)
                         if (widget.isVideo)
                           _ControlButton(
-                            icon: callState.isCameraOff ? Icons.videocam_off : Icons.videocam,
-                            label: callState.isCameraOff ? 'Camera On' : 'Camera Off',
+                            icon: callState.isCameraOff
+                                ? Icons.videocam_off
+                                : Icons.videocam,
+                            label: callState.isCameraOff
+                                ? 'Camera On'
+                                : 'Camera Off',
                             isActive: callState.isCameraOff,
                             onTap: ref.read(callActionsProvider).toggleCamera,
                           ),
@@ -249,7 +260,9 @@ class _ActiveCallScreenState extends ConsumerState<ActiveCallScreen> {
 
                         // Speaker toggle
                         _ControlButton(
-                          icon: callState.isSpeakerOn ? Icons.volume_up : Icons.volume_off,
+                          icon: callState.isSpeakerOn
+                              ? Icons.volume_up
+                              : Icons.volume_off,
                           label: callState.isSpeakerOn ? 'Speaker' : 'Earpiece',
                           isActive: !callState.isSpeakerOn,
                           onTap: ref.read(callActionsProvider).toggleSpeaker,
@@ -268,7 +281,8 @@ class _ActiveCallScreenState extends ConsumerState<ActiveCallScreen> {
                   right: 0,
                   child: Center(
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 8),
                       decoration: BoxDecoration(
                         color: Colors.orange.withOpacity(0.9),
                         borderRadius: BorderRadius.circular(20),
@@ -287,7 +301,9 @@ class _ActiveCallScreenState extends ConsumerState<ActiveCallScreen> {
                           SizedBox(width: 8),
                           Text(
                             'Reconnecting...',
-                            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w500),
+                            style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w500),
                           ),
                         ],
                       ),
@@ -400,8 +416,15 @@ class _ActiveCallScreenState extends ConsumerState<ActiveCallScreen> {
 
   Future<void> _endCall() async {
     await ref.read(callActionsProvider).endCall();
-    if (mounted) {
-      Navigator.of(context).pop();
+    _closeCallScreen();
+  }
+
+  void _closeCallScreen() {
+    if (_closing || !mounted) return;
+    _closing = true;
+    final navigator = Navigator.of(context);
+    if (navigator.canPop()) {
+      navigator.pop();
     }
   }
 }

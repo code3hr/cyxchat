@@ -81,6 +81,7 @@ Native routing pads UUID node IDs to 32 bytes, so server-side searches should in
    - Make call signaling observable before changing transport.
    - Fix dropped-call navigation/state so the UI never lands on a blank screen.
    - Done when A/B or mobile/PC call setup reaches connected media or reports a precise failure reason.
+   - Status: call signaling now reports send failure instead of silently entering a dead call state; active call route close is guarded so dropped/failed calls do not double-pop or leave a blank screen.
 
 7. Large file transfer fix
    - Trace transfer invite, receiver accept, direct/relay route selection, chunk send, chunk ACK, missing-chunk retry, and final persistence.
