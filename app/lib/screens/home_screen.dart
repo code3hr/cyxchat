@@ -1,14 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../main.dart';
+import '../providers/contact_provider.dart';
 import '../providers/conversation_provider.dart';
 import '../providers/network_provider.dart';
 import '../providers/settings_provider.dart';
-import '../providers/group_ffi_provider.dart';
 import '../providers/queue_provider.dart';
 import '../services/group_service.dart';
 import '../models/models.dart';
+import '../models/contact.dart';
 import '../models/invite_link.dart';
 import 'chat_screen.dart';
 import 'group_chat_screen.dart';
@@ -55,7 +55,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       }
     }
   }
-
 
   @override
   Widget build(BuildContext context) {
@@ -182,13 +181,15 @@ class _ChatsTab extends ConsumerWidget {
                 );
               }
               return SliverPadding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 sliver: SliverList(
                   delegate: SliverChildBuilderDelegate(
                     (context, index) {
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 8),
-                        child: _ConversationCard(conversation: conversations[index]),
+                        child: _ConversationCard(
+                            conversation: conversations[index]),
                       );
                     },
                     childCount: conversations.length,
@@ -207,7 +208,10 @@ class _ChatsTab extends ConsumerWidget {
                       child: CircularProgressIndicator(
                         strokeWidth: 3,
                         valueColor: AlwaysStoppedAnimation(
-                          Theme.of(context).colorScheme.primary.withOpacity(0.8),
+                          Theme.of(context)
+                              .colorScheme
+                              .primary
+                              .withOpacity(0.8),
                         ),
                       ),
                     ),
@@ -215,7 +219,11 @@ class _ChatsTab extends ConsumerWidget {
                     Text(
                       'Loading conversations...',
                       style: TextStyle(
-                        color: Theme.of(context).colorScheme.onSurface.withAlpha(153).withOpacity(0.6),
+                        color: Theme.of(context)
+                            .colorScheme
+                            .onSurface
+                            .withAlpha(153)
+                            .withOpacity(0.6),
                       ),
                     ),
                   ],
@@ -264,7 +272,8 @@ class _ChatsTab extends ConsumerWidget {
                 leading: Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.primary.withOpacity(0.2),
+                    color:
+                        Theme.of(context).colorScheme.primary.withOpacity(0.2),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Icon(
@@ -281,7 +290,8 @@ class _ChatsTab extends ConsumerWidget {
                   'Start a direct conversation',
                   style: TextStyle(
                     fontSize: 12,
-                    color: Theme.of(context).colorScheme.onSurface.withAlpha(153),
+                    color:
+                        Theme.of(context).colorScheme.onSurface.withAlpha(153),
                   ),
                 ),
                 onTap: () {
@@ -289,20 +299,25 @@ class _ChatsTab extends ConsumerWidget {
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (context) => const ContactsScreen(selectMode: true),
+                      builder: (context) =>
+                          const ContactsScreen(selectMode: true),
                     ),
                   );
                 },
               ),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Divider(color: Theme.of(context).colorScheme.outlineVariant),
+                child: Divider(
+                    color: Theme.of(context).colorScheme.outlineVariant),
               ),
               ListTile(
                 leading: Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.secondary.withOpacity(0.2),
+                    color: Theme.of(context)
+                        .colorScheme
+                        .secondary
+                        .withOpacity(0.2),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Icon(
@@ -319,7 +334,8 @@ class _ChatsTab extends ConsumerWidget {
                   'Create a group chat',
                   style: TextStyle(
                     fontSize: 12,
-                    color: Theme.of(context).colorScheme.onSurface.withAlpha(153),
+                    color:
+                        Theme.of(context).colorScheme.onSurface.withAlpha(153),
                   ),
                 ),
                 onTap: () {
@@ -334,13 +350,17 @@ class _ChatsTab extends ConsumerWidget {
               ),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Divider(color: Theme.of(context).colorScheme.outlineVariant),
+                child: Divider(
+                    color: Theme.of(context).colorScheme.outlineVariant),
               ),
               ListTile(
                 leading: Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.secondary.withOpacity(0.2),
+                    color: Theme.of(context)
+                        .colorScheme
+                        .secondary
+                        .withOpacity(0.2),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Icon(
@@ -357,7 +377,8 @@ class _ChatsTab extends ConsumerWidget {
                   'Join with group ID',
                   style: TextStyle(
                     fontSize: 12,
-                    color: Theme.of(context).colorScheme.onSurface.withAlpha(153),
+                    color:
+                        Theme.of(context).colorScheme.onSurface.withAlpha(153),
                   ),
                 ),
                 onTap: () {
@@ -424,7 +445,8 @@ class _ChatsTab extends ConsumerWidget {
               final groupId = controller.text.trim();
               if (groupId.isEmpty) {
                 scaffoldMessenger.showSnackBar(
-                  const SnackBar(content: Text('Please enter a group ID or invite link')),
+                  const SnackBar(
+                      content: Text('Please enter a group ID or invite link')),
                 );
                 return;
               }
@@ -438,7 +460,11 @@ class _ChatsTab extends ConsumerWidget {
     );
   }
 
-  Future<void> _joinGroup(NavigatorState navigator, ScaffoldMessengerState scaffoldMessenger, WidgetRef ref, String input) async {
+  Future<void> _joinGroup(
+      NavigatorState navigator,
+      ScaffoldMessengerState scaffoldMessenger,
+      WidgetRef ref,
+      String input) async {
     try {
       // Check if input is an invite link URL
       final linkParsed = InviteLink.parseUrl(input);
@@ -463,13 +489,16 @@ class _ChatsTab extends ConsumerWidget {
           // Navigate to the group chat
           navigator.push(
             MaterialPageRoute(
-              builder: (context) => GroupChatScreen(groupId: linkParsed.groupId),
+              builder: (context) =>
+                  GroupChatScreen(groupId: linkParsed.groupId),
             ),
           );
         } else {
           scaffoldMessenger.hideCurrentSnackBar();
           scaffoldMessenger.showSnackBar(
-            const SnackBar(content: Text('Failed to join group. Link may be expired or invalid.')),
+            const SnackBar(
+                content: Text(
+                    'Failed to join group. Link may be expired or invalid.')),
           );
         }
         return;
@@ -478,7 +507,8 @@ class _ChatsTab extends ConsumerWidget {
       // Not a URL - treat as group ID and check for pending invite
       final groupId = input.trim();
       final pendingInvites = GroupService.instance.pendingInvites;
-      final invite = pendingInvites.where((i) => i.groupId == groupId).firstOrNull;
+      final invite =
+          pendingInvites.where((i) => i.groupId == groupId).firstOrNull;
 
       if (invite != null) {
         // We have an invite, accept it
@@ -509,7 +539,8 @@ class _ChatsTab extends ConsumerWidget {
         // No pending invite - show feedback via SnackBar
         scaffoldMessenger.showSnackBar(
           SnackBar(
-            content: const Text('No invite found. Ask the admin to add you or share an invite link.'),
+            content: const Text(
+                'No invite found. Ask the admin to add you or share an invite link.'),
             duration: const Duration(seconds: 5),
             action: SnackBarAction(
               label: 'OK',
@@ -573,7 +604,11 @@ class _EmptyChats extends StatelessWidget {
               style: TextStyle(
                 fontSize: 13,
                 height: 1.4,
-                color: Theme.of(context).colorScheme.onSurface.withAlpha(153).withOpacity(0.7),
+                color: Theme.of(context)
+                    .colorScheme
+                    .onSurface
+                    .withAlpha(153)
+                    .withOpacity(0.7),
               ),
             ),
             const SizedBox(height: 20),
@@ -593,14 +628,21 @@ class _EmptyChats extends StatelessWidget {
                   Icon(
                     Icons.lock_outline_rounded,
                     size: 14,
-                    color: Theme.of(context).colorScheme.secondary.withOpacity(0.8),
+                    color: Theme.of(context)
+                        .colorScheme
+                        .secondary
+                        .withOpacity(0.8),
                   ),
                   const SizedBox(width: 6),
                   Text(
                     'End-to-end encrypted',
                     style: TextStyle(
                       fontSize: 11,
-                      color: Theme.of(context).colorScheme.onSurface.withAlpha(153).withOpacity(0.8),
+                      color: Theme.of(context)
+                          .colorScheme
+                          .onSurface
+                          .withAlpha(153)
+                          .withOpacity(0.8),
                     ),
                   ),
                 ],
@@ -676,6 +718,9 @@ class _ConversationCard extends ConsumerWidget {
     final hasUnread = conversation.unreadCount > 0;
     final isGroup = conversation.isGroup;
     final showMessagePreview = ref.watch(settingsProvider).showMessagePreview;
+    final contactAsync = !isGroup && conversation.peerId != null
+        ? ref.watch(contactProvider(conversation.peerId!))
+        : null;
 
     return Material(
       color: Theme.of(context).colorScheme.surfaceContainer,
@@ -694,7 +739,8 @@ class _ConversationCard extends ConsumerWidget {
             Navigator.push(
               context,
               MaterialPageRoute(
-                builder: (context) => ChatScreen(conversationId: conversation.id),
+                builder: (context) =>
+                    ChatScreen(conversationId: conversation.id),
               ),
             );
           }
@@ -709,6 +755,7 @@ class _ConversationCard extends ConsumerWidget {
                 title: conversation.title,
                 hasUnread: hasUnread,
                 isGroup: isGroup,
+                presence: contactAsync?.valueOrNull?.presence,
               ),
               const SizedBox(width: 14),
               // Content
@@ -726,7 +773,10 @@ class _ConversationCard extends ConsumerWidget {
                                 Icon(
                                   Icons.group_rounded,
                                   size: 14,
-                                  color: Theme.of(context).colorScheme.secondary.withOpacity(0.8),
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .secondary
+                                      .withOpacity(0.8),
                                 ),
                                 const SizedBox(width: 6),
                               ],
@@ -736,8 +786,11 @@ class _ConversationCard extends ConsumerWidget {
                                   overflow: TextOverflow.ellipsis,
                                   style: TextStyle(
                                     fontSize: 15,
-                                    fontWeight: hasUnread ? FontWeight.w600 : FontWeight.w500,
-                                    color: Theme.of(context).colorScheme.onSurface,
+                                    fontWeight: hasUnread
+                                        ? FontWeight.w600
+                                        : FontWeight.w500,
+                                    color:
+                                        Theme.of(context).colorScheme.onSurface,
                                   ),
                                 ),
                               ),
@@ -746,7 +799,10 @@ class _ConversationCard extends ConsumerWidget {
                                 Icon(
                                   Icons.push_pin_rounded,
                                   size: 14,
-                                  color: Theme.of(context).colorScheme.primary.withOpacity(0.7),
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .primary
+                                      .withOpacity(0.7),
                                 ),
                               ],
                               if (conversation.isMuted) ...[
@@ -754,7 +810,11 @@ class _ConversationCard extends ConsumerWidget {
                                 Icon(
                                   Icons.volume_off_rounded,
                                   size: 14,
-                                  color: Theme.of(context).colorScheme.onSurface.withAlpha(153).withOpacity(0.5),
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurface
+                                      .withAlpha(153)
+                                      .withOpacity(0.5),
                                 ),
                               ],
                             ],
@@ -767,7 +827,11 @@ class _ConversationCard extends ConsumerWidget {
                             fontSize: 12,
                             color: hasUnread
                                 ? Theme.of(context).colorScheme.secondary
-                                : Theme.of(context).colorScheme.onSurface.withAlpha(153).withOpacity(0.6),
+                                : Theme.of(context)
+                                    .colorScheme
+                                    .onSurface
+                                    .withAlpha(153)
+                                    .withOpacity(0.6),
                           ),
                         ),
                       ],
@@ -786,8 +850,15 @@ class _ConversationCard extends ConsumerWidget {
                                 style: TextStyle(
                                   fontSize: 13,
                                   color: hasUnread
-                                      ? Theme.of(context).colorScheme.onSurface.withAlpha(153)
-                                      : Theme.of(context).colorScheme.onSurface.withAlpha(153).withOpacity(0.6),
+                                      ? Theme.of(context)
+                                          .colorScheme
+                                          .onSurface
+                                          .withAlpha(153)
+                                      : Theme.of(context)
+                                          .colorScheme
+                                          .onSurface
+                                          .withAlpha(153)
+                                          .withOpacity(0.6),
                                 ),
                               ),
                             )
@@ -796,10 +867,16 @@ class _ConversationCard extends ConsumerWidget {
                           if (hasUnread) ...[
                             const SizedBox(width: 8),
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 3),
                               decoration: BoxDecoration(
                                 gradient: LinearGradient(
-                                  colors: [Theme.of(context).colorScheme.primary, Theme.of(context).colorScheme.primaryContainer],
+                                  colors: [
+                                    Theme.of(context).colorScheme.primary,
+                                    Theme.of(context)
+                                        .colorScheme
+                                        .primaryContainer
+                                  ],
                                 ),
                                 borderRadius: BorderRadius.circular(10),
                               ),
@@ -881,14 +958,17 @@ class _ConversationCard extends ConsumerWidget {
               ),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Divider(color: Theme.of(context).colorScheme.outlineVariant),
+                child: Divider(
+                    color: Theme.of(context).colorScheme.outlineVariant),
               ),
               _BottomSheetOption(
                 icon: Icons.delete_outline_rounded,
                 label: 'Delete',
                 isDestructive: true,
                 onTap: () {
-                  ref.read(chatActionsProvider).deleteConversation(conversation.id);
+                  ref
+                      .read(chatActionsProvider)
+                      .deleteConversation(conversation.id);
                   Navigator.pop(context);
                 },
               ),
@@ -905,11 +985,13 @@ class _ConversationAvatar extends StatelessWidget {
   final String title;
   final bool hasUnread;
   final bool isGroup;
+  final PresenceStatus? presence;
 
   const _ConversationAvatar({
     required this.title,
     required this.hasUnread,
     this.isGroup = false,
+    this.presence,
   });
 
   @override
@@ -923,9 +1005,21 @@ class _ConversationAvatar extends StatelessWidget {
             gradient: LinearGradient(
               colors: hasUnread
                   ? (isGroup
-                      ? [Theme.of(context).colorScheme.secondary, Theme.of(context).colorScheme.secondary.withOpacity(0.7)]
-                      : [Theme.of(context).colorScheme.primary, Theme.of(context).colorScheme.primaryContainer])
-                  : [Theme.of(context).colorScheme.outlineVariant, Theme.of(context).colorScheme.outlineVariant],
+                      ? [
+                          Theme.of(context).colorScheme.secondary,
+                          Theme.of(context)
+                              .colorScheme
+                              .secondary
+                              .withOpacity(0.7)
+                        ]
+                      : [
+                          Theme.of(context).colorScheme.primary,
+                          Theme.of(context).colorScheme.primaryContainer
+                        ])
+                  : [
+                      Theme.of(context).colorScheme.outlineVariant,
+                      Theme.of(context).colorScheme.outlineVariant
+                    ],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
             ),
@@ -936,20 +1030,30 @@ class _ConversationAvatar extends StatelessWidget {
                 ? Icon(
                     Icons.group_rounded,
                     size: 24,
-                    color: hasUnread ? Colors.white : Theme.of(context).colorScheme.onSurface.withAlpha(153),
+                    color: hasUnread
+                        ? Colors.white
+                        : Theme.of(context)
+                            .colorScheme
+                            .onSurface
+                            .withAlpha(153),
                   )
                 : Text(
                     title.isNotEmpty ? title[0].toUpperCase() : '?',
                     style: TextStyle(
                       fontSize: 20,
                       fontWeight: FontWeight.bold,
-                      color: hasUnread ? Colors.white : Theme.of(context).colorScheme.onSurface.withAlpha(153),
+                      color: hasUnread
+                          ? Colors.white
+                          : Theme.of(context)
+                              .colorScheme
+                              .onSurface
+                              .withAlpha(153),
                     ),
                   ),
           ),
         ),
-        // Online/Group indicator
-        if (!isGroup)
+        // Presence indicator for direct chats.
+        if (!isGroup && presence != null)
           Positioned(
             right: 0,
             bottom: 0,
@@ -957,7 +1061,7 @@ class _ConversationAvatar extends StatelessWidget {
               width: 14,
               height: 14,
               decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.secondary,
+                color: _presenceColor(context, presence!),
                 shape: BoxShape.circle,
                 border: Border.all(
                   color: Theme.of(context).colorScheme.surfaceContainer,
@@ -968,6 +1072,20 @@ class _ConversationAvatar extends StatelessWidget {
           ),
       ],
     );
+  }
+
+  Color _presenceColor(BuildContext context, PresenceStatus status) {
+    switch (status) {
+      case PresenceStatus.online:
+        return Theme.of(context).colorScheme.secondary;
+      case PresenceStatus.away:
+        return Colors.blue;
+      case PresenceStatus.busy:
+        return Colors.orange;
+      case PresenceStatus.offline:
+      case PresenceStatus.invisible:
+        return Colors.grey;
+    }
   }
 }
 
@@ -986,7 +1104,9 @@ class _BottomSheetOption extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = isDestructive ? Theme.of(context).colorScheme.error : Theme.of(context).colorScheme.onSurface;
+    final color = isDestructive
+        ? Theme.of(context).colorScheme.error
+        : Theme.of(context).colorScheme.onSurface;
 
     return ListTile(
       leading: Icon(icon, color: color),
@@ -1010,23 +1130,20 @@ class _NetworkStatusChip extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final connectionState = ref.watch(connectionNotifierProvider);
     final isInitialized = connectionState.initialized;
-    final isBootstrapConnected = connectionState.networkStatus.bootstrapConnected;
 
-    // Three states: Offline, Connecting, Online
+    // Online means the local network stack is running. The bootstrap ACK is
+    // still shown in details as a transport diagnostic.
     final Color statusColor;
     final String statusText;
     if (!isInitialized) {
       statusColor = Theme.of(context).colorScheme.onSurface.withAlpha(153);
       statusText = 'Offline';
-    } else if (!isBootstrapConnected) {
-      statusColor = Colors.orange;
-      statusText = 'Connecting';
     } else {
       statusColor = Theme.of(context).colorScheme.secondary;
       statusText = 'Online';
     }
 
-    final isConnected = isInitialized && isBootstrapConnected;
+    final isConnected = isInitialized;
 
     return GestureDetector(
       onTap: () => _showNetworkDetails(context, ref),
@@ -1047,12 +1164,17 @@ class _NetworkStatusChip extends ConsumerWidget {
               width: 8,
               height: 8,
               decoration: BoxDecoration(
-                color: isConnected ? Theme.of(context).colorScheme.secondary : statusColor,
+                color: isConnected
+                    ? Theme.of(context).colorScheme.secondary
+                    : statusColor,
                 shape: BoxShape.circle,
                 boxShadow: isConnected
                     ? [
                         BoxShadow(
-                          color: Theme.of(context).colorScheme.secondary.withOpacity(0.5),
+                          color: Theme.of(context)
+                              .colorScheme
+                              .secondary
+                              .withOpacity(0.5),
                           blurRadius: 6,
                           spreadRadius: 1,
                         ),
@@ -1078,7 +1200,8 @@ class _NetworkStatusChip extends ConsumerWidget {
   void _showNetworkDetails(BuildContext context, WidgetRef ref) {
     final connectionState = ref.read(connectionNotifierProvider);
     final isInitialized = connectionState.initialized;
-    final isBootstrapConnected = connectionState.networkStatus.bootstrapConnected;
+    final isBootstrapConnected =
+        connectionState.networkStatus.bootstrapConnected;
     final networkStatus = connectionState.networkStatus;
 
     // Determine status display
@@ -1089,17 +1212,13 @@ class _NetworkStatusChip extends ConsumerWidget {
       statusText = 'Disconnected';
       statusColor = Theme.of(context).colorScheme.onSurface.withAlpha(153);
       statusIcon = Icons.wifi_off_rounded;
-    } else if (!isBootstrapConnected) {
-      statusText = 'Connecting...';
-      statusColor = Colors.orange;
-      statusIcon = Icons.wifi_rounded;
     } else {
       statusText = 'Connected';
       statusColor = Theme.of(context).colorScheme.secondary;
       statusIcon = Icons.wifi_rounded;
     }
 
-    final isConnected = isInitialized && isBootstrapConnected;
+    final isConnected = isInitialized;
 
     showDialog(
       context: context,
@@ -1143,12 +1262,21 @@ class _NetworkStatusChip extends ConsumerWidget {
               label: 'Public IP',
               value: networkStatus.publicAddress ?? 'Unknown',
             ),
+            const SizedBox(height: 12),
+            _NetworkInfoRow(
+              label: 'Bootstrap ACK',
+              value: isBootstrapConnected ? 'Received' : 'Waiting',
+              valueColor: isBootstrapConnected ? null : Colors.orange,
+            ),
             if (!isConnected) ...[
               const SizedBox(height: 20),
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Theme.of(context).colorScheme.outlineVariant.withOpacity(0.5),
+                  color: Theme.of(context)
+                      .colorScheme
+                      .outlineVariant
+                      .withOpacity(0.5),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Row(
@@ -1156,7 +1284,10 @@ class _NetworkStatusChip extends ConsumerWidget {
                     Icon(
                       Icons.info_outline_rounded,
                       size: 18,
-                      color: Theme.of(context).colorScheme.secondary.withOpacity(0.8),
+                      color: Theme.of(context)
+                          .colorScheme
+                          .secondary
+                          .withOpacity(0.8),
                     ),
                     const SizedBox(width: 10),
                     Expanded(
@@ -1164,7 +1295,10 @@ class _NetworkStatusChip extends ConsumerWidget {
                         'Connect to the mesh network to start chatting securely.',
                         style: TextStyle(
                           fontSize: 13,
-                          color: Theme.of(context).colorScheme.onSurface.withAlpha(153),
+                          color: Theme.of(context)
+                              .colorScheme
+                              .onSurface
+                              .withAlpha(153),
                         ),
                       ),
                     ),
@@ -1185,10 +1319,12 @@ class _NetworkStatusChip extends ConsumerWidget {
               if (isConnected) {
                 ref.read(connectionActionsProvider).disconnect();
               } else {
-                final success = await ref.read(connectionActionsProvider).connect();
+                final success =
+                    await ref.read(connectionActionsProvider).connect();
                 if (context.mounted && !success) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Failed to connect to network')),
+                    const SnackBar(
+                        content: Text('Failed to connect to network')),
                   );
                 }
               }
@@ -1293,7 +1429,8 @@ class _QueueBanner extends ConsumerWidget {
               onPressed: () => ref.read(queueActionsProvider).flushQueue(),
               style: TextButton.styleFrom(
                 foregroundColor: Colors.orange.shade800,
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               ),
               child: const Text('Retry All'),
             ),

@@ -1,5 +1,3 @@
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../services/identity_service.dart';
 import '../services/log_service.dart';
 import '../utils/node_id_utils.dart';
 import '../models/connection_progress.dart';
@@ -27,7 +25,8 @@ class PeerConnectionState {
   bool get isConnected => CyxChatConnState.isActive(state);
 
   @override
-  String toString() => 'PeerConnectionState($peerId: $stateName, relayed: $isRelayed)';
+  String toString() =>
+      'PeerConnectionState($peerId: $stateName, relayed: $isRelayed)';
 }
 
 /// Network status information
@@ -83,6 +82,7 @@ class ConnectionProvider extends ChangeNotifier {
 
   // State
   bool _initialized = false;
+  String? _bootstrapServer;
   NetworkStatus _networkStatus = NetworkStatus();
   final Map<String, PeerConnectionState> _peerStates = {};
 
@@ -100,11 +100,13 @@ class ConnectionProvider extends ChangeNotifier {
 
   // Getters
   bool get initialized => _initialized;
-  bool get isOnline => _initialized && _networkStatus.bootstrapConnected;
+  String? get bootstrapServer => _bootstrapServer;
+  bool get isOnline => _initialized;
   bool get isConnectingToBootstrap =>
       _initialized && !_networkStatus.bootstrapConnected;
   NetworkStatus get networkStatus => _networkStatus;
-  Map<String, PeerConnectionState> get peerStates => Map.unmodifiable(_peerStates);
+  Map<String, PeerConnectionState> get peerStates =>
+      Map.unmodifiable(_peerStates);
 
   /// Stream of connection progress events for real-time UI updates
   Stream<PeerConnectionProgress> get progressStream => _progressStream.stream;
@@ -135,7 +137,13 @@ class ConnectionProvider extends ChangeNotifier {
     required String bootstrap,
     required List<int> localId,
   }) async {
-    if (_initialized) return true;
+    if (_initialized) {
+      if (_bootstrapServer == bootstrap) return true;
+      debugPrint(
+        'ConnectionProvider: bootstrap changed from $_bootstrapServer to $bootstrap, recreating connection',
+      );
+      shutdown();
+    }
 
     // Convert local ID to native pointer
     final localIdPtr = calloc<Uint8>(32);
@@ -146,11 +154,13 @@ class ConnectionProvider extends ChangeNotifier {
     try {
       final result = _bindings.connCreate(bootstrap, localIdPtr);
       if (result != CyxChatError.ok) {
-        debugPrint('Failed to create connection: ${_bindings.errorString(result)}');
+        debugPrint(
+            'Failed to create connection: ${_bindings.errorString(result)}');
         return false;
       }
 
       _initialized = true;
+      _bootstrapServer = bootstrap;
 
       // Setup progress callback for real-time UI feedback
       _setupProgressCallback();
@@ -182,7 +192,8 @@ class ConnectionProvider extends ChangeNotifier {
 
   /// Handle presence events from C library
   void _handlePresenceEvent(String peerId, bool online) {
-    debugPrint('PRESENCE-CALLBACK: peer=${peerId.substring(0, 16)}... online=$online');
+    debugPrint(
+        'PRESENCE-CALLBACK: peer=${peerId.substring(0, 16)}... online=$online');
 
     // Guard against callbacks after provider is disposed
     if (!_initialized) return;
@@ -273,34 +284,50 @@ class ConnectionProvider extends ChangeNotifier {
         log.info('CONN: Peer discovered $shortId...', source: 'Connection');
         break;
       case CyxChatConnEvent.announceSent:
-        log.info('CONN: ANNOUNCE sent to $shortId... (key exchange attempt ${retry + 1}/$maxRetry)', source: 'Connection');
+        log.info(
+            'CONN: ANNOUNCE sent to $shortId... (key exchange attempt ${retry + 1}/$maxRetry)',
+            source: 'Connection');
         break;
       case CyxChatConnEvent.announceRetry:
-        log.warning('CONN: ANNOUNCE retry $retry/$maxRetry to $shortId... (waiting for key)', source: 'Connection');
+        log.warning(
+            'CONN: ANNOUNCE retry $retry/$maxRetry to $shortId... (waiting for key)',
+            source: 'Connection');
         break;
       case CyxChatConnEvent.keyReceived:
-        log.info('CONN: KEY RECEIVED from $shortId... - can now send encrypted messages', source: 'Connection');
+        log.info(
+            'CONN: KEY RECEIVED from $shortId... - can now send encrypted messages',
+            source: 'Connection');
         break;
       case CyxChatConnEvent.holePunchStart:
-        log.info('CONN: HOLE PUNCH starting to $shortId... (attempting direct P2P)', source: 'Connection');
+        log.info(
+            'CONN: HOLE PUNCH starting to $shortId... (attempting direct P2P)',
+            source: 'Connection');
         break;
       case CyxChatConnEvent.connectedP2p:
-        log.info('CONN: ✓ DIRECT P2P to $shortId... - hole punch succeeded!', source: 'Connection');
+        log.info('CONN: ✓ DIRECT P2P to $shortId... - hole punch succeeded!',
+            source: 'Connection');
         break;
       case CyxChatConnEvent.relayFallback:
-        log.warning('CONN: RELAY FALLBACK for $shortId... - hole punch failed, using relay', source: 'Connection');
+        log.warning(
+            'CONN: RELAY FALLBACK for $shortId... - hole punch failed, using relay',
+            source: 'Connection');
         break;
       case CyxChatConnEvent.connectedRelay:
-        log.info('CONN: ✓ VIA RELAY to $shortId... - messages will go through bootstrap server', source: 'Connection');
+        log.info(
+            'CONN: ✓ VIA RELAY to $shortId... - messages will go through bootstrap server',
+            source: 'Connection');
         break;
       case CyxChatConnEvent.failed:
-        log.error('CONN: FAILED to $shortId... - ${CyxChatConnFail.message(failReason)}', source: 'Connection');
+        log.error(
+            'CONN: FAILED to $shortId... - ${CyxChatConnFail.message(failReason)}',
+            source: 'Connection');
         break;
       case CyxChatConnEvent.disconnected:
         log.info('CONN: DISCONNECTED from $shortId...', source: 'Connection');
         break;
       default:
-        log.debug('CONN: Event $event for $shortId... (retry $retry/$maxRetry)', source: 'Connection');
+        log.debug('CONN: Event $event for $shortId... (retry $retry/$maxRetry)',
+            source: 'Connection');
     }
   }
 
@@ -314,13 +341,14 @@ class ConnectionProvider extends ChangeNotifier {
     // race condition where callback fires after stream is closed
     _bindings.onConnProgress = null;
     _bindings.onPresence = null;
-    _initialized = false;  // Guard against callbacks in flight
+    _initialized = false; // Guard against callbacks in flight
 
     _bindings.connDestroy();
     _peerStates.clear();
     _progress.clear();
     _onlineStatus.clear();
     _networkStatus = NetworkStatus();
+    _bootstrapServer = null;
     notifyListeners();
   }
 
@@ -493,12 +521,9 @@ class ConnectionProvider extends ChangeNotifier {
       publicAddress: publicAddr,
       stunComplete: publicAddr != null,
       bootstrapConnected: bootstrapConnected,
-      activeConnections: _peerStates.values
-          .where((p) => p.isConnected)
-          .length,
-      relayConnections: _peerStates.values
-          .where((p) => p.isConnected && p.isRelayed)
-          .length,
+      activeConnections: _peerStates.values.where((p) => p.isConnected).length,
+      relayConnections:
+          _peerStates.values.where((p) => p.isConnected && p.isRelayed).length,
       upnpAvailable: upnpAvailable,
       upnpMappingActive: upnpMappingActive,
       upnpExternalPort: upnpExternalPort,
@@ -506,15 +531,19 @@ class ConnectionProvider extends ChangeNotifier {
     );
 
     // Log significant changes
-    if (newStatus.publicAddress != _networkStatus.publicAddress && newStatus.publicAddress != null) {
-      log.info('Public address discovered: ${newStatus.publicAddress}', source: 'Network');
+    if (newStatus.publicAddress != _networkStatus.publicAddress &&
+        newStatus.publicAddress != null) {
+      log.info('Public address discovered: ${newStatus.publicAddress}',
+          source: 'Network');
     }
 
     if (newStatus.activeConnections != _networkStatus.activeConnections) {
       final direct = newStatus.directConnections;
       final relay = newStatus.relayConnections;
       if (newStatus.activeConnections > 0) {
-        log.info('Connected peers: ${newStatus.activeConnections} ($direct direct, $relay relay)', source: 'Network');
+        log.info(
+            'Connected peers: ${newStatus.activeConnections} ($direct direct, $relay relay)',
+            source: 'Network');
       }
     }
 

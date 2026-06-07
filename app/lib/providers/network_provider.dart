@@ -211,6 +211,16 @@ class ConnectionActions {
     );
     final nodeIdBytes = NodeIdUtils.toBytesAsList(identity.nodeId);
 
+    if (connectionProvider.initialized &&
+        connectionProvider.bootstrapServer != bootstrap) {
+      log.info(
+        'Reinitializing network connection with bootstrap: $bootstrap',
+        source: 'Network',
+      );
+      disconnect();
+      await Future.delayed(const Duration(milliseconds: 100));
+    }
+
     log.info('Connecting to network...', source: 'Network');
     if (bootstrap.isNotEmpty) {
       log.info('Bootstrap server: $bootstrap', source: 'Network');

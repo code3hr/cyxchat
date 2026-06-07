@@ -53,6 +53,7 @@ Native routing pads UUID node IDs to 32 bytes, so server-side searches should in
    - Warm-connect known contacts in the background so opening a chat does not spend time establishing the route/key.
    - Done when the UI no longer reports a false stuck state while messages can flow.
    - Status: background warm-connect is implemented and pushed; chat header no longer shows a blocking "establishing connection" state while bootstrap is online and peer route warming is passive.
+   - Current fix in progress: app online state now follows the initialized local network stack, while bootstrap ACK is exposed as a diagnostic detail; reconnect no longer tears down a working native connection only because the ACK flag is false.
 
 3. Oracle server relay fix and redeploy
    - Audit the active Oracle `cyxchat-server.c` against the repo/source-of-truth server code.

@@ -76,9 +76,9 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     // Listen for incoming messages
     _setupMessageListener();
 
-    final conversationAsync = ref.watch(conversationProvider(widget.conversationId));
+    final conversationAsync =
+        ref.watch(conversationProvider(widget.conversationId));
     final messagesAsync = ref.watch(messagesProvider(widget.conversationId));
-
 
     // Get connection status for this peer
     final connectionProvider = ref.watch(connectionNotifierProvider);
@@ -124,7 +124,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                   connectionProvider.networkStatus.bootstrapConnected;
               statusText = bootstrapConnected
                   ? 'Online - warming secure route'
-                  : 'Offline - reconnecting';
+                  : 'Online - waiting for server ACK';
               statusColor = bootstrapConnected ? Colors.grey : Colors.orange;
               showSpinner = false;
             } else {
@@ -155,7 +155,10 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                       Flexible(
                         child: Text(
                           statusText,
-                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.normal, color: statusColor),
+                          style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.normal,
+                              color: statusColor),
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
@@ -283,7 +286,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
     // Background presence sync should warm peer routes. This is only a
     // last-resort fallback when the route/key is still missing at send time.
-    final conversationAsync = ref.read(conversationProvider(widget.conversationId));
+    final conversationAsync =
+        ref.read(conversationProvider(widget.conversationId));
     final conversation = conversationAsync.value;
     final peerId = conversation?.peerId ?? widget.conversationId;
 
@@ -291,7 +295,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       if (!connectionProvider.hasPeerKey(peerId)) {
         final progress = connectionProvider.getProgress(peerId);
         if (progress == null || !progress.isConnecting) {
-          debugPrint('ChatScreen: Ensuring connection to peer before sending...');
+          debugPrint(
+              'ChatScreen: Ensuring connection to peer before sending...');
           await connectionProvider.connect(peerId);
         } else {
           debugPrint('ChatScreen: Waiting for existing peer connection...');
@@ -314,7 +319,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Could not establish secure connection. Try again.'),
+              content:
+                  Text('Could not establish secure connection. Try again.'),
               backgroundColor: Colors.orange,
             ),
           );
@@ -332,7 +338,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         );
   }
 
-  Future<void> _startCall(BuildContext context, WidgetRef ref, {required bool video}) async {
+  Future<void> _startCall(BuildContext context, WidgetRef ref,
+      {required bool video}) async {
     // Check if video calls are enabled in settings
     final settings = ref.read(settingsNotifierProvider);
     if (video && !settings.videoCallsEnabled) {
@@ -341,7 +348,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     }
 
     // Get peer info from conversation
-    final conversationAsync = ref.read(conversationProvider(widget.conversationId));
+    final conversationAsync =
+        ref.read(conversationProvider(widget.conversationId));
     final conversation = conversationAsync.value;
     if (conversation == null || conversation.peerId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -355,15 +363,17 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     if (!hasSeenWarning) {
       final proceed = await _showCallPrivacyWarning(context, video);
       if (!proceed) return;
-      ref.read(settingsNotifierProvider.notifier).setHasSeenCallPrivacyWarning(true);
+      ref
+          .read(settingsNotifierProvider.notifier)
+          .setHasSeenCallPrivacyWarning(true);
     }
 
     // Start the call
     final success = await ref.read(callActionsProvider).startCall(
-      peerId: conversation.peerId!,
-      peerName: conversation.title,
-      video: video,
-    );
+          peerId: conversation.peerId!,
+          peerName: conversation.title,
+          video: video,
+        );
 
     if (success && context.mounted) {
       Navigator.of(context).push(
@@ -397,7 +407,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   }
 
   void _showSaveContactDialog(BuildContext context, WidgetRef ref) {
-    final conversationAsync = ref.read(conversationProvider(widget.conversationId));
+    final conversationAsync =
+        ref.read(conversationProvider(widget.conversationId));
     final conversation = conversationAsync.value;
 
     if (conversation == null || conversation.peerId == null) {
@@ -407,7 +418,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       return;
     }
 
-    final displayNameController = TextEditingController(text: conversation.title);
+    final displayNameController =
+        TextEditingController(text: conversation.title);
 
     showDialog(
       context: context,
@@ -446,23 +458,26 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               try {
                 // Add/update contact
                 await ref.read(contactActionsProvider).addContact(
-                  nodeId: conversation.peerId!,
-                  displayName: displayName.isEmpty ? null : displayName,
-                );
+                      nodeId: conversation.peerId!,
+                      displayName: displayName.isEmpty ? null : displayName,
+                    );
 
                 // Also update the conversation's display name directly
                 if (displayName.isNotEmpty) {
-                  await ref.read(chatActionsProvider).updateConversationDisplayName(
-                    widget.conversationId,
-                    displayName,
-                  );
+                  await ref
+                      .read(chatActionsProvider)
+                      .updateConversationDisplayName(
+                        widget.conversationId,
+                        displayName,
+                      );
                 }
 
                 if (ctx.mounted) {
                   Navigator.pop(ctx);
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
-                      content: Text('Contact saved${displayName.isNotEmpty ? " as $displayName" : ""}'),
+                      content: Text(
+                          'Contact saved${displayName.isNotEmpty ? " as $displayName" : ""}'),
                     ),
                   );
                 }
@@ -487,59 +502,60 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
 
   Future<bool> _showCallPrivacyWarning(BuildContext context, bool video) async {
     return await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Row(
-          children: [
-            const Icon(Icons.warning_amber, color: Colors.amber),
-            const SizedBox(width: 8),
-            Text(video ? 'Video Call Privacy' : 'Voice Call Privacy'),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Calls use direct P2P connections for real-time communication.',
-              style: TextStyle(fontWeight: FontWeight.w500),
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: Row(
+              children: [
+                const Icon(Icons.warning_amber, color: Colors.amber),
+                const SizedBox(width: 8),
+                Text(video ? 'Video Call Privacy' : 'Voice Call Privacy'),
+              ],
             ),
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.amber.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.amber.withOpacity(0.3)),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Calls use direct P2P connections for real-time communication.',
+                  style: TextStyle(fontWeight: FontWeight.w500),
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.amber.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.amber.withOpacity(0.3)),
+                  ),
+                  child: const Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('The peer you call can see your IP address.'),
+                      SizedBox(height: 4),
+                      Text('Calls are still end-to-end encrypted.'),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'This is necessary for low-latency real-time communication.',
+                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel'),
               ),
-              child: const Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('The peer you call can see your IP address.'),
-                  SizedBox(height: 4),
-                  Text('Calls are still end-to-end encrypted.'),
-                ],
+              ElevatedButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('I Understand, Continue'),
               ),
-            ),
-            const SizedBox(height: 12),
-            const Text(
-              'This is necessary for low-latency real-time communication.',
-              style: TextStyle(fontSize: 12, color: Colors.grey),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
+            ],
           ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('I Understand, Continue'),
-          ),
-        ],
-      ),
-    ) ?? false;
+        ) ??
+        false;
   }
 }
 
@@ -845,10 +861,12 @@ class _PatternPainter extends CustomPainter {
   void _paintGrid(Canvas canvas, Size size, Paint paint) {
     const spacing = 30.0;
     for (var x = 0.0; x < size.width; x += spacing) {
-      canvas.drawLine(Offset(x, 0), Offset(x, size.height), paint..strokeWidth = 0.3);
+      canvas.drawLine(
+          Offset(x, 0), Offset(x, size.height), paint..strokeWidth = 0.3);
     }
     for (var y = 0.0; y < size.height; y += spacing) {
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), paint..strokeWidth = 0.3);
+      canvas.drawLine(
+          Offset(0, y), Offset(size.width, y), paint..strokeWidth = 0.3);
     }
   }
 
@@ -943,7 +961,7 @@ class _MessageBubbleState extends ConsumerState<_MessageBubble> {
                         colorScheme: colorScheme,
                       )
                     else if (widget.message.type == MessageType.system &&
-                             widget.message.content.startsWith('GROUP_INVITE|'))
+                        widget.message.content.startsWith('GROUP_INVITE|'))
                       _GroupInviteMessageContent(
                         message: widget.message,
                         colorScheme: colorScheme,
@@ -973,7 +991,8 @@ class _MessageBubbleState extends ConsumerState<_MessageBubble> {
                         ),
                         if (isOutgoing) ...[
                           const SizedBox(width: 4),
-                          _buildStatusIndicator(context, colorScheme, isOutgoing),
+                          _buildStatusIndicator(
+                              context, colorScheme, isOutgoing),
                         ],
                       ],
                     ),
@@ -1000,9 +1019,9 @@ class _MessageBubbleState extends ConsumerState<_MessageBubble> {
 
     // Retry sending via chat actions
     final success = await ref.read(chatActionsProvider).retryMessage(
-      widget.message.id,
-      widget.conversationId,
-    );
+          widget.message.id,
+          widget.conversationId,
+        );
 
     if (context.mounted) {
       if (success) {
@@ -1095,13 +1114,15 @@ class _MessageBubbleState extends ConsumerState<_MessageBubble> {
         statusColor = Colors.blue.shade300; // Blue for read
         break;
       case MessageStatus.delivered:
-        statusColor = colorScheme.onPrimary.withOpacity(0.8); // White/light for delivered
+        statusColor =
+            colorScheme.onPrimary.withOpacity(0.8); // White/light for delivered
         break;
       case MessageStatus.sent:
         statusColor = colorScheme.onPrimary.withOpacity(0.6); // Dimmer for sent
         break;
       case MessageStatus.sending:
-        statusColor = colorScheme.onPrimary.withOpacity(0.5); // Dimmer for sending
+        statusColor =
+            colorScheme.onPrimary.withOpacity(0.5); // Dimmer for sending
         break;
       case MessageStatus.pending:
         statusColor = Colors.orange.shade300; // Orange for pending
@@ -1110,7 +1131,7 @@ class _MessageBubbleState extends ConsumerState<_MessageBubble> {
         statusColor = Colors.red.shade300; // Red for failed
         break;
     }
-    
+
     return Tooltip(
       message: message.status.label,
       child: Text(
@@ -1255,7 +1276,8 @@ class _MessageBubbleState extends ConsumerState<_MessageBubble> {
       ),
     );
 
-    final success = await ref.read(queueActionsProvider).retryMessage(messageId);
+    final success =
+        await ref.read(queueActionsProvider).retryMessage(messageId);
     if (mounted) {
       if (success) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1295,7 +1317,8 @@ class _MessageBubbleState extends ConsumerState<_MessageBubble> {
                 leading: const Icon(Icons.copy),
                 title: const Text('Copy'),
                 onTap: () {
-                  Clipboard.setData(ClipboardData(text: widget.message.content));
+                  Clipboard.setData(
+                      ClipboardData(text: widget.message.content));
                   Navigator.pop(sheetContext);
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
@@ -1316,7 +1339,8 @@ class _MessageBubbleState extends ConsumerState<_MessageBubble> {
                 ),
                 ListTile(
                   leading: const Icon(Icons.delete_outline, color: Colors.red),
-                  title: const Text('Delete', style: TextStyle(color: Colors.red)),
+                  title:
+                      const Text('Delete', style: TextStyle(color: Colors.red)),
                   onTap: () {
                     Navigator.pop(sheetContext);
                     _showDeleteConfirmation(context);
@@ -1363,10 +1387,10 @@ class _MessageBubbleState extends ConsumerState<_MessageBubble> {
 
                 Navigator.pop(dialogContext);
                 await ref.read(chatActionsProvider).editMessage(
-                  widget.message.id,
-                  widget.conversationId,
-                  newContent,
-                );
+                      widget.message.id,
+                      widget.conversationId,
+                      newContent,
+                    );
               },
               child: const Text('Save'),
             ),
@@ -1382,7 +1406,8 @@ class _MessageBubbleState extends ConsumerState<_MessageBubble> {
       builder: (dialogContext) {
         return AlertDialog(
           title: const Text('Delete Message'),
-          content: const Text('Are you sure you want to delete this message? This cannot be undone.'),
+          content: const Text(
+              'Are you sure you want to delete this message? This cannot be undone.'),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(dialogContext),
@@ -1392,9 +1417,9 @@ class _MessageBubbleState extends ConsumerState<_MessageBubble> {
               onPressed: () async {
                 Navigator.pop(dialogContext);
                 await ref.read(chatActionsProvider).deleteMessage(
-                  widget.message.id,
-                  widget.conversationId,
-                );
+                      widget.message.id,
+                      widget.conversationId,
+                    );
               },
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.red,
@@ -1461,10 +1486,12 @@ class _FileMessageContent extends ConsumerWidget {
 
     // Determine transfer state
     final isTransferring = transfer != null &&
-        (transfer.state == CyxChatFileState.sending || transfer.state == CyxChatFileState.receiving);
+        (transfer.state == CyxChatFileState.sending ||
+            transfer.state == CyxChatFileState.receiving);
     final isPaused = transfer?.state == CyxChatFileState.paused;
     final isFailed = transfer?.state == CyxChatFileState.failed;
-    final isCompleted = hasFileData || transfer?.state == CyxChatFileState.completed;
+    final isCompleted =
+        hasFileData || transfer?.state == CyxChatFileState.completed;
     final isPendingIncoming = !isOutgoing &&
         transfer != null &&
         transfer.state == CyxChatFileState.pending;
@@ -1491,7 +1518,9 @@ class _FileMessageContent extends ConsumerWidget {
                     Text(
                       filename,
                       style: TextStyle(
-                        color: isOutgoing ? colorScheme.onPrimary : colorScheme.onSurface,
+                        color: isOutgoing
+                            ? colorScheme.onPrimary
+                            : colorScheme.onSurface,
                         fontWeight: FontWeight.w500,
                       ),
                       overflow: TextOverflow.ellipsis,
@@ -1510,8 +1539,8 @@ class _FileMessageContent extends ConsumerWidget {
                     _buildStatusText(
                       transfer: transfer,
                       hasFileData: hasFileData,
-                      isRetrying: isRetrying &&
-                          message.status == MessageStatus.sending,
+                      isRetrying:
+                          isRetrying && message.status == MessageStatus.sending,
                     ),
                   ],
                 ),
@@ -1522,14 +1551,17 @@ class _FileMessageContent extends ConsumerWidget {
                 Icon(
                   Icons.download,
                   size: 20,
-                  color: isOutgoing ? colorScheme.onPrimary : colorScheme.primary,
+                  color:
+                      isOutgoing ? colorScheme.onPrimary : colorScheme.primary,
                 ),
               ],
             ],
           ),
 
           // Progress bar and controls (only during active transfer or paused)
-          if ((isTransferring || isPaused) && transfer != null && fileId != null) ...[
+          if ((isTransferring || isPaused) &&
+              transfer != null &&
+              fileId != null) ...[
             const SizedBox(height: 8),
             _buildProgressSection(
               context: context,
@@ -1548,7 +1580,8 @@ class _FileMessageContent extends ConsumerWidget {
     );
   }
 
-  Widget _buildFileIcon(bool isTransferring, bool isPaused, bool isFailed, bool isCompleted) {
+  Widget _buildFileIcon(
+      bool isTransferring, bool isPaused, bool isFailed, bool isCompleted) {
     IconData icon;
     Color? iconColor;
 
@@ -1589,7 +1622,9 @@ class _FileMessageContent extends ConsumerWidget {
           'Tap to save',
           style: TextStyle(
             fontSize: 11,
-            color: isOutgoing ? colorScheme.onPrimary.withOpacity(0.6) : colorScheme.primary,
+            color: isOutgoing
+                ? colorScheme.onPrimary.withOpacity(0.6)
+                : colorScheme.primary,
           ),
         );
       }
@@ -1624,7 +1659,9 @@ class _FileMessageContent extends ConsumerWidget {
       case CyxChatFileState.completed:
         statusText = hasFileData ? 'Tap to save' : 'Completed';
         statusColor = hasFileData
-            ? (isOutgoing ? colorScheme.onPrimary.withOpacity(0.6) : colorScheme.primary)
+            ? (isOutgoing
+                ? colorScheme.onPrimary.withOpacity(0.6)
+                : colorScheme.primary)
             : Colors.green;
         break;
       case CyxChatFileState.pending:
@@ -1657,7 +1694,8 @@ class _FileMessageContent extends ConsumerWidget {
       children: [
         FilledButton.icon(
           onPressed: () async {
-            final accepted = await ref.read(fileActionsProvider).acceptFile(fileId);
+            final accepted =
+                await ref.read(fileActionsProvider).acceptFile(fileId);
             if (!accepted && context.mounted) {
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(content: Text('Could not accept "$filename"')),
@@ -1670,7 +1708,8 @@ class _FileMessageContent extends ConsumerWidget {
         const SizedBox(width: 8),
         OutlinedButton.icon(
           onPressed: () async {
-            final rejected = await ref.read(fileActionsProvider).rejectFile(fileId);
+            final rejected =
+                await ref.read(fileActionsProvider).rejectFile(fileId);
             if (!rejected && context.mounted) {
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(content: Text('Could not decline "$filename"')),
@@ -1733,7 +1772,8 @@ class _FileMessageContent extends ConsumerWidget {
             _TransferControlButton(
               icon: Icons.close,
               tooltip: 'Cancel',
-              onPressed: () => _showCancelConfirmation(context, ref, fileId, transfer.filename),
+              onPressed: () => _showCancelConfirmation(
+                  context, ref, fileId, transfer.filename),
               isOutgoing: isOutgoing,
               colorScheme: colorScheme,
               isDestructive: true,
@@ -1988,7 +2028,8 @@ class _VoiceMessageContent extends ConsumerWidget {
                     GestureDetector(
                       onTap: () => ref.read(voicePlayerProvider).cycleSpeed(),
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
                           borderRadius: BorderRadius.circular(4),
                           color: isOutgoing
@@ -2108,7 +2149,8 @@ class _GroupInviteMessageContent extends ConsumerWidget {
                 label: const Text('Decline'),
               ),
               ElevatedButton.icon(
-                onPressed: () => _acceptInvite(context, ref, groupId, groupName),
+                onPressed: () =>
+                    _acceptInvite(context, ref, groupId, groupName),
                 icon: const Icon(Icons.check, size: 18),
                 label: const Text('Accept'),
                 style: ElevatedButton.styleFrom(
@@ -2175,7 +2217,9 @@ class _GroupInviteMessageContent extends ConsumerWidget {
     final success = await GroupService.instance.declineInvite(groupId);
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(success ? 'Invitation declined' : 'Failed to decline')),
+        SnackBar(
+            content:
+                Text(success ? 'Invitation declined' : 'Failed to decline')),
       );
     }
   }
@@ -2302,7 +2346,8 @@ class _MessageInputState extends ConsumerState<_MessageInput> {
       }
 
       // Get peer ID from conversation
-      final conversationAsync = ref.read(conversationProvider(widget.conversationId));
+      final conversationAsync =
+          ref.read(conversationProvider(widget.conversationId));
       final conversation = conversationAsync.value;
       if (conversation == null || conversation.peerId == null) {
         if (context.mounted) {
@@ -2328,10 +2373,10 @@ class _MessageInputState extends ConsumerState<_MessageInput> {
 
       // Send file via FileProvider
       final sendResult = await ref.read(fileActionsProvider).sendFile(
-        toPeerId: conversation.peerId!,
-        filename: file.name,
-        data: Uint8List.fromList(fileBytes),
-      );
+            toPeerId: conversation.peerId!,
+            filename: file.name,
+            data: Uint8List.fromList(fileBytes),
+          );
 
       setState(() => _isSendingFile = false);
 
@@ -2341,12 +2386,12 @@ class _MessageInputState extends ConsumerState<_MessageInput> {
             ? '$fileSize B'
             : '${(fileSize / 1024).toStringAsFixed(1)} KB';
         await ref.read(chatActionsProvider).sendFileMessage(
-          conversationId: widget.conversationId,
-          filename: file.name,
-          fileSize: sizeStr,
-          fileId: sendResult.fileId,
-          localPath: sendResult.localPath,
-        );
+              conversationId: widget.conversationId,
+              filename: file.name,
+              fileSize: sizeStr,
+              fileId: sendResult.fileId,
+              localPath: sendResult.localPath,
+            );
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -2379,7 +2424,8 @@ class _MessageInputState extends ConsumerState<_MessageInput> {
     debugPrint('VoiceMessage: Starting recording...');
     final recorder = ref.read(voiceRecorderProvider);
     final started = await recorder.startRecording();
-    debugPrint('VoiceMessage: Recording started=$started, state=${recorder.state}');
+    debugPrint(
+        'VoiceMessage: Recording started=$started, state=${recorder.state}');
     if (!started && mounted) {
       final error = recorder.errorMessage ?? 'Failed to start recording';
       debugPrint('VoiceMessage: Recording error: $error');
@@ -2395,7 +2441,8 @@ class _MessageInputState extends ConsumerState<_MessageInput> {
     final recorder = ref.read(voiceRecorderProvider);
     final voiceMessage = await recorder.stopRecording();
 
-    debugPrint('VoiceMessage: stopRecording returned ${voiceMessage != null ? "${voiceMessage.sizeBytes} bytes, ${voiceMessage.duration.inSeconds}s" : "null"}');
+    debugPrint(
+        'VoiceMessage: stopRecording returned ${voiceMessage != null ? "${voiceMessage.sizeBytes} bytes, ${voiceMessage.duration.inSeconds}s" : "null"}');
 
     if (voiceMessage == null) {
       if (mounted) {
@@ -2408,37 +2455,42 @@ class _MessageInputState extends ConsumerState<_MessageInput> {
     if (!mounted) return;
 
     // Get peer ID from conversation
-    final conversationAsync = ref.read(conversationProvider(widget.conversationId));
+    final conversationAsync =
+        ref.read(conversationProvider(widget.conversationId));
     final conversation = conversationAsync.value;
-    debugPrint('VoiceMessage: conversation=${conversation?.id}, peerId=${conversation?.peerId}');
+    debugPrint(
+        'VoiceMessage: conversation=${conversation?.id}, peerId=${conversation?.peerId}');
 
     if (conversation == null || conversation.peerId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Cannot send voice message: peer not found')),
+        const SnackBar(
+            content: Text('Cannot send voice message: peer not found')),
       );
       return;
     }
 
     // Send voice message via file transfer
-    debugPrint('VoiceMessage: Sending ${voiceMessage.sizeBytes} bytes to ${conversation.peerId}');
+    debugPrint(
+        'VoiceMessage: Sending ${voiceMessage.sizeBytes} bytes to ${conversation.peerId}');
     final sendResult = await ref.read(fileActionsProvider).sendFile(
-      toPeerId: conversation.peerId!,
-      filename: voiceMessage.filename,
-      data: voiceMessage.data,
-      mimeType: 'audio/mp4',
-    );
+          toPeerId: conversation.peerId!,
+          filename: voiceMessage.filename,
+          data: voiceMessage.data,
+          mimeType: 'audio/mp4',
+        );
 
-    debugPrint('VoiceMessage: sendResult success=${sendResult.success}, fileId=${sendResult.fileId}, error=${sendResult.error}');
+    debugPrint(
+        'VoiceMessage: sendResult success=${sendResult.success}, fileId=${sendResult.fileId}, error=${sendResult.error}');
 
     if (sendResult.success && sendResult.fileId != null) {
       // Save audio message to conversation
       await ref.read(chatActionsProvider).sendAudioMessage(
-        conversationId: widget.conversationId,
-        fileId: sendResult.fileId!,
-        duration: voiceMessage.duration.inSeconds,
-        filename: voiceMessage.filename,
-        localPath: sendResult.localPath,
-      );
+            conversationId: widget.conversationId,
+            fileId: sendResult.fileId!,
+            duration: voiceMessage.duration.inSeconds,
+            filename: voiceMessage.filename,
+            localPath: sendResult.localPath,
+          );
       debugPrint('VoiceMessage: Audio message saved to conversation');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -2527,7 +2579,8 @@ class _MessageInputState extends ConsumerState<_MessageInput> {
                         maxLines: null,
                         onSubmitted: (_) => widget.onSend(),
                         // Incognito keyboard - request keyboard to not learn from typing
-                        enableIMEPersonalizedLearning: !settings.incognitoKeyboard,
+                        enableIMEPersonalizedLearning:
+                            !settings.incognitoKeyboard,
                       );
                     },
                   ),
@@ -2538,8 +2591,7 @@ class _MessageInputState extends ConsumerState<_MessageInput> {
                 icon: const Icon(Icons.send),
                 onPressed: widget.onSend,
               ),
-            if (showRecorder)
-              recorderControl,
+            if (showRecorder) recorderControl,
           ],
         ),
       ),
