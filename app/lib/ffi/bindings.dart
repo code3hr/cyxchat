@@ -813,7 +813,7 @@ class CyxChatBindings {
     // Close previous callback if exists to prevent memory leak on re-init
     _onConnProgress?.close();
 
-    _onConnProgress = NativeCallable<_ConnProgressCallback>.listener(
+    _onConnProgress = NativeCallable<_ConnProgressCallback>.isolateLocal(
       _handleConnProgress,
     );
     _native.cyxchat_conn_set_on_progress(
@@ -875,7 +875,7 @@ class CyxChatBindings {
     // Close previous callback if exists
     _onPresence?.close();
 
-    _onPresence = NativeCallable<_PresenceCallback>.listener(
+    _onPresence = NativeCallable<_PresenceCallback>.isolateLocal(
       _handlePresence,
     );
     _native.cyxchat_conn_set_presence_callback(
