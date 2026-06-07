@@ -4,13 +4,17 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/contact.dart';
 import '../services/database_service.dart';
 import '../utils/node_id_utils.dart';
-import 'connection_provider.dart';
 import 'conversation_provider.dart';
 import 'network_provider.dart';
 
 /// Provider for all contacts
 final contactsProvider = FutureProvider<List<Contact>>((ref) async {
   return ContactService.instance.getContacts();
+});
+
+/// Provider for one contact by node ID
+final contactProvider = FutureProvider.family<Contact?, String>((ref, nodeId) {
+  return ContactService.instance.getContact(nodeId);
 });
 
 /// Provider for contact actions
@@ -185,7 +189,8 @@ class ContactActions {
   Future<void> updateDisplayName(String nodeId, String? displayName) async {
     await ContactService.instance.updateDisplayName(nodeId, displayName);
     _ref.invalidate(contactsProvider);
-    _ref.invalidate(conversationsProvider); // Refresh conversations with new name
+    _ref.invalidate(
+        conversationsProvider); // Refresh conversations with new name
   }
 
   /// Toggle verified status
@@ -218,21 +223,24 @@ class ContactActions {
       statusText: statusText,
     );
     _ref.invalidate(contactsProvider);
+    _ref.invalidate(contactProvider(nodeId));
   }
 
   /// Query presence for a single contact
   void queryPresence(String nodeId) {
     final connProvider = _ref.read(connectionNotifierProvider);
     connProvider.queryPresence(nodeId);
-    debugPrint('ContactActions: Querying presence for ${nodeId.substring(0, 16)}...');
+    debugPrint(
+        'ContactActions: Querying presence for ${nodeId.substring(0, 16)}...');
   }
 
   /// Query presence for all contacts
   Future<void> queryAllPresence() async {
     final contacts = await ContactService.instance.getContacts();
     final connProvider = _ref.read(connectionNotifierProvider);
-    
-    debugPrint('ContactActions: Querying presence for ${contacts.length} contacts');
+
+    debugPrint(
+        'ContactActions: Querying presence for ${contacts.length} contacts');
     for (final contact in contacts) {
       connProvider.queryPresence(contact.nodeId);
       // Small delay to avoid flooding the server
@@ -318,6 +326,11 @@ class PresenceSync {
 
     // Invalidate provider to refresh UI
     _ref.invalidate(contactsProvider);
+    _ref.invalidate(contactProvider(peerId));
+    final displayId = NodeIdUtils.toDisplayFormat(peerId);
+    if (displayId != peerId) {
+      _ref.invalidate(contactProvider(displayId));
+    }
 
     if (online) {
       unawaited(_warmConnect(peerId));
