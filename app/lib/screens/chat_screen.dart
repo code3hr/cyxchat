@@ -120,10 +120,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
               statusText = 'Secured (direct P2P)';
               statusColor = Colors.green;
             } else if (peerId != null && connectionProvider.initialized) {
-              // No progress yet but peer exists - still connecting
-              statusText = 'Establishing secure connection...';
-              statusColor = Colors.orange;
-              showSpinner = true;
+              final bootstrapConnected =
+                  connectionProvider.networkStatus.bootstrapConnected;
+              statusText = bootstrapConnected
+                  ? 'Online - warming secure route'
+                  : 'Offline - reconnecting';
+              statusColor = bootstrapConnected ? Colors.grey : Colors.orange;
+              showSpinner = false;
             } else {
               statusText = '';
               statusColor = Colors.grey;
