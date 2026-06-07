@@ -26,6 +26,7 @@ Native routing pads UUID node IDs to 32 bytes, so server-side searches should in
 - When a call drops, the app can show a blank screen instead of returning to a valid chat/home/call-ended state.
 - Large file transfers still do not complete even after the receiver accepts.
 - Hold-to-record audio button is not active.
+- Voice recorder in `v1.2.3` can start on tap but has no clear tap-to-stop path.
 - Architecture is hard to reason about across bootstrap, relay, chat ACKs, notifications, and WebRTC signaling.
 - Security needs proof: determine whether Oracle relay/server or a network observer can capture plaintext messages, or only metadata/encrypted packets.
 
@@ -96,6 +97,7 @@ Native routing pads UUID node IDs to 32 bytes, so server-side searches should in
    - Trace recorder permission, press/hold gesture state, recorder initialization, active recording flag, and audio file creation.
    - Fix the smallest broken UI/provider boundary.
    - Done when hold-to-record becomes active, records audio, stores metadata, and sends or reports a precise permission/device error.
+   - Status: recorder widget now supports tap-to-start/tap-to-stop and still preserves hold-to-record. Active state shows a stop icon instead of another mic icon. Focused widget test passes.
 
 9. Security validation
    - Capture traffic on the Oracle server and/or PC while sending a known test phrase.

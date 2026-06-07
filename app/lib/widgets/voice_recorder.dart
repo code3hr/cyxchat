@@ -38,6 +38,7 @@ class VoiceRecorder extends StatefulWidget {
 class _VoiceRecorderState extends State<VoiceRecorder>
     with SingleTickerProviderStateMixin {
   bool _isRecording = false;
+  bool _isStarting = false;
   int _recordingDurationMs = 0;
   Timer? _durationTimer;
   Offset _dragOffset = Offset.zero;
@@ -74,6 +75,7 @@ class _VoiceRecorderState extends State<VoiceRecorder>
 
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
+      onTap: _toggleRecording,
       onLongPressStart: (_) => _startRecording(),
       onLongPressEnd: (_) {
         if (_isRecording) {
@@ -174,7 +176,7 @@ class _VoiceRecorderState extends State<VoiceRecorder>
                   ],
                 ),
                 child: const Icon(
-                  Icons.mic,
+                  Icons.stop,
                   color: Colors.white,
                 ),
               ),
@@ -186,7 +188,8 @@ class _VoiceRecorderState extends State<VoiceRecorder>
   }
 
   Future<void> _startRecording() async {
-    if (_isRecording) return;
+    if (_isRecording || _isStarting) return;
+    _isStarting = true;
     bool canStart = true;
     if (widget.onRecordingStart != null) {
       try {
@@ -195,6 +198,7 @@ class _VoiceRecorderState extends State<VoiceRecorder>
         canStart = false;
       }
     }
+    _isStarting = false;
     if (!canStart || !mounted) return;
 
     _setRecordingState(true);
@@ -218,7 +222,16 @@ class _VoiceRecorderState extends State<VoiceRecorder>
     });
   }
 
+  void _toggleRecording() {
+    if (_isRecording) {
+      _stopRecording();
+    } else {
+      unawaited(_startRecording());
+    }
+  }
+
   void _stopRecording() {
+    if (!_isRecording) return;
     _durationTimer?.cancel();
     _pulseController.stop();
     _pulseController.reset();
