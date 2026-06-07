@@ -171,10 +171,13 @@ static void dns_ctx_broadcast(cyxchat_dns_ctx_t *ctx, const uint8_t *data, size_
 static uint64_t get_time_ms(void)
 {
 #ifdef _WIN32
-    return GetTickCount64();
+    FILETIME ft;
+    GetSystemTimeAsFileTime(&ft);
+    uint64_t t = ((uint64_t)ft.dwHighDateTime << 32) | ft.dwLowDateTime;
+    return (t - 116444736000000000ULL) / 10000;
 #else
     struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
+    clock_gettime(CLOCK_REALTIME, &ts);
     return (uint64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 #endif
 }

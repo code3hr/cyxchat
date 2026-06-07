@@ -169,10 +169,13 @@ static void fire_progress_event(cyxchat_conn_ctx_t *ctx,
 static uint64_t get_time_ms(void)
 {
 #ifdef _WIN32
-    return GetTickCount64();
+    FILETIME ft;
+    GetSystemTimeAsFileTime(&ft);
+    uint64_t t = ((uint64_t)ft.dwHighDateTime << 32) | ft.dwLowDateTime;
+    return (t - 116444736000000000ULL) / 10000;
 #else
     struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
+    clock_gettime(CLOCK_REALTIME, &ts);
     return (uint64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 #endif
 }
@@ -318,12 +321,21 @@ static void on_relay_data(cyxchat_relay_ctx_t *relay_ctx,
     /* Update peer connection state */
     cyxchat_peer_conn_t *peer = find_peer_conn(ctx, from);
     int was_connecting = peer && peer->state == CYXCHAT_CONN_CONNECTING;
+    if (!peer) {
+        peer = alloc_peer_conn(ctx);
+        if (peer) {
+            peer->peer_id = *from;
+            peer->state = CYXCHAT_CONN_DISCONNECTED;
+        }
+    }
     if (peer) {
         peer->last_activity = get_time_ms();
         peer->bytes_received += (uint32_t)len;
 
-        /* Mark as relayed — data arrived via relay path */
-        if (!peer->is_relayed) {
+        /* Relay traffic is enough to revive stale disconnected relay state. */
+        if (!peer->is_relayed ||
+            (peer->state != CYXCHAT_CONN_RELAYING &&
+             peer->state != CYXCHAT_CONN_CONNECTED)) {
             peer->is_relayed = 1;
             set_peer_state(ctx, peer, CYXCHAT_CONN_RELAYING);
         }
@@ -375,6 +387,17 @@ static void on_relay_data(cyxchat_relay_ctx_t *relay_ctx,
             }
             send_announce_to_peer(ctx, from);
         }
+    }
+
+    /* Relay-delivered onion payloads must enter the same decrypt/dispatch path
+     * as direct transport onion payloads. Otherwise relay traffic reaches the
+     * socket but never becomes a chat message in Dart. */
+    if (len > 0 && ctx->onion && data[0] == CYXWIZ_MSG_ONION_DATA) {
+        cyxwiz_error_t err = cyxwiz_onion_handle_message(ctx->onion, from, data, len);
+        if (err != CYXWIZ_OK && err != CYXWIZ_ERR_RATE_LIMITED) {
+            CYXWIZ_DEBUG("Relayed onion message handling failed: %d", err);
+        }
+        return;
     }
 
     /* Forward to application callback */
@@ -722,11 +745,14 @@ static void on_peer_key_received(const cyxwiz_node_id_t *peer_id,
         if (conn) {
             memcpy(conn->pubkey, peer_pubkey, 32);
             conn->has_pubkey = 1;
+            conn->last_activity = now;
+            conn->announce_retries = 0;
         }
 
         /* Set peer to connected/relaying state after successful key exchange.
          * Preserve relay state if already set. */
-        if (conn && conn->state == CYXCHAT_CONN_CONNECTING) {
+        if (conn && conn->state != CYXCHAT_CONN_CONNECTED &&
+            conn->state != CYXCHAT_CONN_RELAYING) {
             /* If relay is active for this peer, mark as relaying */
             if (conn->is_relayed) {
                 set_peer_state(ctx, conn, CYXCHAT_CONN_RELAYING);
@@ -1222,6 +1248,9 @@ int cyxchat_conn_poll(cyxchat_conn_ctx_t *ctx, uint64_t now_ms)
                 fire_progress_event(ctx, &peer->peer_id, CYXCHAT_CONN_EVENT_FAILED,
                                     peer->announce_retries, CYXCHAT_ANNOUNCE_MAX_RETRIES,
                                     CYXCHAT_CONN_FAIL_KEY_TIMEOUT);
+                set_peer_state(ctx, peer, CYXCHAT_CONN_DISCONNECTED);
+                peer->is_relayed = 0;
+                peer->last_announce_sent = now_ms;
             }
         }
     }
