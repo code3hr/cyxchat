@@ -52,6 +52,7 @@ Native routing pads UUID node IDs to 32 bytes, so server-side searches should in
    - Reconnect only when actually offline, after app resume, or after network recovery; do not repeatedly reset established connections.
    - Warm-connect known contacts in the background so opening a chat does not spend time establishing the route/key.
    - Done when the UI no longer reports a false stuck state while messages can flow.
+   - Status: background warm-connect is implemented and pushed; chat header no longer shows a blocking "establishing connection" state while bootstrap is online and peer route warming is passive.
 
 3. Oracle server relay fix and redeploy
    - Audit the active Oracle `cyxchat-server.c` against the repo/source-of-truth server code.
@@ -59,6 +60,7 @@ Native routing pads UUID node IDs to 32 bytes, so server-side searches should in
    - Add server logging that shows message hash/route/queue/ACK outcomes without logging plaintext payloads.
    - Build locally or on Oracle, upload the new `cyxchat-server`, restart the systemd service, and verify UDP `7777` is bound.
    - Done when A/B logs show stable registration, no false offline churn during active use, and queued messages drain predictably.
+   - Status: local source-of-truth server was patched, pushed in the parent repo, deployed to Oracle, restarted, and verified active on UDP `7777`.
 
 4. Message-delivery fix
    - Prove whether lost messages are failing before send, at native retry, at relay/direct route, at ACK clearing, or at receiver polling/persistence.
@@ -97,7 +99,11 @@ Native routing pads UUID node IDs to 32 bytes, so server-side searches should in
 
 ## Current Next Step
 
-- Validate the first Oracle server patch with live Android traffic:
+- Current shipped fixes:
+  - `cc1f798` warmed active contacts in the background.
+  - `1c0f5ef` tracked background contact warm connection.
+  - `a31ed01` fixed passive chat connection status so bootstrap-online route warming does not look stuck.
+  - Parent repo `6b69a3e` fixed CyxChat relay peer liveness in `D:\Dev\conspiracy\tools\cyxchat-server.c`.
   - Server source of truth on this PC: `D:\Dev\conspiracy\tools\cyxchat-server.c`.
   - Deployed to Oracle on 2026-06-07.
   - Changed peer expiry from 5 seconds to 180 seconds.
@@ -107,7 +113,11 @@ Native routing pads UUID node IDs to 32 bytes, so server-side searches should in
   - Oracle service verified active on UDP `7777` after restart.
   - Oracle backups: `/home/ubuntu/cyxchat-server..bak` and `/home/ubuntu/cyxchat-server.c..bak`.
   - Second deployment backup: `/home/ubuntu/cyxchat-server.20260607055950.bak` and `/home/ubuntu/cyxchat-server.c.20260607055950.bak`.
-  - Next live check: send A -> B and B -> A while tailing `/home/ubuntu/server.log`; confirm no false peer expiry during active use.
+
+- Next fix target:
+  - Validate live bidirectional messaging with Android devices A and B while tailing `/home/ubuntu/server.log`.
+  - Confirm A -> B and B -> A each show send, relay/direct route, receive, persistence/display, and ACK.
+  - If one direction still fails, fix the smallest broken layer in Workstream 4 before moving to notifications, calls, large files, or recorder polish.
 
 ## Done Criteria For Each Fix
 
