@@ -263,6 +263,7 @@ class PresenceSync {
   PresenceSync(this._ref) {
     _setupListener();
     _startPeriodicRefresh();
+    unawaited(warmOnlineContacts());
   }
 
   void _setupListener() {
@@ -296,6 +297,7 @@ class PresenceSync {
         // Small delay to avoid flooding the server
         await Future.delayed(const Duration(milliseconds: 100));
       }
+      await warmOnlineContacts(contacts: contacts);
     } catch (e) {
       debugPrint('PresenceSync: Error querying presence: $e');
     }
@@ -341,6 +343,22 @@ class PresenceSync {
     final result = await connProvider.connect(peerId);
     debugPrint(
         'PresenceSync: Warm connect to ${peerId.substring(0, 16)}... result=$result');
+  }
+
+  Future<void> warmOnlineContacts({List<Contact>? contacts}) async {
+    final connProvider = _ref.read(connectionNotifierProvider);
+    if (!connProvider.isOnline) return;
+
+    final targetContacts =
+        contacts ?? await ContactService.instance.getContacts();
+    final onlineContacts = targetContacts.where(
+      (contact) => contact.isOnline && !contact.blocked,
+    );
+
+    for (final contact in onlineContacts) {
+      await _warmConnect(contact.nodeId);
+      await Future.delayed(const Duration(milliseconds: 100));
+    }
   }
 
   /// Enable or disable presence sync

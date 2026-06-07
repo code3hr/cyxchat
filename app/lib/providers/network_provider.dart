@@ -388,8 +388,10 @@ class ConnectionActions {
     // Initialize presence sync if enabled
     if (settings.presenceSyncEnabled) {
       try {
-        // Initialize presence sync provider (sets up callback)
+        // Initialize presence sync provider (sets up callback) and warm any
+        // contacts already marked online from the last presence refresh.
         final presenceSync = _ref.read(presenceSyncProvider);
+        unawaited(presenceSync.warmOnlineContacts());
         log.info('Presence sync initialized', source: 'Network');
 
         // Wait for server to be ready before querying presence
@@ -589,6 +591,7 @@ class ConnectionActions {
             'Server ready ($healthyCount/$serverCount healthy), querying presence',
             source: 'Network');
         await _ref.read(contactActionsProvider).queryAllPresence();
+        await _ref.read(presenceSyncProvider).warmOnlineContacts();
         log.info('Queried presence for all contacts', source: 'Network');
         return;
       }
@@ -598,6 +601,7 @@ class ConnectionActions {
         log.warning('Server verification slow, querying presence anyway',
             source: 'Network');
         await _ref.read(contactActionsProvider).queryAllPresence();
+        await _ref.read(presenceSyncProvider).warmOnlineContacts();
         return;
       }
     }
@@ -619,14 +623,15 @@ class ConnectionActions {
         log.info('Network restored - triggering reconnection',
             source: 'Network');
         // Use retry logic for robust reconnection
-        connectWithRetry();
+        unawaited(_reconnectAndWarmContacts());
       } else if (!connectionProvider.networkStatus.bootstrapConnected) {
         log.info('Network restored - re-registering with bootstrap',
             source: 'Network');
         // Already initialized but lost bootstrap connection
-        connectWithRetry();
+        unawaited(_reconnectAndWarmContacts());
       } else {
         log.debug('Network restored but already connected', source: 'Network');
+        unawaited(_warmContactsIfEnabled());
       }
     };
 
@@ -639,6 +644,21 @@ class ConnectionActions {
     _networkMonitor.onNetworkRestored = null;
     _networkMonitor.stopMonitoring();
     _autoReconnectEnabled = false;
+  }
+
+  Future<void> _reconnectAndWarmContacts() async {
+    final connected = await connectWithRetry();
+    if (connected) {
+      await _warmContactsIfEnabled();
+    }
+  }
+
+  Future<void> _warmContactsIfEnabled() async {
+    final settings = _ref.read(settingsProvider);
+    if (!settings.presenceSyncEnabled) return;
+    final presenceSync = _ref.read(presenceSyncProvider);
+    await presenceSync.refresh();
+    await presenceSync.warmOnlineContacts();
   }
 
   void disconnect() {

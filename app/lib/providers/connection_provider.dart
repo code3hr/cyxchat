@@ -328,6 +328,11 @@ class ConnectionProvider extends ChangeNotifier {
   Future<int> connect(String peerIdHex) async {
     if (!_initialized) return CyxChatError.errNull;
 
+    if (hasPeerKey(peerIdHex)) return CyxChatError.ok;
+
+    final progress = getProgress(peerIdHex);
+    if (progress != null && progress.isConnecting) return CyxChatError.ok;
+
     final peerId = NodeIdUtils.toBytesAsList(peerIdHex);
     final peerIdPtr = calloc<Uint8>(32);
 

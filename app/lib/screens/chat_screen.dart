@@ -7,7 +7,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:file_picker/file_picker.dart';
 import '../providers/conversation_provider.dart';
-import '../providers/connection_provider.dart';
 import '../providers/network_provider.dart';
 import '../providers/file_provider.dart';
 import '../providers/voice_provider.dart';
@@ -39,7 +38,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
   final _textController = TextEditingController();
   final _scrollController = ScrollController();
   String? _replyToId;
-  bool _hasPreConnected = false;
 
   @override
   void initState() {
@@ -50,32 +48,7 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       // while the chat screen was not active
       ref.invalidate(messagesProvider(widget.conversationId));
       ref.read(chatActionsProvider).markAsRead(widget.conversationId);
-      // Pre-connect triggered when conversation loads (see build)
-      // _preConnectToPeer() called from build when peerId available
     });
-  }
-
-  /// Pre-connect to peer to establish connection before sending
-  void _preConnectToPeer() async {
-    if (_hasPreConnected) return;
-    _hasPreConnected = true;
-
-    final connectionProvider = ref.read(connectionNotifierProvider);
-    if (!connectionProvider.initialized) return;
-
-    // Load conversation to get the actual peer ID (not the conversation DB id)
-    final conv = await ChatService.instance.getConversation(widget.conversationId);
-    final peerId = conv?.peerId;
-    if (peerId != null && peerId.isNotEmpty) {
-      final progress = connectionProvider.getProgress(peerId);
-      if (connectionProvider.hasPeerKey(peerId) ||
-          (progress != null && progress.isConnecting)) {
-        return;
-      }
-      final result = await connectionProvider.connect(peerId);
-      final shortId = peerId.length > 16 ? peerId.substring(0, 16) : peerId;
-      debugPrint('Pre-connect to $shortId...: $result');
-    }
   }
 
   /// Listen for incoming messages and refresh UI
@@ -116,9 +89,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
           data: (conv) {
             // Use the actual peer ID from the conversation, not the conversation ID
             final peerId = conv?.peerId;
-
-            // Pre-connect to peer (loads conversation internally)
-            _preConnectToPeer();
 
             // Get connection progress for real-time feedback
             final progress = peerId != null && connectionProvider.initialized
@@ -308,7 +278,8 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       await Future.delayed(const Duration(seconds: 2));
     }
 
-    // Pre-connect to peer before sending (ensures route is established)
+    // Background presence sync should warm peer routes. This is only a
+    // last-resort fallback when the route/key is still missing at send time.
     final conversationAsync = ref.read(conversationProvider(widget.conversationId));
     final conversation = conversationAsync.value;
     final peerId = conversation?.peerId ?? widget.conversationId;
