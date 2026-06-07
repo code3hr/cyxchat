@@ -44,8 +44,12 @@ function Write-TestResult($name, $passed, $message = "") {
 
 function New-NodeId {
     $bytes = New-Object byte[] 32
-    $random = New-Object System.Random
-    $random.NextBytes($bytes)
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        $rng.GetBytes($bytes)
+    } finally {
+        $rng.Dispose()
+    }
     return $bytes
 }
 
@@ -86,6 +90,41 @@ function Receive-Response($client) {
     } catch {
         return @{ Success = $false; Error = $_.Exception.Message }
     }
+}
+
+function Receive-ExpectedPayload($client, $expectedText, $timeoutMs = 5000) {
+    $originalTimeout = $client.Client.ReceiveTimeout
+    $client.Client.ReceiveTimeout = 500
+    $deadline = [DateTime]::UtcNow.AddMilliseconds($timeoutMs)
+    $last = ""
+
+    try {
+        while ([DateTime]::UtcNow -lt $deadline) {
+            $resp = Receive-Response $client
+            if (-not $resp.Success) {
+                continue
+            }
+
+            $text = [System.Text.Encoding]::UTF8.GetString($resp.Data)
+            if ($text -eq $expectedText) {
+                return @{ Success = $true; Data = $resp.Data; Type = $resp.Type }
+            }
+
+            if ($resp.Type -eq $MSG_REGISTER_ACK -or $resp.Type -eq $MSG_PEER_LIST) {
+                $last = "Skipped control packet type 0x$($resp.Type.ToString('X2'))"
+                continue
+            }
+
+            $last = "Expected '$expectedText', got type 0x$($resp.Type.ToString('X2'))"
+        }
+    } finally {
+        $client.Client.ReceiveTimeout = $originalTimeout
+    }
+
+    if (-not $last) {
+        $last = "Timed out waiting for '$expectedText'"
+    }
+    return @{ Success = $false; Error = $last }
 }
 
 # ============================================================
@@ -282,18 +321,12 @@ try {
     Write-Host "  Sent RELAY_DATA from A to B via server" -ForegroundColor Gray
 
     # Try to receive on B (server sends raw payload, not wrapped)
-    $relayResp = Receive-Response $relayClientB
+    $relayResp = Receive-ExpectedPayload $relayClientB "Relay test message" $TIMEOUT_MS
 
     if ($relayResp.Success) {
-        $receivedText = [System.Text.Encoding]::UTF8.GetString($relayResp.Data)
-        if ($receivedText -eq "Relay test message") {
-            Write-TestResult "Relay message forwarded" $true "Server relayed message to peer B"
-        } else {
-            Write-TestResult "Relay message forwarded" $true "Got response (type 0x$($relayResp.Type.ToString('X2')))"
-        }
+        Write-TestResult "Relay message forwarded" $true "Server relayed message to peer B"
     } else {
-        # Check if server at least accepted the message (didn't error)
-        Write-TestResult "Relay message accepted by server" $true "Server accepted relay (peer may need active listener)"
+        Write-TestResult "Relay message forwarded" $false $relayResp.Error
     }
 } catch {
     Write-TestResult "Relay communication" $false $_.Exception.Message
@@ -391,22 +424,17 @@ try {
     $regResp = Receive-Response $offlinePeerClient
 
     if ($regResp.Success) {
-        Write-Host "  Peer registered, waiting for queued message delivery (2-3 sec)..." -ForegroundColor Gray
-        # Server delays queue delivery by 2 seconds to allow key exchange
-        Start-Sleep -Seconds 3
+        Write-Host "  Peer registered, waiting for queued message delivery..." -ForegroundColor Gray
+        # Server delays queue delivery to allow key exchange.
+        Start-Sleep -Seconds 6
 
         # Try to receive the queued message
-        $queuedResp = Receive-Response $offlinePeerClient
+        $queuedResp = Receive-ExpectedPayload $offlinePeerClient "Message for offline peer" $TIMEOUT_MS
 
         if ($queuedResp.Success) {
-            $receivedText = [System.Text.Encoding]::UTF8.GetString($queuedResp.Data)
-            if ($receivedText -eq "Message for offline peer") {
-                Write-TestResult "Queued message delivered to peer" $true "Server delivered queued message!"
-            } else {
-                Write-TestResult "Queued message delivered to peer" $true "Got queued data (type 0x$($queuedResp.Type.ToString('X2')))"
-            }
+            Write-TestResult "Queued message delivered to peer" $true "Server delivered queued message"
         } else {
-            Write-TestResult "Queued message delivered to peer" $false "No queued message received after delay"
+            Write-TestResult "Queued message delivered to peer" $false $queuedResp.Error
         }
     } else {
         Write-TestResult "Queued message delivered to peer" $false "Failed to register offline peer"

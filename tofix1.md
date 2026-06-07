@@ -129,6 +129,10 @@ Native routing pads UUID node IDs to 32 bytes, so server-side searches should in
   - Second deployment backup: `/home/ubuntu/cyxchat-server.20260607055950.bak` and `/home/ubuntu/cyxchat-server.c.20260607055950.bak`.
 
 - Next fix target:
+  - TDD audit started in `tdd-audit.md`.
+  - The P2P relay script was hardened so relay delivery fails if peer B does not receive the expected payload; it no longer passes only because the server accepted the packet.
+  - The P2P test node IDs now use a cryptographic RNG instead of repeated `System.Random` seeds, which previously produced duplicate IDs during fast test setup.
+  - Strict Oracle UDP contract check passed on 2026-06-07 for register, direct UDP simulation, relay forwarding, and offline queue delivery.
   - Install/download the latest build, then validate live bidirectional messaging with Android devices A and B while tailing `/home/ubuntu/server.log`.
   - Confirm A -> B and B -> A each show send, relay/direct route, receive, persistence/display, and ACK.
   - If bidirectional text is stable, move next to Android notifications, then calls, large files, and recorder polish.
