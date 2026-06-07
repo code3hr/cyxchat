@@ -96,8 +96,10 @@ Native routing pads UUID node IDs to 32 bytes, so server-side searches should in
   - Changed peer expiry from 5 seconds to 180 seconds.
   - Fixed scheduled queue delivery to scan all `MAX_PEERS` slots instead of only `g_peer_count`.
   - Refresh sender activity when a known peer sends a `CYXWIZ_UDP_RELAY_PKT`.
+  - Added server-side sender recovery from relayed UDP data packets (`[0xF6][from_id:32]`) when the sender's source IP:port no longer matches the registration table.
   - Oracle service verified active on UDP `7777` after restart.
   - Oracle backups: `/home/ubuntu/cyxchat-server..bak` and `/home/ubuntu/cyxchat-server.c..bak`.
+  - Second deployment backup: `/home/ubuntu/cyxchat-server.20260607055950.bak` and `/home/ubuntu/cyxchat-server.c.20260607055950.bak`.
   - Next live check: send A -> B and B -> A while tailing `/home/ubuntu/server.log`; confirm no false peer expiry during active use.
 
 ## Done Criteria For Each Fix
