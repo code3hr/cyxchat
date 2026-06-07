@@ -20,6 +20,7 @@ Native routing pads UUID node IDs to 32 bytes, so server-side searches should in
 - Messages from A to B can be delayed or never appear on B.
 - Messaging can become one-way, where one device receives but the other direction does not.
 - UI can stay on "establishing connection" even while some messages still pass.
+- Connections are re-established too late, often when the user opens a chat or tries to send, instead of being maintained after app start/resume/network recovery.
 - Android inactive/background app does not reliably show notifications.
 - Audio calls and video calls do not work reliably.
 - When a call drops, the app can show a blank screen instead of returning to a valid chat/home/call-ended state.
@@ -48,6 +49,8 @@ Native routing pads UUID node IDs to 32 bytes, so server-side searches should in
 2. Connection-state fix
    - Separate app online/bootstrap state from peer delivery state.
    - UI should show bootstrap, peer key, route, relay/direct, and delivery status without blocking on a stale "establishing connection" label.
+   - Reconnect only when actually offline, after app resume, or after network recovery; do not repeatedly reset established connections.
+   - Warm-connect known contacts in the background so opening a chat does not spend time establishing the route/key.
    - Done when the UI no longer reports a false stuck state while messages can flow.
 
 3. Oracle server relay fix and redeploy
