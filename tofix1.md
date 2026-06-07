@@ -104,6 +104,8 @@ Native routing pads UUID node IDs to 32 bytes, so server-side searches should in
   - `cc1f798` warmed active contacts in the background.
   - `1c0f5ef` tracked background contact warm connection.
   - `a31ed01` fixed passive chat connection status so bootstrap-online route warming does not look stuck.
+  - `26c7952` fixed stale FFI peer ID reads by using isolate-local connection/presence callbacks.
+  - Relay fallback now refreshes peer activity so a newly relayed route is not immediately timed out before key exchange can complete.
   - Parent repo `6b69a3e` fixed CyxChat relay peer liveness in `D:\Dev\conspiracy\tools\cyxchat-server.c`.
   - Server source of truth on this PC: `D:\Dev\conspiracy\tools\cyxchat-server.c`.
   - Deployed to Oracle on 2026-06-07.

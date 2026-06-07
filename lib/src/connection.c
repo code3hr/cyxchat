@@ -1160,6 +1160,7 @@ int cyxchat_conn_poll(cyxchat_conn_ctx_t *ctx, uint64_t now_ms)
                 );
 
                 if (relay_err == CYXCHAT_OK) {
+                    peer->last_activity = now_ms;
                     set_peer_state(ctx, peer, CYXCHAT_CONN_RELAYING);
                     peer->is_relayed = 1;
 
@@ -1297,6 +1298,7 @@ cyxchat_error_t cyxchat_conn_connect(cyxchat_conn_ctx_t *ctx,
     pending->punch_attempts = 0;
 
     /* Set state to connecting */
+    peer->last_activity = pending->start_time;
     set_peer_state(ctx, peer, CYXCHAT_CONN_CONNECTING);
 
     /* Fire progress event: lookup started */
