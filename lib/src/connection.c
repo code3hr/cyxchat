@@ -1328,6 +1328,8 @@ cyxchat_error_t cyxchat_conn_connect(cyxchat_conn_ctx_t *ctx,
 
     /* Set state to connecting */
     peer->last_activity = pending->start_time;
+    peer->last_announce_sent = 0;
+    peer->announce_retries = 0;
     set_peer_state(ctx, peer, CYXCHAT_CONN_CONNECTING);
 
     /* Fire progress event: lookup started */

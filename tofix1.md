@@ -54,6 +54,8 @@ Native routing pads UUID node IDs to 32 bytes, so server-side searches should in
    - Done when the UI no longer reports a false stuck state while messages can flow.
    - Status: background warm-connect is implemented and pushed; chat header no longer shows a blocking "establishing connection" state while bootstrap is online and peer route warming is passive.
    - Current fix in progress: app online state now follows the initialized local network stack, while bootstrap ACK is exposed as a diagnostic detail; reconnect no longer tears down a working native connection only because the ACK flag is false.
+   - New finding: after a peer key exchange timed out, native `announce_retries` was not reset on the next fresh connect, so later attempts could fail immediately instead of retrying from attempt 1. Also, chat send was still blocking in the foreground while the route warmed even though the queue/retry path exists.
+   - Status: native peer connect now resets announce retry state; chat send starts route warming in the background and lets failed native sends queue for retry instead of making the user wait on foreground key exchange.
 
 3. Oracle server relay fix and redeploy
    - Audit the active Oracle `cyxchat-server.c` against the repo/source-of-truth server code.

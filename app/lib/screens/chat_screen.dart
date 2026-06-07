@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io' as io;
 import 'dart:math' as math;
@@ -291,44 +292,15 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
     final conversation = conversationAsync.value;
     final peerId = conversation?.peerId ?? widget.conversationId;
 
-    if (connectionProvider.initialized) {
-      if (!connectionProvider.hasPeerKey(peerId)) {
-        final progress = connectionProvider.getProgress(peerId);
-        if (progress == null || !progress.isConnecting) {
-          debugPrint(
-              'ChatScreen: Ensuring connection to peer before sending...');
-          await connectionProvider.connect(peerId);
-        } else {
-          debugPrint('ChatScreen: Waiting for existing peer connection...');
-        }
+    if (connectionProvider.initialized &&
+        !connectionProvider.hasPeerKey(peerId)) {
+      final progress = connectionProvider.getProgress(peerId);
+      if (progress == null || !progress.isConnecting) {
+        debugPrint('ChatScreen: Warming peer route before sending...');
+        unawaited(connectionProvider.connect(peerId));
+      } else {
+        debugPrint('ChatScreen: Peer route already warming');
       }
-
-      // Wait for key exchange to complete (up to 5 seconds)
-      // Uses increasing delays to avoid blocking UI thread with tight polling
-      int waited = 0;
-      const maxWait = 5000;
-      int checkInterval = 200;
-
-      while (!connectionProvider.hasPeerKey(peerId) && waited < maxWait) {
-        await Future.delayed(Duration(milliseconds: checkInterval));
-        waited += checkInterval;
-        if (checkInterval < 800) checkInterval = (checkInterval * 1.5).toInt();
-      }
-
-      if (!connectionProvider.hasPeerKey(peerId)) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content:
-                  Text('Could not establish secure connection. Try again.'),
-              backgroundColor: Colors.orange,
-            ),
-          );
-        }
-        return;
-      }
-
-      debugPrint('ChatScreen: Key exchange complete, sending message');
     }
 
     await ref.read(chatActionsProvider).sendMessage(
