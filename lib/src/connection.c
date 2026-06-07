@@ -1314,6 +1314,26 @@ cyxchat_error_t cyxchat_conn_connect(cyxchat_conn_ctx_t *ctx,
         peer->peer_id = *peer_id;
     }
 
+    int already_has_key = peer->has_pubkey;
+    if (!already_has_key && ctx->onion) {
+        already_has_key = cyxwiz_onion_has_key(ctx->onion, peer_id) ? 1 : 0;
+    }
+    if (already_has_key && ctx->relay) {
+        cyxchat_error_t relay_err = cyxchat_relay_connect(ctx->relay, peer_id);
+        if (relay_err == CYXCHAT_OK) {
+            peer->last_activity = get_time_ms();
+            peer->announce_retries = 0;
+            peer->is_relayed = 1;
+            set_peer_state(ctx, peer, CYXCHAT_CONN_RELAYING);
+            fire_progress_event(ctx, peer_id, CYXCHAT_CONN_EVENT_CONNECTED_RELAY,
+                                0, CYXCHAT_ANNOUNCE_MAX_RETRIES, CYXCHAT_CONN_FAIL_NONE);
+            if (callback) {
+                callback(ctx, peer_id, CYXCHAT_CONN_RELAYING, CYXCHAT_OK, user_data);
+            }
+            return CYXCHAT_OK;
+        }
+    }
+
     /* Create pending connection request */
     cyxchat_pending_conn_t *pending = alloc_pending(ctx);
     if (!pending) {
@@ -1642,6 +1662,50 @@ int cyxchat_conn_has_peer_key(cyxchat_conn_ctx_t *ctx, const cyxwiz_node_id_t *p
     if (!ctx || !peer_id || !ctx->onion) return 0;
     return cyxwiz_onion_has_key(ctx->onion, peer_id) ? 1 : 0;
 }
+
+cyxchat_error_t cyxchat_conn_add_peer_pubkey(
+    cyxchat_conn_ctx_t *ctx,
+    const cyxwiz_node_id_t *peer_id,
+    const uint8_t *peer_pubkey)
+{
+    if (!ctx || !ctx->onion || !peer_id || !peer_pubkey) {
+        return CYXCHAT_ERR_NULL;
+    }
+
+    int has_nonzero = 0;
+    for (int i = 0; i < 32; i++) {
+        if (peer_pubkey[i] != 0) {
+            has_nonzero = 1;
+            break;
+        }
+    }
+    if (!has_nonzero) {
+        return CYXCHAT_ERR_INVALID;
+    }
+
+    cyxwiz_error_t err = cyxwiz_onion_add_peer_key(ctx->onion, peer_id, peer_pubkey);
+    if (err != CYXWIZ_OK) {
+        return CYXCHAT_ERR_CRYPTO;
+    }
+
+    cyxchat_peer_conn_t *conn = find_peer_conn(ctx, peer_id);
+    if (!conn) {
+        conn = alloc_peer_conn(ctx);
+        if (!conn) {
+            return CYXCHAT_ERR_FULL;
+        }
+        conn->peer_id = *peer_id;
+        conn->state = CYXCHAT_CONN_DISCONNECTED;
+    }
+
+    memcpy(conn->pubkey, peer_pubkey, 32);
+    conn->has_pubkey = 1;
+    conn->last_activity = get_time_ms();
+    conn->announce_retries = 0;
+    conn->last_key_exchange = conn->last_activity;
+    return CYXCHAT_OK;
+}
+
 cyxchat_error_t cyxchat_conn_get_peer_pubkey(
     cyxchat_conn_ctx_t *ctx,
     const cyxwiz_node_id_t *peer_id,

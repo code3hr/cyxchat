@@ -1022,6 +1022,34 @@ class CyxChatBindings {
     }
   }
 
+  /// Restore a known peer X25519 public key into the native onion context.
+  int connAddPeerPubkeyHex(String peerIdHex, List<int> pubkey) {
+    if (_connCtx == null) return CyxChatError.errNull;
+    if (pubkey.length != 32) return CyxChatError.errInvalid;
+
+    final peerIdBytes = _hexToBytes(peerIdHex);
+    final peerIdPtr = calloc<Uint8>(32);
+    final pubkeyPtr = calloc<Uint8>(32);
+
+    try {
+      for (int i = 0; i < 32 && i < peerIdBytes.length; i++) {
+        peerIdPtr[i] = peerIdBytes[i];
+      }
+      for (int i = 0; i < 32; i++) {
+        pubkeyPtr[i] = pubkey[i];
+      }
+
+      return _native.cyxchat_conn_add_peer_pubkey(
+        _connCtx!,
+        peerIdPtr,
+        pubkeyPtr,
+      );
+    } finally {
+      calloc.free(peerIdPtr);
+      calloc.free(pubkeyPtr);
+    }
+  }
+
   /// Get full 32-byte node ID from a prefix (first 8 bytes)
   /// Useful when the onion layer needs the full ID for key lookup
   List<int>? connGetFullNodeIdHex(String prefixIdHex) {
@@ -4272,7 +4300,14 @@ class CyxChatNative {
   late final cyxchat_conn_has_peer_key = _lib.lookupFunction<
       Int32 Function(Pointer<Void>, Pointer<Uint8>),
       int Function(Pointer<Void>, Pointer<Uint8>)>('cyxchat_conn_has_peer_key');
-late final cyxchat_conn_get_peer_pubkey = _lib.lookupFunction<      Int32 Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>),      int Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>)>('cyxchat_conn_get_peer_pubkey');
+  late final cyxchat_conn_get_peer_pubkey = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>),
+      int Function(Pointer<Void>, Pointer<Uint8>,
+          Pointer<Uint8>)>('cyxchat_conn_get_peer_pubkey');
+  late final cyxchat_conn_add_peer_pubkey = _lib.lookupFunction<
+      Int32 Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>),
+      int Function(Pointer<Void>, Pointer<Uint8>,
+          Pointer<Uint8>)>('cyxchat_conn_add_peer_pubkey');
 
   late final cyxchat_conn_get_full_node_id = _lib.lookupFunction<
       Int32 Function(Pointer<Void>, Pointer<Uint8>, Pointer<Uint8>),

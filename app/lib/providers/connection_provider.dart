@@ -356,7 +356,9 @@ class ConnectionProvider extends ChangeNotifier {
   Future<int> connect(String peerIdHex) async {
     if (!_initialized) return CyxChatError.errNull;
 
-    if (hasPeerKey(peerIdHex)) return CyxChatError.ok;
+    if (hasPeerKey(peerIdHex) && isConnected(peerIdHex)) {
+      return CyxChatError.ok;
+    }
 
     final progress = getProgress(peerIdHex);
     if (progress != null && progress.isConnecting) return CyxChatError.ok;
@@ -455,6 +457,32 @@ class ConnectionProvider extends ChangeNotifier {
     } finally {
       calloc.free(peerIdPtr);
     }
+  }
+
+  /// Return the peer key learned by native key exchange, if available.
+  List<int>? getPeerPublicKey(String peerIdHex) {
+    if (!_initialized) return null;
+    final pubkey = _bindings.connGetPeerPubkeyHex(peerIdHex);
+    if (pubkey == null || pubkey.length != 32 || _isAllZero(pubkey)) {
+      return null;
+    }
+    return pubkey;
+  }
+
+  /// Restore a previously learned peer key into the native onion context.
+  int restorePeerPublicKey(String peerIdHex, List<int> pubkey) {
+    if (!_initialized) return CyxChatError.errNull;
+    if (pubkey.length != 32 || _isAllZero(pubkey)) {
+      return CyxChatError.errInvalid;
+    }
+    return _bindings.connAddPeerPubkeyHex(peerIdHex, pubkey);
+  }
+
+  bool _isAllZero(List<int> bytes) {
+    for (final byte in bytes) {
+      if (byte != 0) return false;
+    }
+    return true;
   }
 
   /// Add relay server

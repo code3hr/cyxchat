@@ -1,7 +1,11 @@
 import 'dart:async';
+import 'dart:typed_data';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/contact.dart';
+import '../models/connection_progress.dart';
+import '../ffi/bindings.dart';
 import '../services/database_service.dart';
 import '../utils/node_id_utils.dart';
 import 'conversation_provider.dart';
@@ -92,6 +96,38 @@ class ContactService {
       where: 'peer_id = ?',
       whereArgs: [nodeId],
     );
+  }
+
+  /// Persist a peer public key learned during native key exchange.
+  Future<bool> updatePublicKey(String nodeId, List<int> publicKey) async {
+    if (publicKey.length != 32 || _isAllZero(publicKey)) return false;
+
+    final db = await DatabaseService.instance.database;
+    final keyBytes = Uint8List.fromList(publicKey);
+    final candidates = <String>{
+      nodeId,
+      nodeId.replaceAll('-', '').toLowerCase(),
+      NodeIdUtils.toDisplayFormat(nodeId),
+    };
+
+    var updated = 0;
+    for (final candidate in candidates) {
+      updated += await db.update(
+        'contacts',
+        {'public_key': keyBytes},
+        where: 'node_id = ?',
+        whereArgs: [candidate],
+      );
+    }
+
+    return updated > 0;
+  }
+
+  bool _isAllZero(List<int> bytes) {
+    for (final byte in bytes) {
+      if (byte != 0) return false;
+    }
+    return true;
   }
 
   /// Toggle contact verified status
@@ -255,6 +291,80 @@ final presenceSyncProvider = Provider<PresenceSync>((ref) {
   ref.onDispose(() => sync.dispose());
   return sync;
 });
+
+/// Provider for restoring and persisting peer public keys for known contacts.
+final contactKeySyncProvider = Provider<ContactKeySync>((ref) {
+  final sync = ContactKeySync(ref);
+  ref.onDispose(() => sync.dispose());
+  return sync;
+});
+
+class ContactKeySync {
+  final Ref _ref;
+  StreamSubscription? _subscription;
+
+  ContactKeySync(this._ref) {
+    final connProvider = _ref.read(connectionNotifierProvider);
+    _subscription = connProvider.progressStream.listen(_handleProgress);
+  }
+
+  Future<void> restoreKnownPeerKeys({List<Contact>? contacts}) async {
+    final connProvider = _ref.read(connectionNotifierProvider);
+    if (!connProvider.initialized) return;
+
+    final targetContacts =
+        contacts ?? await ContactService.instance.getContacts();
+    var restored = 0;
+    for (final contact in targetContacts) {
+      if (contact.blocked || _isAllZero(contact.publicKey)) continue;
+      final result = connProvider.restorePeerPublicKey(
+        contact.nodeId,
+        contact.publicKey,
+      );
+      if (result == CyxChatError.ok) {
+        restored++;
+      }
+    }
+    if (restored > 0) {
+      debugPrint('ContactKeySync: Restored $restored peer keys');
+    }
+  }
+
+  Future<void> _handleProgress(PeerConnectionProgress progress) async {
+    if (progress.phase != ConnectionPhase.keyExchanged) return;
+
+    final connProvider = _ref.read(connectionNotifierProvider);
+    final pubkey = connProvider.getPeerPublicKey(progress.peerId);
+    if (pubkey == null) return;
+
+    final updated = await ContactService.instance.updatePublicKey(
+      progress.peerId,
+      pubkey,
+    );
+    if (updated) {
+      _ref.invalidate(contactsProvider);
+      _ref.invalidate(contactProvider(progress.peerId));
+      final displayId = NodeIdUtils.toDisplayFormat(progress.peerId);
+      if (displayId != progress.peerId) {
+        _ref.invalidate(contactProvider(displayId));
+      }
+      debugPrint(
+          'ContactKeySync: Saved peer key for ${progress.peerId.substring(0, 16)}...');
+    }
+  }
+
+  bool _isAllZero(List<int> bytes) {
+    for (final byte in bytes) {
+      if (byte != 0) return false;
+    }
+    return true;
+  }
+
+  void dispose() {
+    _subscription?.cancel();
+    _subscription = null;
+  }
+}
 
 /// Presence synchronization handler
 class PresenceSync {

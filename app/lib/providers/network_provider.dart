@@ -247,6 +247,9 @@ class ConnectionActions {
       log.info('Relay server configured: $bootstrap', source: 'Network');
     }
 
+    final contactKeySync = _ref.read(contactKeySyncProvider);
+    await contactKeySync.restoreKnownPeerKeys();
+
     // Yield to let UI render before continuing initialization
     await Future.delayed(Duration.zero);
 

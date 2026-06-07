@@ -346,6 +346,23 @@ CYXCHAT_API cyxchat_error_t cyxchat_conn_get_peer_pubkey(
 );
 
 /**
+ * Add a known peer X25519 public key to the connection.
+ *
+ * This is used when restoring trusted peer keys from the contact database after
+ * app restart. Placeholder/all-zero keys are rejected.
+ *
+ * @param ctx           Connection context
+ * @param peer_id       Peer node ID
+ * @param peer_pubkey   Peer public key (32 bytes)
+ * @return              CYXCHAT_OK on success, error code otherwise
+ */
+CYXCHAT_API cyxchat_error_t cyxchat_conn_add_peer_pubkey(
+    cyxchat_conn_ctx_t *ctx,
+    const cyxwiz_node_id_t *peer_id,
+    const uint8_t *peer_pubkey
+);
+
+/**
  * Get full node ID from a prefix (first 8 bytes)
  *
  * This function looks up a peer by the first 8 bytes of their node ID
