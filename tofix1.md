@@ -87,6 +87,7 @@ Native routing pads UUID node IDs to 32 bytes, so server-side searches should in
    - Confirm whether the failure is direct-mode routing, relay chunk size, accept-state mismatch, or receiver file persistence.
    - Include Oracle server limits in the audit: `MAX_RELAY_DATA`, per-peer queue cap, queued chunk behavior, and ACK handling.
    - Done when a large file transfer completes after accept and shows a precise error if it cannot.
+   - Status: found the accept-state mismatch in the onion receive path. `FILE_ACCEPT` and other v2 file control messages were parsed as file messages but not routed to the file module, so the sender never left pending state after the receiver accepted.
 
 8. Voice recording fix
    - Trace recorder permission, press/hold gesture state, recorder initialization, active recording flag, and audio file creation.

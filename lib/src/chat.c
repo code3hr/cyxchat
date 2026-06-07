@@ -1009,6 +1009,12 @@ static void on_onion_delivery(
         case CYXCHAT_MSG_FILE_META:
         case CYXCHAT_MSG_FILE_CHUNK:
         case CYXCHAT_MSG_FILE_ACK:
+        case CYXCHAT_MSG_FILE_OFFER:
+        case CYXCHAT_MSG_FILE_ACCEPT:
+        case CYXCHAT_MSG_FILE_REJECT:
+        case CYXCHAT_MSG_FILE_COMPLETE:
+        case CYXCHAT_MSG_FILE_CANCEL:
+        case CYXCHAT_MSG_FILE_DHT_READY:
         case CYXCHAT_MSG_PEER_ADDR:
         case CYXCHAT_MSG_PEER_ADDR_ACK:
             /* Route to file module if registered */
