@@ -900,11 +900,6 @@ static void on_onion_delivery(
         return;  /* Duplicate - already processed */
     }
 
-    /* Auto-ACK text messages on receipt */
-    if (type == CYXCHAT_MSG_TEXT) {
-        cyxchat_send_ack(ctx, actual_sender, &msg_id, CYXCHAT_STATUS_DELIVERED);
-    }
-
     /* Non-fragmented message - convert to 2-byte length format for TEXT messages */
     if (type == CYXCHAT_MSG_TEXT && len > offset) {
         uint8_t wire_text_len = data[offset];  /* 1-byte on wire */

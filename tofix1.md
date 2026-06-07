@@ -68,6 +68,7 @@ Native routing pads UUID node IDs to 32 bytes, so server-side searches should in
    - Add focused logging only where the path lacks evidence.
    - Fix the smallest broken layer, then add a regression test where practical.
    - Done when A/B logs show message ID sent, routed, received, persisted, displayed, and ACKed.
+   - Status: native text ACK now waits for Dart persistence, incoming native message IDs are idempotent, and duplicate relay/direct deliveries do not create duplicate visible rows.
 
 5. Android notification fix
    - Confirm foreground, background, and killed-app behavior separately.
@@ -115,9 +116,9 @@ Native routing pads UUID node IDs to 32 bytes, so server-side searches should in
   - Second deployment backup: `/home/ubuntu/cyxchat-server.20260607055950.bak` and `/home/ubuntu/cyxchat-server.c.20260607055950.bak`.
 
 - Next fix target:
-  - Validate live bidirectional messaging with Android devices A and B while tailing `/home/ubuntu/server.log`.
+  - Install/download the latest build, then validate live bidirectional messaging with Android devices A and B while tailing `/home/ubuntu/server.log`.
   - Confirm A -> B and B -> A each show send, relay/direct route, receive, persistence/display, and ACK.
-  - If one direction still fails, fix the smallest broken layer in Workstream 4 before moving to notifications, calls, large files, or recorder polish.
+  - If bidirectional text is stable, move next to Android notifications, then calls, large files, and recorder polish.
 
 ## Done Criteria For Each Fix
 

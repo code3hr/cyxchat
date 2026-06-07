@@ -1,6 +1,8 @@
 import 'dart:convert';
 
+import 'package:cyxchat/ffi/bindings.dart';
 import 'package:cyxchat/models/models.dart';
+import 'package:cyxchat/providers/chat_provider.dart';
 import 'package:cyxchat/services/chat_service.dart';
 import 'package:cyxchat/services/database_service.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -197,6 +199,37 @@ void main() {
       limit: 1,
     );
     expect(conversation.single['unread_count'], 0);
+  });
+
+  test('incoming native text is idempotent by native message ID', () async {
+    final db = await DatabaseService.instance.database;
+    final textBytes = utf8.encode('hello once');
+    final received = ReceivedMessage(
+      fromNodeId: 'peer-dup',
+      type: CyxChatMsgType.text,
+      msgId: '0102030405060708',
+      rawData: [textBytes.length, 0, ...textBytes],
+      receivedAt: DateTime.fromMillisecondsSinceEpoch(1700000002000),
+    );
+
+    await ChatService.instance.handleIncomingMessageForTesting(received);
+    await ChatService.instance.handleIncomingMessageForTesting(received);
+
+    final rows = await db.query(
+      'messages',
+      where: 'native_msg_id = ?',
+      whereArgs: ['0102030405060708'],
+    );
+    expect(rows, hasLength(1));
+
+    final conversations = await db.query(
+      'conversations',
+      columns: ['unread_count'],
+      where: 'peer_id = ?',
+      whereArgs: ['peer-dup'],
+      limit: 1,
+    );
+    expect(conversations.single['unread_count'], 1);
   });
 }
 

@@ -12,7 +12,6 @@ import 'settings_provider.dart';
 
 /// Message status values must match cyxchat_msg_status_t in
 /// lib/include/cyxchat/types.h.
-@visibleForTesting
 class NativeMessageStatus {
   static const pending = 0;
   static const sending = 1;
@@ -949,7 +948,7 @@ class ChatActions {
   Future<bool> sendAck({
     required String toPeerId,
     required String msgId,
-    int status = 1,
+    int status = NativeMessageStatus.delivered,
   }) {
     return _ref.read(chatNotifierProvider).sendAck(
           toPeerId: toPeerId,

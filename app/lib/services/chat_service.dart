@@ -926,6 +926,7 @@ class ChatService {
     if (isBlocked) {
       debugPrint(
           'ChatService: Message from blocked contact ${received.fromNodeId} ignored');
+      await _sendDeliveredAck(received);
       return;
     }
 
@@ -935,6 +936,24 @@ class ChatService {
       // Get or create conversation with sender
       final conversation =
           await getOrCreateDirectConversation(received.fromNodeId);
+
+      final existingRows = await db.query(
+        'messages',
+        columns: ['id'],
+        where: 'native_msg_id = ? AND sender_id = ? AND is_outgoing = 0',
+        whereArgs: [received.msgId, received.fromNodeId],
+        limit: 1,
+      );
+      if (existingRows.isNotEmpty) {
+        final existingId = existingRows.first['id'] as String;
+        _nativeMsgIdToLocalId[received.msgId] = existingId;
+        _localIdToNativeMsgId[existingId] = received.msgId;
+        await _sendDeliveredAck(received);
+        await _updateSenderPresence(received.fromNodeId);
+        debugPrint(
+            'ChatService: Duplicate incoming message ${received.msgId} acknowledged');
+        return;
+      }
 
       // Create message
       final message = Message(
@@ -998,13 +1017,27 @@ class ChatService {
       // Update sender's presence to online (they're actively messaging)
       await _updateSenderPresence(received.fromNodeId);
 
-      // Send ACK back to sender
-      if (_chatProvider != null) {
-        debugPrint(
-            'ChatService: Received message from ${received.fromNodeId}: ${parsed.text}');
-      }
+      await _sendDeliveredAck(received);
+
+      debugPrint(
+          'ChatService: Received message from ${received.fromNodeId}: ${parsed.text}');
     } catch (e) {
       debugPrint('ChatService: Error handling incoming message: $e');
+    }
+  }
+
+  Future<void> _sendDeliveredAck(ReceivedMessage received) async {
+    final provider = _chatProvider;
+    if (provider == null) return;
+
+    final sent = await provider.sendAck(
+      toPeerId: received.fromNodeId,
+      msgId: received.msgId,
+      status: NativeMessageStatus.delivered,
+    );
+    if (!sent) {
+      debugPrint(
+          'ChatService: Failed to ACK incoming message ${received.msgId}');
     }
   }
 
@@ -1693,6 +1726,11 @@ class ChatService {
     _pendingReadReceipts.clear();
     _readReceiptSender = null;
     _flushingReadReceipts = false;
+  }
+
+  @visibleForTesting
+  Future<void> handleIncomingMessageForTesting(ReceivedMessage received) {
+    return _handleIncomingMessage(received);
   }
 }
 
