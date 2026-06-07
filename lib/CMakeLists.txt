@@ -1,6 +1,6 @@
 # CyxChat Library - CMake Build Configuration
 cmake_minimum_required(VERSION 3.16)
-project(cyxchat VERSION 0.1.0 LANGUAGES C)
+project(cyxchat VERSION 1.2.1 LANGUAGES C)
 
 # Options
 option(CYXCHAT_BUILD_TESTS "Build tests" ON)

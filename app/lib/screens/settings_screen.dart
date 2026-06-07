@@ -249,7 +249,7 @@ class SettingsScreen extends ConsumerWidget {
                     _SettingsTile(
                       icon: Icons.tag_rounded,
                       title: 'Version',
-                      subtitle: '0.1.0 (Beta)',
+                      subtitle: '1.2.1',
                       onTap: null,
                     ),
                     _SettingsTile(

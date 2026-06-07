@@ -107,17 +107,17 @@ foreach(bundled_library ${PLUGIN_BUNDLED_LIBRARIES})
 endforeach(bundled_library)
 
 # Copy libcyxchat.so (the CyxChat C library) to the bundle
-# The library has versioned symlinks: libcyxchat.so -> libcyxchat.so.0 -> libcyxchat.so.0.1.0
+# The library has versioned symlinks: libcyxchat.so -> libcyxchat.so.0 -> libcyxchat.so.1.2.1
 set(CYXCHAT_LIB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../lib/build")
-if(EXISTS "${CYXCHAT_LIB_DIR}/libcyxchat.so.0.1.0")
+if(EXISTS "${CYXCHAT_LIB_DIR}/libcyxchat.so.1.2.1")
   # Copy the actual library file
-  install(FILES "${CYXCHAT_LIB_DIR}/libcyxchat.so.0.1.0"
+  install(FILES "${CYXCHAT_LIB_DIR}/libcyxchat.so.1.2.1"
     DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
     COMPONENT Runtime)
   # Create symlinks
   install(CODE "
     execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink
-      libcyxchat.so.0.1.0 \${CMAKE_INSTALL_PREFIX}/lib/libcyxchat.so.0)
+      libcyxchat.so.1.2.1 \${CMAKE_INSTALL_PREFIX}/lib/libcyxchat.so.0)
     execute_process(COMMAND ${CMAKE_COMMAND} -E create_symlink
       libcyxchat.so.0 \${CMAKE_INSTALL_PREFIX}/lib/libcyxchat.so)
   " COMPONENT Runtime)

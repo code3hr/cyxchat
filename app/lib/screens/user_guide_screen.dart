@@ -669,7 +669,7 @@ A: Visit github.com/code3hr/cyxchat/issues
                         ),
                         const SizedBox(height: 12),
                         Text(
-                          'CyxChat v0.1.0',
+                          'CyxChat v1.2.1',
                           style: TextStyle(
                             color: AppColors.textDarkSecondary,
                             fontSize: 14,
