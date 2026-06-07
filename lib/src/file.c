@@ -452,10 +452,10 @@ void cyxchat_file_ctx_destroy(cyxchat_file_ctx_t *ctx) {
     }
 }
 
-/* Helper to send next chunk for a transfer */
-static void send_next_chunk(cyxchat_file_ctx_t *ctx, file_transfer_slot_t *slot) {
+/* Helper to send next chunk for a transfer. Returns 1 if a chunk was sent. */
+static int send_next_chunk(cyxchat_file_ctx_t *ctx, file_transfer_slot_t *slot) {
     if (!slot->data || slot->transfer.chunks_done >= slot->transfer.meta.chunk_count) {
-        return;
+        return 0;
     }
 
     uint16_t chunk_idx = slot->transfer.chunks_done;
@@ -476,7 +476,7 @@ static void send_next_chunk(cyxchat_file_ctx_t *ctx, file_transfer_slot_t *slot)
 
     if (!chunk_buf) {
         CYXWIZ_ERROR("send_next_chunk: failed to allocate chunk buffer");
-        return;
+        return 0;
     }
 
     size_t chunk_wire_len = 0;
@@ -498,7 +498,7 @@ static void send_next_chunk(cyxchat_file_ctx_t *ctx, file_transfer_slot_t *slot)
         CYXWIZ_ERROR("send_next_chunk: offset out of bounds (%zu >= %u)",
                      offset, slot->transfer.meta.size);
         free(chunk_buf);
-        return;
+        return 0;
     }
     size_t remaining = slot->transfer.meta.size - offset;
     uint16_t chunk_len = (remaining > chunk_size) ? (uint16_t)chunk_size : (uint16_t)remaining;
@@ -539,15 +539,16 @@ static void send_next_chunk(cyxchat_file_ctx_t *ctx, file_transfer_slot_t *slot)
         err = cyxchat_send_raw(ctx->chat_ctx, &slot->transfer.peer, chunk_buf, chunk_wire_len);
     }
 
-    /* Free buffer */
-    free(chunk_buf);
-    slot->transfer.chunks_done++;
-    slot->transfer.updated_at = cyxchat_timestamp_ms();
-    slot->last_chunk_sent_ms = slot->transfer.updated_at;
     if (err != CYXCHAT_OK) {
         CYXWIZ_ERROR("send_next_chunk: FAILED to send chunk %u/%u, error=%d",
-                     slot->transfer.chunks_done, slot->transfer.meta.chunk_count, err);
+                     chunk_idx + 1, slot->transfer.meta.chunk_count, err);
+        slot->last_chunk_sent_ms = cyxchat_timestamp_ms();
+        free(chunk_buf);
+        return 0;
     } else {
+        slot->transfer.chunks_done++;
+        slot->transfer.updated_at = cyxchat_timestamp_ms();
+        slot->last_chunk_sent_ms = slot->transfer.updated_at;
         CYXWIZ_INFO("send_next_chunk: sent chunk %u/%u (%u bytes, %s mode)",
                     slot->transfer.chunks_done, slot->transfer.meta.chunk_count, chunk_len,
                     (ctx->use_direct_mode && ctx->transport) ? "direct" : "onion");
@@ -559,6 +560,10 @@ static void send_next_chunk(cyxchat_file_ctx_t *ctx, file_transfer_slot_t *slot)
                             ctx->on_progress_data);
         }
     }
+
+    /* Free buffer */
+    free(chunk_buf);
+    return 1;
 }
 
 int cyxchat_file_poll(cyxchat_file_ctx_t *ctx, uint64_t now_ms) {
@@ -580,7 +585,9 @@ int cyxchat_file_poll(cyxchat_file_ctx_t *ctx, uint64_t now_ms) {
                     int chunks_this_poll = 0;
                     while (slot->transfer.chunks_done < slot->transfer.meta.chunk_count &&
                            chunks_this_poll < 10) {
-                        send_next_chunk(ctx, slot);
+                        if (!send_next_chunk(ctx, slot)) {
+                            break;
+                        }
                         chunks_this_poll++;
                         events++;
                     }
@@ -588,8 +595,9 @@ int cyxchat_file_poll(cyxchat_file_ctx_t *ctx, uint64_t now_ms) {
                     /* Onion routing mode: rate limited (4 chunks/sec for LoRa compatibility) */
                     uint64_t delay_ms = (slot->transfer.chunks_done == 0) ? 0 : 250;
                     if (now_ms - slot->last_chunk_sent_ms >= delay_ms) {
-                        send_next_chunk(ctx, slot);
-                        events++;
+                        if (send_next_chunk(ctx, slot)) {
+                            events++;
+                        }
                     }
                 }
             } else if (!slot->waiting_for_ack) {

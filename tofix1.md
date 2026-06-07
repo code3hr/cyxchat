@@ -94,6 +94,8 @@ Native routing pads UUID node IDs to 32 bytes, so server-side searches should in
    - Include Oracle server limits in the audit: `MAX_RELAY_DATA`, per-peer queue cap, queued chunk behavior, and ACK handling.
    - Done when a large file transfer completes after accept and shows a precise error if it cannot.
    - Status: found the accept-state mismatch in the onion receive path. `FILE_ACCEPT` and other v2 file control messages were parsed as file messages but not routed to the file module, so the sender never left pending state after the receiver accepted.
+   - New finding: outgoing file chunks were counted as sent even when direct/relay/onion send failed, so transfers could wait for impossible ACKs and stall after accept.
+   - Status: chunk progress now advances only after successful send; failed sends leave the same chunk pending and direct-mode burst sending backs off instead of retrying the same failed chunk repeatedly in one poll.
 
 8. Voice recording fix
    - Trace recorder permission, press/hold gesture state, recorder initialization, active recording flag, and audio file creation.
