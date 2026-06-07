@@ -21,6 +21,7 @@ Native routing pads UUID node IDs to 32 bytes, so server-side searches should in
 - UI can stay on "establishing connection" even while some messages still pass.
 - Android inactive/background app does not reliably show notifications.
 - Audio calls and video calls do not work reliably.
+- When a call drops, the app can show a blank screen instead of returning to a valid chat/home/call-ended state.
 - Large file transfers still do not complete even after the receiver accepts.
 - Hold-to-record audio button is not active.
 - Architecture is hard to reason about across bootstrap, relay, chat ACKs, notifications, and WebRTC signaling.
@@ -69,6 +70,7 @@ Native routing pads UUID node IDs to 32 bytes, so server-side searches should in
 6. Audio/video call fix
    - Trace offer, answer, ICE candidates, call state transitions, permission checks, and media acquisition.
    - Make call signaling observable before changing transport.
+   - Fix dropped-call navigation/state so the UI never lands on a blank screen.
    - Done when A/B or mobile/PC call setup reaches connected media or reports a precise failure reason.
 
 7. Large file transfer fix
