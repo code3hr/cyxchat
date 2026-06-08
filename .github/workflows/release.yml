@@ -45,10 +45,65 @@ jobs:
         working-directory: app
         run: flutter test
 
+  validate-native-linux:
+    name: Validate Native C Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout CyxChat
+        uses: actions/checkout@v4
+        with:
+          path: cyxchat
+
+      - name: Checkout CyxWiz
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/conspiracy
+          path: cyxwiz
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake libsodium-dev ninja-build pkg-config
+
+      - name: Build CyxWiz
+        working-directory: cyxwiz
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCYXWIZ_ENABLE_UPNP=OFF \
+            -DCYXWIZ_BUILD_TESTS=OFF \
+            -DCYXWIZ_BUILD_TOOLS=OFF \
+            -DCYXWIZ_TRANSPORT_BLUETOOTH=OFF \
+            -DCYXWIZ_TRANSPORT_LORA=OFF \
+            -G Ninja
+          cmake --build build --config Debug --target cyxwiz
+
+      - name: Build CyxChat tests
+        working-directory: cyxchat/lib
+        run: |
+          cmake -B build-native-tests \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            "-DCYXWIZ_LIBRARY=${{ github.workspace }}/cyxwiz/build/libcyxwiz.a" \
+            "-DCYXWIZ_INCLUDE_DIR=${{ github.workspace }}/cyxwiz/include" \
+            -DSODIUM_INCLUDE_DIR=/usr/include \
+            -DSODIUM_LIBRARY=/usr/lib/x86_64-linux-gnu/libsodium.so \
+            -DCYXCHAT_ENABLE_UPNP=OFF \
+            -DCYXCHAT_BUILD_TESTS=ON \
+            -G Ninja
+          cmake --build build-native-tests --config Debug
+
+      - name: Run CyxChat tests
+        working-directory: cyxchat/lib/build-native-tests
+        run: ctest --output-on-failure
+
   build-windows:
     name: Build Windows
     runs-on: windows-latest
-    needs: validate-flutter
+    needs:
+      - validate-flutter
+      - validate-native-linux
     steps:
       - name: Checkout CyxChat
         uses: actions/checkout@v4
@@ -157,7 +212,9 @@ jobs:
   build-macos:
     name: Build macOS
     runs-on: macos-latest
-    needs: validate-flutter
+    needs:
+      - validate-flutter
+      - validate-native-linux
     steps:
       - name: Checkout CyxChat
         uses: actions/checkout@v4
@@ -246,7 +303,9 @@ jobs:
   build-linux:
     name: Build Linux
     runs-on: ubuntu-latest
-    needs: validate-flutter
+    needs:
+      - validate-flutter
+      - validate-native-linux
     steps:
       - name: Checkout CyxChat
         uses: actions/checkout@v4
@@ -339,7 +398,9 @@ jobs:
   build-android:
     name: Build Android
     runs-on: ubuntu-latest
-    needs: validate-flutter
+    needs:
+      - validate-flutter
+      - validate-native-linux
     steps:
       - name: Checkout CyxChat
         uses: actions/checkout@v4

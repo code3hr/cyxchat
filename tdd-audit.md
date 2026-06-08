@@ -9,7 +9,7 @@ The chat server is not yet proven production-stable.
 Evidence:
 
 - GitHub release CI validates Flutter analyzer/tests and cross-platform release builds.
-- CI does not run the native C test suite.
+- CI now runs the native C test suite before platform release builds.
 - CI does not build or test `cyxchat-server`.
 - The active server source of truth is currently outside this repo at `D:\Dev\conspiracy\tools\cyxchat-server.c`.
 - Existing live P2P relay checks can report success when the server accepts a relay packet even if the receiver gets nothing.
@@ -46,7 +46,6 @@ Evidence:
 
 1. Make the existing P2P relay test fail if peer B receives nothing.
 2. Add a strict server relay contract test that can run against a local or Oracle server.
-3. Add native C CI for `lib/tests`.
+3. Add native C CI for `lib/tests`. Done in `.github/workflows/release.yml`.
 4. Add server CI once `cyxchat-server.c` is moved into this repo or checked out by workflow.
 5. Add Flutter provider tests for contact key restore, chat route warming, file transfer failure, and call signaling failure.
-
