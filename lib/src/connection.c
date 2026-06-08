@@ -99,6 +99,7 @@ struct cyxchat_conn_ctx {
     cyxwiz_onion_ctx_t *onion;
     cyxwiz_dht_t *dht;
     cyxwiz_discovery_t *discovery;
+    const cyxwiz_transport_ops_t *transport_ops;
 
     /* Our identity */
     cyxwiz_node_id_t local_id;
@@ -165,6 +166,27 @@ static void fire_progress_event(cyxchat_conn_ctx_t *ctx,
                                 uint8_t retry_num,
                                 uint8_t retry_max,
                                 cyxchat_conn_fail_t fail_reason);
+static cyxwiz_error_t relay_aware_transport_init(cyxwiz_transport_t *transport);
+static cyxwiz_error_t relay_aware_transport_shutdown(cyxwiz_transport_t *transport);
+static cyxwiz_error_t relay_aware_transport_send(cyxwiz_transport_t *transport,
+                                                  const cyxwiz_node_id_t *to,
+                                                  const uint8_t *data,
+                                                  size_t len);
+static cyxwiz_error_t relay_aware_transport_discover(cyxwiz_transport_t *transport);
+static cyxwiz_error_t relay_aware_transport_stop_discover(cyxwiz_transport_t *transport);
+static size_t relay_aware_transport_max_packet_size(cyxwiz_transport_t *transport);
+static cyxwiz_error_t relay_aware_transport_poll(cyxwiz_transport_t *transport,
+                                                  uint32_t timeout_ms);
+
+static const cyxwiz_transport_ops_t relay_aware_transport_ops = {
+    relay_aware_transport_init,
+    relay_aware_transport_shutdown,
+    relay_aware_transport_send,
+    relay_aware_transport_discover,
+    relay_aware_transport_stop_discover,
+    relay_aware_transport_max_packet_size,
+    relay_aware_transport_poll
+};
 
 static uint64_t get_time_ms(void)
 {
@@ -307,6 +329,126 @@ static void fire_progress_event(cyxchat_conn_ctx_t *ctx,
 
     ctx->on_progress(peer_id, event, retry_num, retry_max, fail_reason,
                      ctx->progress_user_data);
+}
+
+static cyxchat_conn_ctx_t* ctx_from_transport(cyxwiz_transport_t *transport)
+{
+    if (!transport || transport->recv_user_data == NULL) {
+        return NULL;
+    }
+    return (cyxchat_conn_ctx_t*)transport->recv_user_data;
+}
+
+static const cyxwiz_transport_ops_t* original_transport_ops(cyxwiz_transport_t *transport)
+{
+    cyxchat_conn_ctx_t *ctx = ctx_from_transport(transport);
+    return (ctx && ctx->transport_ops) ? ctx->transport_ops : NULL;
+}
+
+static cyxwiz_error_t relay_error_to_cyxwiz(cyxchat_error_t err)
+{
+    switch (err) {
+        case CYXCHAT_OK:
+            return CYXWIZ_OK;
+        case CYXCHAT_ERR_FILE_TOO_LARGE:
+            return CYXWIZ_ERR_PACKET_TOO_LARGE;
+        case CYXCHAT_ERR_NOT_FOUND:
+        case CYXCHAT_ERR_NO_KEY:
+            return CYXWIZ_ERR_NO_ROUTE;
+        case CYXCHAT_ERR_NULL:
+        case CYXCHAT_ERR_INVALID:
+            return CYXWIZ_ERR_INVALID;
+        default:
+            return CYXWIZ_ERR_TRANSPORT;
+    }
+}
+
+static int should_send_over_chat_relay(cyxchat_conn_ctx_t *ctx,
+                                       const cyxwiz_node_id_t *to,
+                                       const uint8_t *data,
+                                       size_t len)
+{
+    if (!ctx || !ctx->relay || !to || !data || len == 0) {
+        return 0;
+    }
+
+    if (data[0] != CYXWIZ_MSG_ONION_DATA && !is_discovery_message(data[0])) {
+        return 0;
+    }
+
+    cyxchat_peer_conn_t *peer = find_peer_conn(ctx, to);
+    if (peer && peer->is_relayed) {
+        return 1;
+    }
+
+    return cyxchat_relay_is_connected(ctx->relay, to) ? 1 : 0;
+}
+
+static cyxwiz_error_t relay_aware_transport_init(cyxwiz_transport_t *transport)
+{
+    const cyxwiz_transport_ops_t *ops = original_transport_ops(transport);
+    return (ops && ops->init) ? ops->init(transport) : CYXWIZ_ERR_NOT_INITIALIZED;
+}
+
+static cyxwiz_error_t relay_aware_transport_shutdown(cyxwiz_transport_t *transport)
+{
+    const cyxwiz_transport_ops_t *ops = original_transport_ops(transport);
+    return (ops && ops->shutdown) ? ops->shutdown(transport) : CYXWIZ_ERR_NOT_INITIALIZED;
+}
+
+static cyxwiz_error_t relay_aware_transport_send(cyxwiz_transport_t *transport,
+                                                  const cyxwiz_node_id_t *to,
+                                                  const uint8_t *data,
+                                                  size_t len)
+{
+    cyxchat_conn_ctx_t *ctx = ctx_from_transport(transport);
+    const cyxwiz_transport_ops_t *ops = original_transport_ops(transport);
+
+    if (should_send_over_chat_relay(ctx, to, data, len)) {
+        cyxchat_error_t relay_err = cyxchat_relay_send(ctx->relay, to, data, len);
+        if (relay_err == CYXCHAT_ERR_NOT_FOUND &&
+            cyxchat_relay_connect(ctx->relay, to) == CYXCHAT_OK) {
+            relay_err = cyxchat_relay_send(ctx->relay, to, data, len);
+        }
+
+        if (relay_err == CYXCHAT_OK) {
+            CYXWIZ_DEBUG("Transport send routed over CyxChat relay");
+            return CYXWIZ_OK;
+        }
+
+        CYXWIZ_WARN("Relay-aware transport send failed: %d", relay_err);
+        return relay_error_to_cyxwiz(relay_err);
+    }
+
+    return (ops && ops->send) ? ops->send(transport, to, data, len)
+                              : CYXWIZ_ERR_NOT_INITIALIZED;
+}
+
+static cyxwiz_error_t relay_aware_transport_discover(cyxwiz_transport_t *transport)
+{
+    const cyxwiz_transport_ops_t *ops = original_transport_ops(transport);
+    return (ops && ops->discover) ? ops->discover(transport) : CYXWIZ_ERR_NOT_INITIALIZED;
+}
+
+static cyxwiz_error_t relay_aware_transport_stop_discover(cyxwiz_transport_t *transport)
+{
+    const cyxwiz_transport_ops_t *ops = original_transport_ops(transport);
+    return (ops && ops->stop_discover) ? ops->stop_discover(transport)
+                                       : CYXWIZ_ERR_NOT_INITIALIZED;
+}
+
+static size_t relay_aware_transport_max_packet_size(cyxwiz_transport_t *transport)
+{
+    const cyxwiz_transport_ops_t *ops = original_transport_ops(transport);
+    return (ops && ops->max_packet_size) ? ops->max_packet_size(transport) : 0;
+}
+
+static cyxwiz_error_t relay_aware_transport_poll(cyxwiz_transport_t *transport,
+                                                  uint32_t timeout_ms)
+{
+    const cyxwiz_transport_ops_t *ops = original_transport_ops(transport);
+    return (ops && ops->poll) ? ops->poll(transport, timeout_ms)
+                              : CYXWIZ_ERR_NOT_INITIALIZED;
 }
 
 /* Relay data callback - forwards relay data to application */
@@ -968,6 +1110,9 @@ cyxchat_error_t cyxchat_conn_create(cyxchat_conn_ctx_t **ctx,
     /* Set callbacks */
     cyxwiz_transport_set_recv_callback(c->transport, on_transport_recv, c);
     cyxwiz_transport_set_peer_callback(c->transport, on_peer_discovered, c);
+
+    c->transport_ops = c->transport->ops;
+    c->transport->ops = &relay_aware_transport_ops;
 
     /* Note: cyxwiz_transport_create already calls init internally */
 
