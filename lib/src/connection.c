@@ -406,6 +406,44 @@ static void on_relay_data(cyxchat_relay_ctx_t *relay_ctx,
     }
 }
 
+static void on_relay_state(cyxchat_relay_ctx_t *relay_ctx,
+                           const cyxwiz_node_id_t *peer_id,
+                           int connected,
+                           void *user_data)
+{
+    (void)relay_ctx;
+    cyxchat_conn_ctx_t *ctx = (cyxchat_conn_ctx_t*)user_data;
+    if (!ctx || !peer_id) return;
+
+    cyxchat_peer_conn_t *peer = find_peer_conn(ctx, peer_id);
+    if (!peer && connected) {
+        peer = alloc_peer_conn(ctx);
+        if (peer) {
+            peer->peer_id = *peer_id;
+        }
+    }
+    if (!peer) return;
+
+    if (connected) {
+        uint64_t now = get_time_ms();
+        peer->is_relayed = 1;
+        peer->last_activity = now;
+        if (peer->state != CYXCHAT_CONN_RELAYING &&
+            peer->state != CYXCHAT_CONN_CONNECTED) {
+            set_peer_state(ctx, peer, CYXCHAT_CONN_RELAYING);
+        }
+        if (!peer->has_pubkey && peer->last_announce_sent == 0 && ctx->onion) {
+            send_announce_to_peer(ctx, peer_id);
+            peer->last_announce_sent = now;
+        }
+    } else {
+        peer->is_relayed = 0;
+        if (!peer->has_pubkey || peer->state == CYXCHAT_CONN_RELAYING) {
+            set_peer_state(ctx, peer, CYXCHAT_CONN_DISCONNECTED);
+        }
+    }
+}
+
 /* Router data callback - forwards direct P2P data to application
  * This handles data sent via cyxwiz_router_send() (direct mode) */
 static void on_router_data(const cyxwiz_node_id_t *from,
@@ -1033,6 +1071,7 @@ cyxchat_error_t cyxchat_conn_create(cyxchat_conn_ctx_t **ctx,
     /* Set relay callbacks */
     if (c->relay) {
         cyxchat_relay_set_on_data(c->relay, on_relay_data, c);
+        cyxchat_relay_set_on_state(c->relay, on_relay_state, c);
     }
 
     /* Create server registry for multi-server health tracking */
@@ -1199,6 +1238,10 @@ int cyxchat_conn_poll(cyxchat_conn_ctx_t *ctx, uint64_t now_ms)
                 continue;
             }
             if (peer) {
+                if (pending->punch_attempts > 0) {
+                    continue;
+                }
+
                 /* Fire progress event: relay fallback */
                 fire_progress_event(ctx, &pending->peer_id, CYXCHAT_CONN_EVENT_RELAY_FALLBACK,
                                     0, CYXCHAT_ANNOUNCE_MAX_RETRIES, CYXCHAT_CONN_FAIL_NONE);
@@ -1219,10 +1262,9 @@ int cyxchat_conn_poll(cyxchat_conn_ctx_t *ctx, uint64_t now_ms)
                         peer->last_announce_sent = get_time_ms();
                     }
 
-                    if (pending->callback) {
-                        pending->callback(ctx, &pending->peer_id, CYXCHAT_CONN_RELAYING,
-                                         CYXCHAT_OK, pending->user_data);
-                    }
+                    pending->punch_attempts = 1;
+                    events++;
+                    continue;
                 } else {
                     set_peer_state(ctx, peer, CYXCHAT_CONN_DISCONNECTED);
 
@@ -1274,6 +1316,15 @@ int cyxchat_conn_poll(cyxchat_conn_ctx_t *ctx, uint64_t now_ms)
                 set_peer_state(ctx, peer, CYXCHAT_CONN_DISCONNECTED);
                 peer->is_relayed = 0;
                 peer->last_announce_sent = now_ms;
+
+                cyxchat_pending_conn_t *pending = find_pending(ctx, &peer->peer_id);
+                if (pending) {
+                    if (pending->callback) {
+                        pending->callback(ctx, &peer->peer_id, CYXCHAT_CONN_DISCONNECTED,
+                                          CYXCHAT_ERR_TIMEOUT, pending->user_data);
+                    }
+                    free_pending(ctx, pending);
+                }
             }
         }
     }
