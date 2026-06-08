@@ -347,6 +347,14 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
       return;
     }
 
+    final routeReady = await _showCallRouteWarningIfNeeded(
+      context,
+      ref,
+      peerId: conversation.peerId!,
+      video: video,
+    );
+    if (!routeReady) return;
+
     // Show privacy warning for first call
     final hasSeenWarning = settings.hasSeenCallPrivacyWarning;
     if (!hasSeenWarning) {
@@ -375,6 +383,52 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
         ),
       );
     }
+  }
+
+  Future<bool> _showCallRouteWarningIfNeeded(
+    BuildContext context,
+    WidgetRef ref, {
+    required String peerId,
+    required bool video,
+  }) async {
+    final connectionProvider = ref.read(connectionNotifierProvider);
+    final hasSecureRoute =
+        connectionProvider.initialized && connectionProvider.hasPeerKey(peerId);
+    final isDirect = hasSecureRoute &&
+        connectionProvider.isConnected(peerId) &&
+        !connectionProvider.isRelayed(peerId);
+
+    if (isDirect) return true;
+
+    if (connectionProvider.initialized && !hasSecureRoute) {
+      unawaited(connectionProvider.connect(peerId));
+    }
+
+    final routeText = hasSecureRoute
+        ? 'This contact is connected through relay, not direct P2P.'
+        : 'The secure route to this contact is still being established.';
+    final mediaText = video
+        ? 'Video media needs a direct NAT path and may not connect on relay.'
+        : 'Audio media needs a direct NAT path and may not connect on relay.';
+
+    return await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Call Route Not Ready'),
+            content: Text('$routeText $mediaText'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Try Anyway'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
   }
 
   void _showVideoCallDisabledDialog(BuildContext context) {
