@@ -71,6 +71,7 @@ jobs:
         run: |
           cmake -B build \
             -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
             -DCYXWIZ_ENABLE_UPNP=OFF \
             -DCYXWIZ_BUILD_TESTS=OFF \
             -DCYXWIZ_BUILD_TOOLS=OFF \
@@ -90,6 +91,7 @@ jobs:
             -DSODIUM_INCLUDE_DIR=/usr/include \
             -DSODIUM_LIBRARY=/usr/lib/x86_64-linux-gnu/libsodium.so \
             -DCYXCHAT_ENABLE_UPNP=OFF \
+            -DCYXCHAT_BUILD_SHARED=OFF \
             -DCYXCHAT_BUILD_TESTS=ON \
             -G Ninja
           cmake --build build-native-tests --config Debug
