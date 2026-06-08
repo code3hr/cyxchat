@@ -4,8 +4,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/models.dart';
 import '../services/chat_service.dart';
 import 'chat_provider.dart' as native_chat;
+import 'connection_provider.dart';
 import 'file_provider.dart';
 import 'network_provider.dart';
+import 'settings_provider.dart';
 
 /// Provider for all conversations
 final conversationsProvider = FutureProvider<List<Conversation>>((ref) async {
@@ -195,6 +197,13 @@ class ChatActions {
           );
         }
 
+        final settings = _ref.read(settingsProvider);
+        final connectionProvider = _ref.read(connectionNotifierProvider);
+        final useFastTransfer = settings.directFileTransfer &&
+            connectionProvider.initialized &&
+            connectionProvider.isConnected(toPeerId) &&
+            !connectionProvider.isRelayed(toPeerId);
+
         return fileProvider.sendFile(
           toPeerId: toPeerId,
           filename: filename,
@@ -203,6 +212,7 @@ class ChatActions {
                   messageType == MessageType.voice
               ? 'audio/mp4'
               : null,
+          useDirectMode: useFastTransfer,
         );
       },
     );

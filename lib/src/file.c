@@ -47,6 +47,7 @@ typedef struct {
     int active;
     uint64_t last_chunk_sent_ms;            /* Timestamp of last chunk sent */
     size_t chunk_size;                      /* Chunk size used for this transfer */
+    int use_direct_mode;                    /* Transfer mode selected when created */
     int peer_addr_sent;                     /* 1 if we sent our address for this transfer */
     int peer_addr_received;                 /* 1 if we received peer's address */
     /* ACK/retry fields */
@@ -464,7 +465,7 @@ static int send_next_chunk(cyxchat_file_ctx_t *ctx, file_transfer_slot_t *slot) 
     size_t chunk_size = slot->chunk_size;
     if (chunk_size == 0) {
         /* Fallback if not set (shouldn't happen) */
-        chunk_size = (ctx->use_direct_mode && ctx->router)
+        chunk_size = (slot->use_direct_mode && ctx->router)
             ? CYXCHAT_DIRECT_CHUNK_SIZE
             : CYXCHAT_CHUNK_SIZE;
     }
@@ -521,7 +522,7 @@ static int send_next_chunk(cyxchat_file_ctx_t *ctx, file_transfer_slot_t *slot) 
     }
 
     cyxchat_error_t err;
-    if (ctx->use_direct_mode && ctx->transport) {
+    if (slot->use_direct_mode && ctx->transport) {
         /* Direct P2P: send via transport directly (bypasses router peer check) */
         cyxwiz_error_t werr = ctx->transport->ops->send(
             ctx->transport, &slot->transfer.peer, chunk_buf, chunk_wire_len);
@@ -551,7 +552,7 @@ static int send_next_chunk(cyxchat_file_ctx_t *ctx, file_transfer_slot_t *slot) 
         slot->last_chunk_sent_ms = slot->transfer.updated_at;
         CYXWIZ_INFO("send_next_chunk: sent chunk %u/%u (%u bytes, %s mode)",
                     slot->transfer.chunks_done, slot->transfer.meta.chunk_count, chunk_len,
-                    (ctx->use_direct_mode && ctx->transport) ? "direct" : "onion");
+                    (slot->use_direct_mode && ctx->transport) ? "direct" : "onion");
         /* Notify progress for outgoing transfers */
         if (ctx->on_progress) {
             ctx->on_progress(ctx, &slot->transfer.meta.file_id,
@@ -579,7 +580,7 @@ int cyxchat_file_poll(cyxchat_file_ctx_t *ctx, uint64_t now_ms) {
         /* For outgoing transfers, send chunks */
         if (slot->transfer.is_outgoing && slot->transfer.state == CYXCHAT_FILE_SENDING) {
             if (slot->transfer.chunks_done < slot->transfer.meta.chunk_count) {
-                if (ctx->use_direct_mode && ctx->router) {
+                if (slot->use_direct_mode && ctx->router) {
                     /* Direct P2P mode: send multiple chunks per poll, no rate limiting
                      * Send up to 10 chunks per poll for fast transfer */
                     int chunks_this_poll = 0;
@@ -661,7 +662,7 @@ int cyxchat_file_poll(cyxchat_file_ctx_t *ctx, uint64_t now_ms) {
                 uint64_t elapsed = now_ms - updated_at;
                 /* Direct mode: 5 minute timeout (large files take time)
                  * Onion mode: 60 second timeout, but extend if ACK retry in progress */
-                uint64_t timeout_ms = (ctx->use_direct_mode && ctx->router) ? 300000 : 60000;
+                uint64_t timeout_ms = (slot->use_direct_mode && ctx->router) ? 300000 : 60000;
                 if (slot->ack_requested) timeout_ms = 120000;  /* Extend to 2 min if retrying */
                 if (elapsed > timeout_ms) {
                     CYXWIZ_WARN("file_poll: Transfer timeout after %llu ms", (unsigned long long)elapsed);
@@ -707,8 +708,10 @@ cyxchat_error_t cyxchat_file_send(
         return CYXCHAT_ERR_NULL;
     }
 
+    int use_direct_mode = (ctx->use_direct_mode && ctx->router && ctx->transport) ? 1 : 0;
+
     /* Check file size limit based on mode */
-    size_t max_file_size = (ctx->use_direct_mode && ctx->router)
+    size_t max_file_size = use_direct_mode
         ? CYXCHAT_DIRECT_MAX_FILE
         : (65536);  /* 64KB limit for onion routing */
 
@@ -718,7 +721,7 @@ cyxchat_error_t cyxchat_file_send(
     }
 
     /* Calculate chunk count based on mode */
-    size_t chunk_size = (ctx->use_direct_mode && ctx->router)
+    size_t chunk_size = use_direct_mode
         ? CYXCHAT_DIRECT_CHUNK_SIZE
         : CYXCHAT_CHUNK_SIZE;
 
@@ -761,6 +764,7 @@ cyxchat_error_t cyxchat_file_send(
     slot->transfer.meta.size = (uint32_t)data_len;
     slot->transfer.meta.chunk_count = chunk_count;
     slot->chunk_size = chunk_size;  /* Store for send_next_chunk */
+    slot->use_direct_mode = use_direct_mode;
 
     /* Hash file */
     cyxwiz_crypto_hash(data, data_len, slot->transfer.meta.file_hash, 32);
@@ -792,7 +796,7 @@ cyxchat_error_t cyxchat_file_send(
 
     /* For direct mode, send our public address BEFORE file metadata.
      * This allows the peer to add us to their transport for direct P2P. */
-    if (ctx->use_direct_mode && ctx->conn_ctx) {
+    if (slot->use_direct_mode && ctx->conn_ctx) {
         cyxchat_error_t addr_err = send_peer_addr_to_peer(ctx, to, &slot->transfer.meta.file_id);
         if (addr_err != CYXCHAT_OK) {
             CYXWIZ_WARN("file: failed to send peer addr for direct mode: %d", addr_err);
@@ -1426,6 +1430,7 @@ static cyxchat_error_t handle_file_meta(
     } else {
         slot->chunk_size = CYXCHAT_CHUNK_SIZE;  /* Fallback */
     }
+    slot->use_direct_mode = (slot->chunk_size > CYXCHAT_CHUNK_SIZE) ? 1 : 0;
 
     /* Validate file size before allocation */
     if (size == 0 || size > CYXCHAT_DIRECT_MAX_FILE) {

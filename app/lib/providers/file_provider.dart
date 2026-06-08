@@ -384,19 +384,25 @@ class FileProvider extends ChangeNotifier {
     required String filename,
     required Uint8List data,
     String? mimeType,
+    bool? useDirectMode,
   }) async {
     if (!_initialized) {
       return FileSendResult(
           success: false, error: 'File provider not initialized');
     }
 
+    if (useDirectMode != null && useDirectMode != isDirectMode) {
+      setDirectMode(useDirectMode);
+    }
+    final effectiveDirectMode = useDirectMode ?? isDirectMode;
+
     // Check file size limit based on mode
-    final maxSize = isDirectMode
+    final maxSize = effectiveDirectMode
         ? CyxChatFileConst.directMaxFileSize
         : CyxChatFileConst.maxFileSize;
 
     if (data.length > maxSize) {
-      if (isDirectMode) {
+      if (effectiveDirectMode) {
         return FileSendResult(
           success: false,
           error:
@@ -436,10 +442,10 @@ class FileProvider extends ChangeNotifier {
 
       if (fileId != null) {
         debugPrint(
-            'FileProvider: Sending file $filename (${data.length} bytes) to $toPeerId, direct=$isDirectMode');
+            'FileProvider: Sending file $filename (${data.length} bytes) to $toPeerId, direct=$effectiveDirectMode');
 
         // Calculate chunk count based on mode
-        final chunkSize = isDirectMode
+        final chunkSize = effectiveDirectMode
             ? CyxChatFileConst.directChunkSize
             : CyxChatFileConst.chunkSize;
 
@@ -772,12 +778,14 @@ class FileActions {
     required String filename,
     required Uint8List data,
     String? mimeType,
+    bool? useDirectMode,
   }) {
     return _ref.read(fileNotifierProvider).sendFile(
           toPeerId: toPeerId,
           filename: filename,
           data: data,
           mimeType: mimeType,
+          useDirectMode: useDirectMode,
         );
   }
 

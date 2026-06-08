@@ -2293,6 +2293,25 @@ class _MessageInputState extends ConsumerState<_MessageInput> {
     }
   }
 
+  bool _canUseFastTransfer(String peerId) {
+    final settings = ref.read(settingsProvider);
+    final connectionProvider = ref.read(connectionNotifierProvider);
+    return settings.directFileTransfer &&
+        connectionProvider.initialized &&
+        connectionProvider.isConnected(peerId) &&
+        !connectionProvider.isRelayed(peerId);
+  }
+
+  String _formatPayloadSize(int size) {
+    if (size >= 1024 * 1024) {
+      return '${(size / (1024 * 1024)).toStringAsFixed(1)} MB';
+    }
+    if (size >= 1024) {
+      return '${(size / 1024).toStringAsFixed(1)} KB';
+    }
+    return '$size B';
+  }
+
   Future<void> _pickFile(BuildContext context) async {
     try {
       final result = await FilePicker.platform.pickFiles(
@@ -2306,34 +2325,6 @@ class _MessageInputState extends ConsumerState<_MessageInput> {
       final file = result.files.first;
       final fileSize = file.size;
 
-      // Check file size limit based on direct mode
-      final fileProvider = ref.read(fileNotifierProvider);
-      final isDirectMode = fileProvider.isDirectMode;
-      final maxSize = isDirectMode
-          ? CyxChatFileConst.directMaxFileSize
-          : CyxChatFileConst.maxFileSize;
-
-      if (fileSize > maxSize) {
-        if (context.mounted) {
-          final sizeStr = isDirectMode
-              ? '${(maxSize / (1024 * 1024 * 1024)).toStringAsFixed(0)} GB'
-              : '${(maxSize / 1024).toStringAsFixed(0)} KB';
-          final fileSizeStr = fileSize >= 1024 * 1024
-              ? '${(fileSize / (1024 * 1024)).toStringAsFixed(1)} MB'
-              : '${(fileSize / 1024).toStringAsFixed(1)} KB';
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                'File too large ($fileSizeStr). Maximum size is $sizeStr.'
-                '${!isDirectMode ? ' Enable "Fast File Transfer" in settings for larger files.' : ''}',
-              ),
-              duration: const Duration(seconds: 4),
-            ),
-          );
-        }
-        return;
-      }
-
       // Get peer ID from conversation
       final conversationAsync =
           ref.read(conversationProvider(widget.conversationId));
@@ -2342,6 +2333,29 @@ class _MessageInputState extends ConsumerState<_MessageInput> {
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Cannot send file: peer not found')),
+          );
+        }
+        return;
+      }
+
+      final useFastTransfer = _canUseFastTransfer(conversation.peerId!);
+      final maxSize = useFastTransfer
+          ? CyxChatFileConst.directMaxFileSize
+          : CyxChatFileConst.maxFileSize;
+
+      if (fileSize > maxSize) {
+        if (context.mounted) {
+          final settings = ref.read(settingsProvider);
+          final reason = settings.directFileTransfer
+              ? 'Fast transfer needs a direct P2P route before sending large files.'
+              : 'Enable Fast File Transfer and wait for a direct P2P route before sending large files.';
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'File too large (${_formatPayloadSize(fileSize)}). Relay/onion transfer supports up to ${_formatPayloadSize(maxSize)}. $reason',
+              ),
+              duration: const Duration(seconds: 5),
+            ),
           );
         }
         return;
@@ -2365,19 +2379,17 @@ class _MessageInputState extends ConsumerState<_MessageInput> {
             toPeerId: conversation.peerId!,
             filename: file.name,
             data: Uint8List.fromList(fileBytes),
+            useDirectMode: useFastTransfer,
           );
 
       setState(() => _isSendingFile = false);
 
       if (sendResult.success) {
         // Save file message to conversation
-        final sizeStr = fileSize < 1024
-            ? '$fileSize B'
-            : '${(fileSize / 1024).toStringAsFixed(1)} KB';
         await ref.read(chatActionsProvider).sendFileMessage(
               conversationId: widget.conversationId,
               filename: file.name,
-              fileSize: sizeStr,
+              fileSize: _formatPayloadSize(fileSize),
               fileId: sendResult.fileId,
               localPath: sendResult.localPath,
             );
@@ -2459,6 +2471,7 @@ class _MessageInputState extends ConsumerState<_MessageInput> {
     }
 
     // Send voice message via file transfer
+    final useFastTransfer = _canUseFastTransfer(conversation.peerId!);
     debugPrint(
         'VoiceMessage: Sending ${voiceMessage.sizeBytes} bytes to ${conversation.peerId}');
     final sendResult = await ref.read(fileActionsProvider).sendFile(
@@ -2466,6 +2479,7 @@ class _MessageInputState extends ConsumerState<_MessageInput> {
           filename: voiceMessage.filename,
           data: voiceMessage.data,
           mimeType: 'audio/mp4',
+          useDirectMode: useFastTransfer,
         );
 
     debugPrint(
