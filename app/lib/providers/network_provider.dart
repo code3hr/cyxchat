@@ -247,12 +247,6 @@ class ConnectionActions {
       log.info('Relay server configured: $bootstrap', source: 'Network');
     }
 
-    final contactKeySync = _ref.read(contactKeySyncProvider);
-    await contactKeySync.restoreKnownPeerKeys();
-
-    // Yield to let UI render before continuing initialization
-    await Future.delayed(Duration.zero);
-
     // Initialize DNS with the same identity
     // Note: DNS will use node ID for identification without signing for now
     // Full signing key support can be added when identity includes Ed25519 keys
@@ -277,6 +271,11 @@ class ConnectionActions {
       log.error('Chat initialization failed', source: 'Network');
       // Don't fail - chat can be retried
     } else {
+      // Restore peer keys only after ChatProvider has restored the local onion
+      // keypair. cyxwiz_onion_set_keypair() clears derived peer keys.
+      final contactKeySync = _ref.read(contactKeySyncProvider);
+      await contactKeySync.restoreKnownPeerKeys();
+
       // Connect ChatService to ChatProvider for message handling
       ChatService.instance.connectProvider(chatProvider);
       log.info('Chat service ready for messaging', source: 'Network');

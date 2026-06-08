@@ -293,22 +293,26 @@ int cyxchat_relay_poll(cyxchat_relay_ctx_t *ctx, uint64_t now_ms)
         cyxchat_relay_conn_internal_t *conn = &ctx->connections[i];
         if (!conn->active) continue;
 
-        /* Check for timeout */
-        if (now_ms - conn->last_activity > CYXCHAT_RELAY_TIMEOUT_MS) {
-            free_connection(ctx, conn);
-            events++;
-            continue;
-        }
-
         /* Send keepalive if needed */
         if (now_ms - conn->last_keepalive > CYXCHAT_RELAY_KEEPALIVE_MS) {
             cyxchat_relay_keepalive_msg_t msg;
             msg.type = CYXCHAT_RELAY_KEEPALIVE;
             msg.from = ctx->local_id;
 
-            send_to_relay(ctx, conn->server_index, (uint8_t*)&msg, sizeof(msg));
+            if (send_to_relay(ctx, conn->server_index,
+                              (uint8_t*)&msg, sizeof(msg)) == CYXCHAT_OK) {
+                conn->last_activity = now_ms;
+            }
             conn->last_keepalive = now_ms;
             events++;
+        }
+
+        /* Check for timeout after keepalive so idle but writable relay routes
+         * are not dropped just because no peer payload has arrived recently. */
+        if (now_ms - conn->last_activity > CYXCHAT_RELAY_TIMEOUT_MS) {
+            free_connection(ctx, conn);
+            events++;
+            continue;
         }
     }
 

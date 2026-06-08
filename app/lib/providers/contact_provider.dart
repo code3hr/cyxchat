@@ -450,7 +450,9 @@ class PresenceSync {
   Future<void> _warmConnect(String peerId) async {
     final connProvider = _ref.read(connectionNotifierProvider);
     if (!connProvider.isOnline) return;
-    if (connProvider.hasPeerKey(peerId)) return;
+    if (connProvider.hasPeerKey(peerId) && connProvider.isConnected(peerId)) {
+      return;
+    }
 
     final progress = connProvider.getProgress(peerId);
     if (progress != null && progress.isConnecting) return;

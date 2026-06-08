@@ -770,6 +770,18 @@ static void on_peer_key_received(const cyxwiz_node_id_t *peer_id,
             cyxwiz_peer_table_set_state(ctx->peer_table, peer_id, CYXWIZ_PEER_STATE_CONNECTED);
             cyxwiz_peer_table_record_success(ctx->peer_table, peer_id);
         }
+
+        /* Key exchange proves the secure path is ready. Clear any pending
+         * hole-punch request so its timeout cannot later force relay fallback
+         * or disconnect an already usable route. */
+        cyxchat_pending_conn_t *pending = find_pending(ctx, peer_id);
+        if (pending) {
+            if (pending->callback && conn) {
+                pending->callback(ctx, peer_id, conn->state, CYXCHAT_OK,
+                                  pending->user_data);
+            }
+            free_pending(ctx, pending);
+        }
     }
 }
 
@@ -1175,6 +1187,17 @@ int cyxchat_conn_poll(cyxchat_conn_ctx_t *ctx, uint64_t now_ms)
         if (elapsed >= CYXCHAT_HOLE_PUNCH_TIMEOUT_MS) {
             /* Hole punch timed out, try relay */
             cyxchat_peer_conn_t *peer = find_peer_conn(ctx, &pending->peer_id);
+            if (peer && peer->has_pubkey &&
+                (peer->state == CYXCHAT_CONN_CONNECTED ||
+                 peer->state == CYXCHAT_CONN_RELAYING)) {
+                if (pending->callback) {
+                    pending->callback(ctx, &pending->peer_id, peer->state,
+                                     CYXCHAT_OK, pending->user_data);
+                }
+                free_pending(ctx, pending);
+                events++;
+                continue;
+            }
             if (peer) {
                 /* Fire progress event: relay fallback */
                 fire_progress_event(ctx, &pending->peer_id, CYXCHAT_CONN_EVENT_RELAY_FALLBACK,
@@ -1261,6 +1284,15 @@ int cyxchat_conn_poll(cyxchat_conn_ctx_t *ctx, uint64_t now_ms)
         if (!peer->active) continue;
 
         if (peer->state == CYXCHAT_CONN_CONNECTED || peer->state == CYXCHAT_CONN_RELAYING) {
+            if (peer->is_relayed && ctx->relay) {
+                cyxchat_relay_conn_t relay_info;
+                if (cyxchat_relay_get_info(ctx->relay, &peer->peer_id,
+                                           &relay_info) == CYXCHAT_OK &&
+                    relay_info.active &&
+                    relay_info.last_activity > peer->last_activity) {
+                    peer->last_activity = relay_info.last_activity;
+                }
+            }
             uint64_t elapsed = now_ms - peer->last_activity;
 
             if (elapsed >= CYXCHAT_CONNECTION_TIMEOUT_MS) {
@@ -1475,8 +1507,16 @@ cyxchat_error_t cyxchat_conn_send(cyxchat_conn_ctx_t *ctx,
     cyxchat_error_t result;
 
     if (peer->is_relayed && ctx->relay) {
+        if (!cyxchat_relay_is_connected(ctx->relay, peer_id)) {
+            cyxchat_relay_connect(ctx->relay, peer_id);
+        }
+
         /* Send via relay */
         result = cyxchat_relay_send(ctx->relay, peer_id, data, len);
+        if (result == CYXCHAT_ERR_NOT_FOUND &&
+            cyxchat_relay_connect(ctx->relay, peer_id) == CYXCHAT_OK) {
+            result = cyxchat_relay_send(ctx->relay, peer_id, data, len);
+        }
     } else {
         /* Send directly via transport */
         cyxwiz_error_t err = ctx->transport->ops->send(ctx->transport, peer_id, data, len);
