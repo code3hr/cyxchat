@@ -751,3 +751,158 @@ Relay is required. This adds:
 - RFC 5389: STUN Protocol
 - RFC 5245: ICE (Interactive Connectivity Establishment)
 - RFC 6886: NAT-PMP (NAT Port Mapping Protocol)
+
+---
+
+## P2P vs Relay Asymmetry
+
+### Why One Side Shows P2P and Other Shows Relay
+
+A common confusion: "If I can reach you via P2P, why can't you reach me the same way?"
+
+**Answer:** Each side tracks its own **outbound** path independently. NAT asymmetry can cause different outcomes for each direction.
+
+### The Symmetric NAT Problem (Detailed)
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     ASYMMETRIC CONNECTION                        │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│   Alice (Full Cone NAT)              Bob (Symmetric NAT)        │
+│   ┌─────────┐                        ┌─────────┐                │
+│   │ Phone   │                        │ Phone   │                │
+│   │ 192.168.1.5                      │ 192.168.1.5              │
+│   └────┬────┘                        └────┬────┘                │
+│        │                                  │                     │
+│   ┌────┴────┐                        ┌────┴────┐                │
+│   │ Router  │                        │ Router  │                │
+│   │ NAT     │                        │ NAT     │                │
+│   └────┬────┘                        └────┬────┘                │
+│        │                                  │                     │
+│   Public: 1.1.1.1:5000               Public: 2.2.2.2:6000       │
+│   (SAME for all destinations)        (ONLY for STUN server!)   │
+│                                                                 │
+│   Full Cone: "Anyone can send        Symmetric: "Different      │
+│   to port 5000 once it's open"       port for each destination" │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+
+Step 1: STUN Discovery
+  • Alice asks STUN: "What's my address?" → 1.1.1.1:5000
+  • Bob asks STUN: "What's my address?" → 2.2.2.2:6000
+
+Step 2: Bootstrap Exchange
+  • Bootstrap tells Alice: "Bob is at 2.2.2.2:6000"
+  • Bootstrap tells Bob: "Alice is at 1.1.1.1:5000"
+
+Step 3: The Problem
+  • When Bob sends to Alice, Bob's NAT creates NEW port: 2.2.2.2:6001
+  • The 6000 port was ONLY for talking to STUN server!
+
+Step 4: Connection Attempts
+  • Alice → 2.2.2.2:6000 → Bob's NAT: "No mapping for 6000 from Alice" → DROPPED ❌
+  • Bob → 1.1.1.1:5000 → Alice's NAT: "Port 5000 is open to anyone" → DELIVERED ✓
+
+Result:
+  • Alice's view: "I can't reach Bob directly" → Relay
+  • Bob's view: "I can reach Alice directly" → P2P
+```
+
+### Same PC / Same Network Testing
+
+When testing with two instances on the **same PC** or **same network**:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     SAME PC / SAME NAT                          │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│   ┌──────────────┐    ┌──────────────┐                         │
+│   │ Instance A   │    │ Instance B   │                         │
+│   │ (Debug)      │    │ (Release)    │                         │
+│   │ port 12345   │    │ port 12346   │                         │
+│   └──────┬───────┘    └──────┬───────┘                         │
+│          │                   │                                  │
+│          └─────────┬─────────┘                                  │
+│                    │                                            │
+│            ┌───────┴───────┐                                    │
+│            │  Your Router  │                                    │
+│            │  (Same NAT)   │                                    │
+│            └───────┬───────┘                                    │
+│                    │                                            │
+│            Public: 203.x.x.x                                    │
+│                                                                 │
+│   Both instances share:                                         │
+│   • Same public IP                                              │
+│   • Same NAT type                                               │
+│   • Same router behavior                                        │
+│                                                                 │
+│   Expected: SYMMETRIC behavior (both P2P or both Relay)         │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+
+If you see asymmetry on same PC, it's likely a TIMING issue:
+  1. Instance A connects first
+  2. Instance B not ready yet
+  3. A's hole punch times out → falls back to Relay
+  4. Instance B connects later
+  5. B's hole punch succeeds (A is now "known")
+  6. Result: A=Relay, B=P2P (timing artifact)
+
+Solution: Ensure both instances are fully connected to bootstrap
+          BEFORE initiating peer connections.
+```
+
+### Expected Behavior by Network Combination
+
+| Your Network | Peer's Network | Expected Result |
+|--------------|----------------|-----------------|
+| Home Router | Home Router | Both P2P ✓ |
+| Home Router | Mobile 4G/5G | Asymmetric (you=P2P, peer=Relay) |
+| Mobile 4G/5G | Mobile 4G/5G | Both Relay (CGNAT on both) |
+| Office/Corporate | Any | Usually Relay (strict firewall) |
+| VPN | Any | Depends on VPN (usually Relay) |
+| Same PC/Network | Same PC/Network | Both same (P2P or Relay) |
+
+### Network Type Characteristics
+
+| Network Type | NAT Type | Hole Punch Success |
+|--------------|----------|-------------------|
+| Home router (typical) | Full Cone / Restricted Cone | ✓ Usually works |
+| Office network | Varies (often restricted) | ○ Sometimes works |
+| Mobile 4G/5G | Symmetric / CGNAT | ✗ Usually fails |
+| Hotel/Airport WiFi | Symmetric / Strict firewall | ✗ Usually fails |
+| VPN | Depends on provider | ○ Varies |
+
+### Visual Summary
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│              CONNECTION OUTCOME MATRIX                           │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│                         Peer B's NAT Type                       │
+│                    Full Cone    Symmetric                       │
+│                  ┌────────────┬────────────┐                    │
+│  Peer A's   Full │   Both     │   A=P2P    │                    │
+│  NAT Type   Cone │   P2P ✓    │   B=Relay  │                    │
+│                  ├────────────┼────────────┤                    │
+│           Symm.  │   A=Relay  │   Both     │                    │
+│                  │   B=P2P    │   Relay    │                    │
+│                  └────────────┴────────────┘                    │
+│                                                                 │
+│  Legend:                                                        │
+│    P2P = Direct hole punch succeeded                            │
+│    Relay = Hole punch failed, using relay server                │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Important Notes
+
+1. **Asymmetry is Normal**: Different NAT types cause legitimately different outcomes per direction
+2. **Messages Still Work**: Both P2P and Relay deliver messages - just different paths
+3. **Relay is Encrypted**: Relay server only forwards encrypted blobs, can't read content
+4. **Each Side Independent**: Your `is_relayed` flag only tracks YOUR outbound path
+5. **Timing Matters**: Same-network asymmetry usually means timing issue, not real NAT difference

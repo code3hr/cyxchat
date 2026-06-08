@@ -114,7 +114,8 @@ class GroupService {
       WHERE m.node_id IS NOT NULL
     ''', [identity.nodeId]);
 
-    _log.info('Restoring ${rows.length} groups to C library', source: 'GroupService');
+    _log.info('Restoring ${rows.length} groups to C library',
+        source: 'GroupService');
     int groupCount = 0;
     for (final row in rows) {
       // Yield to UI thread every 3 groups to prevent ANR
@@ -129,7 +130,8 @@ class GroupService {
       final role = row['role'] as int? ?? 0;
 
       if (keyBlob == null) {
-        _log.warning('Group $groupId has no key, skipping restore', source: 'GroupService');
+        _log.warning('Group $groupId has no key, skipping restore',
+            source: 'GroupService');
         continue;
       }
 
@@ -140,12 +142,16 @@ class GroupService {
       } else if (keyBlob is Uint8List) {
         groupKey = keyBlob;
       } else {
-        _log.warning('Group $groupId has invalid key format: ${keyBlob.runtimeType}', source: 'GroupService');
+        _log.warning(
+            'Group $groupId has invalid key format: ${keyBlob.runtimeType}',
+            source: 'GroupService');
         continue;
       }
 
       if (groupKey.length != 32) {
-        _log.warning('Group $groupId has invalid key length: ${groupKey.length}', source: 'GroupService');
+        _log.warning(
+            'Group $groupId has invalid key length: ${groupKey.length}',
+            source: 'GroupService');
         continue;
       }
 
@@ -159,7 +165,8 @@ class GroupService {
       );
 
       if (result == 0) {
-        _log.info('Restored group $groupId (role: $role)', source: 'GroupService');
+        _log.info('Restored group $groupId (role: $role)',
+            source: 'GroupService');
 
         // Now restore all members for this group
         var memberRows = await db.query(
@@ -170,14 +177,18 @@ class GroupService {
 
         // Ensure creator is in group_members (fix for groups accepted before this fix)
         if (creatorId.isNotEmpty) {
-          final creatorExists = memberRows.any((r) => r['node_id'] == creatorId);
+          final creatorExists =
+              memberRows.any((r) => r['node_id'] == creatorId);
           if (!creatorExists) {
-            await db.insert('group_members', {
-              'group_id': groupId,
-              'node_id': creatorId,
-              'role': GroupRole.owner.index,
-              'joined_at': DateTime.now().millisecondsSinceEpoch,
-            }, conflictAlgorithm: ConflictAlgorithm.ignore);
+            await db.insert(
+                'group_members',
+                {
+                  'group_id': groupId,
+                  'node_id': creatorId,
+                  'role': GroupRole.owner.index,
+                  'joined_at': DateTime.now().millisecondsSinceEpoch,
+                },
+                conflictAlgorithm: ConflictAlgorithm.ignore);
             _log.info('Auto-added missing creator $creatorId to group $groupId',
                 source: 'GroupService');
             // Re-query to include the new member
@@ -190,7 +201,8 @@ class GroupService {
           }
         }
 
-        _log.info('Restoring ${memberRows.length} members for group $groupId', source: 'GroupService');
+        _log.info('Restoring ${memberRows.length} members for group $groupId',
+            source: 'GroupService');
         // Yield before member restoration if many members
         if (memberRows.length > 5) {
           await Future.delayed(Duration.zero);
@@ -207,16 +219,17 @@ class GroupService {
           );
 
           if (memberResult != 0) {
-            _log.warning('Failed to restore member ${memberId.substring(0, 8)}... to group: error $memberResult',
+            _log.warning(
+                'Failed to restore member ${memberId.substring(0, 8)}... to group: error $memberResult',
                 source: 'GroupService');
           }
         }
       } else {
-        _log.warning('Failed to restore group $groupId: error $result', source: 'GroupService');
+        _log.warning('Failed to restore group $groupId: error $result',
+            source: 'GroupService');
       }
     }
   }
-
 
   /// Handle incoming group message from FFI
   // Deduplication for group messages
@@ -236,7 +249,8 @@ class GroupService {
     _recentGroupMsgIds.add(msg.msgId);
     if (_recentGroupMsgIds.length > 256) {
       // Remove oldest entries (first added)
-      final toRemove = _recentGroupMsgIds.take(_recentGroupMsgIds.length - 128).toList();
+      final toRemove =
+          _recentGroupMsgIds.take(_recentGroupMsgIds.length - 128).toList();
       _recentGroupMsgIds.removeAll(toRemove);
     }
 
@@ -432,9 +446,8 @@ class GroupService {
       where: 'node_id = ?',
       whereArgs: [event.memberId],
     );
-    final displayName = contacts.isNotEmpty
-        ? contacts.first['display_name'] as String?
-        : null;
+    final displayName =
+        contacts.isNotEmpty ? contacts.first['display_name'] as String? : null;
 
     final member = GroupMember(
       groupId: event.groupId,
@@ -586,7 +599,8 @@ class GroupService {
       WHERE id = ?
     ''', [invite.receivedAt.millisecondsSinceEpoch, conversationId]);
 
-    _log.info('Created invite message in conversation with ${invite.inviterId.substring(0, 8)}...',
+    _log.info(
+        'Created invite message in conversation with ${invite.inviterId.substring(0, 8)}...',
         source: 'GroupService');
 
     // Emit to ChatService stream so UI gets notified
@@ -727,12 +741,13 @@ class GroupService {
           where: 'id = ?',
           whereArgs: [groupId],
         );
-        _log.info('Saved group key for $groupId (version: $keyVersion)', source: 'GroupService');
+        _log.info('Saved group key for $groupId (version: $keyVersion)',
+            source: 'GroupService');
       } else {
-        _log.warning('Could not get group key for $groupId', source: 'GroupService');
+        _log.warning('Could not get group key for $groupId',
+            source: 'GroupService');
       }
     }
-
 
     // Add ourselves as owner
     final selfMember = GroupMember(
@@ -792,9 +807,8 @@ class GroupService {
       where: 'node_id = ?',
       whereArgs: [nodeId],
     );
-    final displayName = contacts.isNotEmpty
-        ? contacts.first['display_name'] as String?
-        : null;
+    final displayName =
+        contacts.isNotEmpty ? contacts.first['display_name'] as String? : null;
 
     // Get pubkey - priority: 1) provided, 2) connection context, 3) contact DB
     List<int>? pubkey = memberPubkey;
@@ -807,7 +821,8 @@ class GroupService {
         final hasNonZero = connPubkey.any((b) => b != 0);
         if (hasNonZero) {
           pubkey = connPubkey;
-          _log.info('Got pubkey from connection context', source: 'GroupService');
+          _log.info('Got pubkey from connection context',
+              source: 'GroupService');
         }
       }
     }
@@ -815,7 +830,9 @@ class GroupService {
     // Fall back to contact database
     if (pubkey == null && contacts.isNotEmpty) {
       final pubkeyData = contacts.first['public_key'];
-      _log.info('Contact DB pubkey data type: ${pubkeyData?.runtimeType}, value: $pubkeyData', source: 'GroupService');
+      _log.info(
+          'Contact DB pubkey data type: ${pubkeyData?.runtimeType}, value: $pubkeyData',
+          source: 'GroupService');
       if (pubkeyData != null) {
         List<int>? candidatePubkey;
         // public_key is stored as BLOB, read as bytes directly
@@ -846,12 +863,16 @@ class GroupService {
           final hasNonZero = candidatePubkey.any((b) => b != 0);
           if (hasNonZero) {
             pubkey = candidatePubkey;
-            _log.info('Got pubkey from contact DB (valid, non-zero)', source: 'GroupService');
+            _log.info('Got pubkey from contact DB (valid, non-zero)',
+                source: 'GroupService');
           } else {
-            _log.warning('Contact DB has all-zero pubkey, ignoring', source: 'GroupService');
+            _log.warning('Contact DB has all-zero pubkey, ignoring',
+                source: 'GroupService');
           }
         } else {
-          _log.warning('Contact DB pubkey invalid length: ${candidatePubkey?.length}', source: 'GroupService');
+          _log.warning(
+              'Contact DB pubkey invalid length: ${candidatePubkey?.length}',
+              source: 'GroupService');
         }
       }
     }
@@ -859,13 +880,15 @@ class GroupService {
     // Send invite via FFI
     if (_ffiProvider != null && _ffiProvider!.initialized) {
       if (pubkey == null || pubkey.length != 32) {
-        _log.error('Cannot invite: missing public key for member (pubkey=$pubkey, len=${pubkey?.length})',
+        _log.error(
+            'Cannot invite: missing public key for member (pubkey=$pubkey, len=${pubkey?.length})',
             source: 'GroupService');
         return false;
       }
 
       // Log the pubkey being used for invite
-      final pubkeyHex = pubkey.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+      final pubkeyHex =
+          pubkey.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
       _log.info('Inviting with pubkey: $pubkeyHex', source: 'GroupService');
 
       final success = await _ffiProvider!.inviteMember(
@@ -1089,8 +1112,11 @@ class GroupService {
     final db = await DatabaseService.instance.database;
 
     // Update via FFI
-    if (_ffiProvider != null && _ffiProvider!.initialized && description != null) {
-      final success = await _ffiProvider!.setGroupDescription(groupId, description);
+    if (_ffiProvider != null &&
+        _ffiProvider!.initialized &&
+        description != null) {
+      final success =
+          await _ffiProvider!.setGroupDescription(groupId, description);
       if (!success) {
         return false;
       }
@@ -1318,7 +1344,7 @@ class GroupService {
       groupId: groupId,
       msgId: result.msgId!,
       type: MessageType.image,
-      content: localPath ?? '',
+      content: storedPath ?? localPath ?? '',
       mediaType: MediaType.image,
       mediaMetadata: {
         'filename': filename,
@@ -1793,7 +1819,8 @@ class GroupService {
       whereArgs: [groupId],
     );
 
-    _log.info('Unpinned all messages in group $groupId', source: 'GroupService');
+    _log.info('Unpinned all messages in group $groupId',
+        source: 'GroupService');
 
     // Notify group update
     final group = await getGroup(groupId);
@@ -1863,7 +1890,8 @@ class GroupService {
       whereArgs: [messageId],
     );
     if (msgRows.isEmpty) {
-      _log.error('Original message not found for forward', source: 'GroupService');
+      _log.error('Original message not found for forward',
+          source: 'GroupService');
       return null;
     }
 
@@ -1954,8 +1982,7 @@ class GroupService {
   // ============================================================
 
   /// Get pending group invites
-  List<GroupInvite> get pendingInvites =>
-      _ffiProvider?.pendingInvites ?? [];
+  List<GroupInvite> get pendingInvites => _ffiProvider?.pendingInvites ?? [];
 
   /// Accept a pending group invite
   Future<bool> acceptInvite(String groupId) async {
@@ -2009,10 +2036,12 @@ class GroupService {
             where: 'id = ?',
             whereArgs: [groupId],
           );
-          _log.info('Saved group key for accepted invite $groupId (version: $keyVersion)',
+          _log.info(
+              'Saved group key for accepted invite $groupId (version: $keyVersion)',
               source: 'GroupService');
         } else {
-          _log.warning('Could not retrieve group key after accepting invite $groupId',
+          _log.warning(
+              'Could not retrieve group key after accepting invite $groupId',
               source: 'GroupService');
         }
       }
@@ -2040,15 +2069,19 @@ class GroupService {
           inviterDisplayName = inviterContact.first['display_name'] as String?;
         }
 
-        await db.insert('group_members', {
-          'group_id': groupId,
-          'node_id': invite.inviterId,
-          'role': GroupRole.owner.index,
-          'display_name': inviterDisplayName,
-          'joined_at': now.millisecondsSinceEpoch,
-        }, conflictAlgorithm: ConflictAlgorithm.ignore);
+        await db.insert(
+            'group_members',
+            {
+              'group_id': groupId,
+              'node_id': invite.inviterId,
+              'role': GroupRole.owner.index,
+              'display_name': inviterDisplayName,
+              'joined_at': now.millisecondsSinceEpoch,
+            },
+            conflictAlgorithm: ConflictAlgorithm.ignore);
 
-        _log.info('Added inviter ${invite.inviterId.substring(0, 8)}... as group owner',
+        _log.info(
+            'Added inviter ${invite.inviterId.substring(0, 8)}... as group owner',
             source: 'GroupService');
       }
 
@@ -2148,7 +2181,8 @@ class GroupService {
   }
 
   /// Get all admin permissions for a group
-  Future<List<AdminPermissions>> getGroupAdminPermissions(String groupId) async {
+  Future<List<AdminPermissions>> getGroupAdminPermissions(
+      String groupId) async {
     final db = await DatabaseService.instance.database;
 
     final rows = await db.query(
@@ -2213,8 +2247,7 @@ class GroupService {
         untilMs: restriction.mutedUntil?.millisecondsSinceEpoch,
       );
       if (!success) {
-        _log.error('Failed to restrict member via FFI',
-            source: 'GroupService');
+        _log.error('Failed to restrict member via FFI', source: 'GroupService');
         return false;
       }
     }
@@ -2770,7 +2803,8 @@ class GroupService {
 
     // Revoke via FFI
     if (_ffiProvider != null && _ffiProvider!.initialized) {
-      final result = _ffiProvider!.bindings.groupRevokeInviteLink(groupId, linkId);
+      final result =
+          _ffiProvider!.bindings.groupRevokeInviteLink(groupId, linkId);
       if (result != 0) {
         _log.error('Failed to revoke invite link via FFI: $result',
             source: 'GroupService');
@@ -2838,19 +2872,23 @@ class GroupService {
     if (_ffiProvider != null && _ffiProvider!.initialized) {
       final linksData = _ffiProvider!.bindings.groupGetInviteLinks(groupId);
       if (linksData.isNotEmpty) {
-        return linksData.map((data) => InviteLink(
-          id: data['id'] as String,
-          groupId: data['groupId'] as String,
-          createdBy: data['createdBy'] as String,
-          createdAt: DateTime.fromMillisecondsSinceEpoch(data['createdAt'] as int),
-          expiresAt: data['expiresAt'] != null && data['expiresAt'] != 0
-              ? DateTime.fromMillisecondsSinceEpoch(data['expiresAt'] as int)
-              : null,
-          maxUses: data['maxUses'] as int?,
-          useCount: data['useCount'] as int? ?? 0,
-          isRevoked: data['isRevoked'] as bool? ?? false,
-          name: data['name'] as String?,
-        )).toList();
+        return linksData
+            .map((data) => InviteLink(
+                  id: data['id'] as String,
+                  groupId: data['groupId'] as String,
+                  createdBy: data['createdBy'] as String,
+                  createdAt: DateTime.fromMillisecondsSinceEpoch(
+                      data['createdAt'] as int),
+                  expiresAt: data['expiresAt'] != null && data['expiresAt'] != 0
+                      ? DateTime.fromMillisecondsSinceEpoch(
+                          data['expiresAt'] as int)
+                      : null,
+                  maxUses: data['maxUses'] as int?,
+                  useCount: data['useCount'] as int? ?? 0,
+                  isRevoked: data['isRevoked'] as bool? ?? false,
+                  name: data['name'] as String?,
+                ))
+            .toList();
       }
     }
 
@@ -2880,7 +2918,8 @@ class GroupService {
           id: data['id'] as String,
           groupId: data['groupId'] as String,
           createdBy: data['createdBy'] as String,
-          createdAt: DateTime.fromMillisecondsSinceEpoch(data['createdAt'] as int),
+          createdAt:
+              DateTime.fromMillisecondsSinceEpoch(data['createdAt'] as int),
           expiresAt: data['expiresAt'] != null && data['expiresAt'] != 0
               ? DateTime.fromMillisecondsSinceEpoch(data['expiresAt'] as int)
               : null,
@@ -2984,7 +3023,8 @@ class GroupService {
     );
 
     if (result == null || result.$1 != 0) {
-      _log.warning('Failed to log admin action: ${result?.$1}', source: 'GroupService');
+      _log.warning('Failed to log admin action: ${result?.$1}',
+          source: 'GroupService');
       return null;
     }
 
@@ -3007,7 +3047,8 @@ class GroupService {
 
     await db.insert('admin_actions', action.toMap());
 
-    _log.info('Logged admin action: ${actionType.description}', source: 'GroupService');
+    _log.info('Logged admin action: ${actionType.description}',
+        source: 'GroupService');
     return action;
   }
 

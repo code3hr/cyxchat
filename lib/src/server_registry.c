@@ -652,9 +652,10 @@ cyxchat_error_t cyxchat_server_registry_get_best(cyxchat_server_registry_t *reg,
         cyxchat_server_entry_t *srv = &reg->servers[i];
         if (!srv->active) continue;
 
-        /* Prefer healthy servers; fall back to verified, then unknown */
+        /* Prefer healthy servers; fall back to verified, verifying, then unknown */
         int usable = (srv->state == CYXCHAT_SERVER_HEALTHY ||
                       srv->state == CYXCHAT_SERVER_VERIFIED ||
+                      srv->state == CYXCHAT_SERVER_VERIFYING ||
                       srv->state == CYXCHAT_SERVER_UNKNOWN);
         if (!usable) continue;
 
@@ -663,6 +664,8 @@ cyxchat_error_t cyxchat_server_registry_get_best(cyxchat_server_registry_t *reg,
         /* Penalize non-healthy servers */
         if (srv->state == CYXCHAT_SERVER_VERIFIED) {
             effective_latency += 100;  /* +100ms penalty */
+        } else if (srv->state == CYXCHAT_SERVER_VERIFYING) {
+            effective_latency += 150;  /* +150ms penalty for verifying */
         } else if (srv->state == CYXCHAT_SERVER_UNKNOWN) {
             effective_latency += 500;  /* +500ms penalty for unverified */
         }

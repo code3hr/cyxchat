@@ -214,11 +214,12 @@ class _CallOverlay extends ConsumerStatefulWidget {
 
 class _CallOverlayState extends ConsumerState<_CallOverlay> {
   bool _incomingVisible = false;
+  ProviderSubscription<CallState>? _callSubscription;
 
   @override
   void initState() {
     super.initState();
-    ref.listen<CallState>(
+    _callSubscription = ref.listenManual<CallState>(
       callNotifierProvider.select((p) => p.state),
       (previous, next) {
         if (!mounted) return;
@@ -227,6 +228,12 @@ class _CallOverlayState extends ConsumerState<_CallOverlay> {
         }
       },
     );
+  }
+
+  @override
+  void dispose() {
+    _callSubscription?.close();
+    super.dispose();
   }
 
   void _showIncoming(CallState state) {

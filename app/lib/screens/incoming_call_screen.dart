@@ -21,10 +21,12 @@ class IncomingCallScreen extends ConsumerStatefulWidget {
 }
 
 class _IncomingCallScreenState extends ConsumerState<IncomingCallScreen> {
+  ProviderSubscription<CallState>? _callSubscription;
+
   @override
   void initState() {
     super.initState();
-    ref.listen<CallState>(
+    _callSubscription = ref.listenManual<CallState>(
       callNotifierProvider.select((p) => p.state),
       (previous, next) {
         if (!mounted) return;
@@ -35,6 +37,12 @@ class _IncomingCallScreenState extends ConsumerState<IncomingCallScreen> {
         }
       },
     );
+  }
+
+  @override
+  void dispose() {
+    _callSubscription?.close();
+    super.dispose();
   }
 
   @override

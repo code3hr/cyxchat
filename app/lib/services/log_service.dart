@@ -1,4 +1,5 @@
 import 'dart:collection';
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 
 /// Log entry with timestamp and level
@@ -62,6 +63,8 @@ class LogService extends ChangeNotifier {
   // Circular buffer of logs (keep last 500 entries)
   static const int _maxLogs = 500;
   final Queue<LogEntry> _logs = Queue<LogEntry>();
+  IOSink? _fileSink;
+  bool _fileLoggingEnabled = false;
 
   // Current filter
   LogLevel _filter = LogLevel.all;
@@ -92,6 +95,11 @@ class LogService extends ChangeNotifier {
     );
 
     _logs.add(entry);
+    if (_fileLoggingEnabled) {
+      _fileSink?.writeln(
+        '${entry.timestamp.toIso8601String()} ${entry.toString()}',
+      );
+    }
 
     // Trim old logs
     while (_logs.length > _maxLogs) {
@@ -111,6 +119,23 @@ class LogService extends ChangeNotifier {
   void clear() {
     _logs.clear();
     notifyListeners();
+  }
+
+  void enableFileLogging() {
+    if (_fileLoggingEnabled || kIsWeb) return;
+    try {
+      const instanceId =
+          String.fromEnvironment('INSTANCE_ID', defaultValue: 'default');
+      final suffix = instanceId.isEmpty ? 'default' : instanceId;
+      final file = File('cyxchat_$suffix.log');
+      _fileSink = file.openWrite(mode: FileMode.append);
+      _fileLoggingEnabled = true;
+      _fileSink?.writeln(
+        '${DateTime.now().toIso8601String()} === CyxChat log started (instance $suffix) ===',
+      );
+    } catch (_) {
+      _fileLoggingEnabled = false;
+    }
   }
 
   /// Export logs as text
@@ -137,6 +162,8 @@ void appLog(String message, {String? source, String level = 'DEBUG'}) {
 
 /// Capture Flutter's debugPrint output
 void setupLogging() {
+  LogService.instance.enableFileLogging();
+
   // Override debugPrint to capture logs
   debugPrint = (String? message, {int? wrapWidth}) {
     if (message == null) return;
