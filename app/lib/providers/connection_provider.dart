@@ -115,12 +115,7 @@ class ConnectionProvider extends ChangeNotifier {
   /// Normalizes peer ID by removing dashes and padding to 64 chars
   /// to match the 32-byte node ID format used by the C callback
   PeerConnectionProgress? getProgress(String peerIdHex) {
-    var normalized = peerIdHex.replaceAll('-', '').toLowerCase();
-    // Pad UUID-style IDs (32 hex chars) to full node ID length (64 hex chars)
-    if (normalized.length < 64) {
-      normalized = normalized.padRight(64, '0');
-    }
-    return _progress[normalized];
+    return _progress[_normalizePeerId(peerIdHex)];
   }
 
   /// Stream of presence updates (peer ID, online status)
@@ -128,8 +123,15 @@ class ConnectionProvider extends ChangeNotifier {
 
   /// Get online status for a peer
   bool? getOnlineStatus(String peerIdHex) {
-    final normalized = peerIdHex.replaceAll('-', '').toLowerCase();
-    return _onlineStatus[normalized];
+    return _onlineStatus[_normalizePeerId(peerIdHex)];
+  }
+
+  String _normalizePeerId(String peerIdHex) {
+    var normalized = peerIdHex.replaceAll('-', '').toLowerCase();
+    if (normalized.length < 64) {
+      normalized = normalized.padRight(64, '0');
+    }
+    return normalized;
   }
 
   /// Initialize connection manager
@@ -244,6 +246,16 @@ class ConnectionProvider extends ChangeNotifier {
     // Guard against callbacks after provider is disposed
     if (!_initialized) return;
 
+    if (event == CyxChatConnEvent.disconnected &&
+        hasPeerKey(peerId) &&
+        _nativeRouteIsActive(peerId)) {
+      LogService.instance.debug(
+        'CONN: Ignoring stale disconnect for ${peerId.substring(0, 16)}...; native route is still active',
+        source: 'Connection',
+      );
+      return;
+    }
+
     final phase = PeerConnectionProgress.eventToPhase(event);
     final progress = PeerConnectionProgress(
       peerId: peerId,
@@ -356,6 +368,8 @@ class ConnectionProvider extends ChangeNotifier {
   Future<int> connect(String peerIdHex) async {
     if (!_initialized) return CyxChatError.errNull;
 
+    final stateKey = _normalizePeerId(peerIdHex);
+
     if (hasPeerKey(peerIdHex) && isConnected(peerIdHex)) {
       return CyxChatError.ok;
     }
@@ -374,8 +388,8 @@ class ConnectionProvider extends ChangeNotifier {
       final result = _bindings.connConnect(peerIdPtr);
 
       if (result == CyxChatError.ok) {
-        _peerStates[peerIdHex] = PeerConnectionState(
-          peerId: peerIdHex,
+        _peerStates[stateKey] = PeerConnectionState(
+          peerId: stateKey,
           state: CyxChatConnState.connecting,
           isRelayed: false,
         );
@@ -391,6 +405,7 @@ class ConnectionProvider extends ChangeNotifier {
   /// Disconnect from a peer
   Future<int> disconnect(String peerIdHex) async {
     if (!_initialized) return CyxChatError.errNull;
+    final stateKey = _normalizePeerId(peerIdHex);
 
     final peerId = NodeIdUtils.toBytesAsList(peerIdHex);
     final peerIdPtr = calloc<Uint8>(32);
@@ -403,7 +418,7 @@ class ConnectionProvider extends ChangeNotifier {
       final result = _bindings.connDisconnect(peerIdPtr);
 
       if (result == CyxChatError.ok) {
-        _peerStates.remove(peerIdHex);
+        _peerStates.remove(stateKey);
         notifyListeners();
       }
 
@@ -415,12 +430,12 @@ class ConnectionProvider extends ChangeNotifier {
 
   /// Get connection state for a peer
   PeerConnectionState? getState(String peerIdHex) {
-    return _peerStates[peerIdHex];
+    return _peerStates[_normalizePeerId(peerIdHex)];
   }
 
   /// Check if peer is connected (direct or relay)
   bool isConnected(String peerIdHex) {
-    final state = _peerStates[peerIdHex];
+    final state = _peerStates[_normalizePeerId(peerIdHex)];
     return state?.isConnected ?? false;
   }
 
@@ -469,15 +484,6 @@ class ConnectionProvider extends ChangeNotifier {
     return pubkey;
   }
 
-  /// Restore a previously learned peer key into the native onion context.
-  int restorePeerPublicKey(String peerIdHex, List<int> pubkey) {
-    if (!_initialized) return CyxChatError.errNull;
-    if (pubkey.length != 32 || _isAllZero(pubkey)) {
-      return CyxChatError.errInvalid;
-    }
-    return _bindings.connAddPeerPubkeyHex(peerIdHex, pubkey);
-  }
-
   bool _isAllZero(List<int> bytes) {
     for (final byte in bytes) {
       if (byte != 0) return false;
@@ -489,6 +495,23 @@ class ConnectionProvider extends ChangeNotifier {
   int addRelayServer(String address) {
     if (!_initialized) return CyxChatError.errNull;
     return _bindings.connAddRelay(address);
+  }
+
+  bool _nativeRouteIsActive(String peerIdHex) {
+    if (!_initialized) return false;
+
+    final peerId = NodeIdUtils.toBytesAsList(peerIdHex);
+    final peerIdPtr = calloc<Uint8>(32);
+
+    try {
+      for (int i = 0; i < 32 && i < peerId.length; i++) {
+        peerIdPtr[i] = peerId[i];
+      }
+      final state = _bindings.connGetState(peerIdPtr);
+      return CyxChatConnState.isActive(state);
+    } finally {
+      calloc.free(peerIdPtr);
+    }
   }
 
   /// Force relay for a peer

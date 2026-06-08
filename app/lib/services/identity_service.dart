@@ -175,7 +175,7 @@ class IdentityService {
     // Save to database
     await db.insert('identity', {
       ...identity.toMap(),
-      'private_key_encrypted': String.fromCharCodes(privateKey),
+      'private_key_encrypted': privateKey,
     });
 
     _currentIdentity = identity;
@@ -213,8 +213,14 @@ class IdentityService {
       print('[IdentityService] ERROR: Invalid onion secret key length');
       return;
     }
+    final identity = _currentIdentity;
+    if (identity == null) {
+      print('[IdentityService] ERROR: Cannot save onion secret without identity');
+      return;
+    }
     final keyStr = String.fromCharCodes(secretKey);
     await _writeSecure('onion_secret', keyStr);
+    await _writeSecure('onion_secret_owner', identity.nodeId);
     print('[IdentityService] Saved onion secret key');
   }
 
@@ -222,6 +228,20 @@ class IdentityService {
   ///
   /// Returns null if no saved key exists (first run).
   Future<List<int>?> loadOnionSecret() async {
+    final identity = _currentIdentity;
+    if (identity == null) return null;
+
+    final owner = await _readSecure('onion_secret_owner');
+    if (owner != identity.nodeId) {
+      if (owner != null) {
+        print('[IdentityService] Ignoring onion secret for different identity');
+      } else {
+        print('[IdentityService] Ignoring legacy onion secret without owner');
+      }
+      await _deleteOnionSecretBestEffort();
+      return null;
+    }
+
     final keyStr = await _readSecure('onion_secret');
     if (keyStr == null) {
       print('[IdentityService] No saved onion secret key');
@@ -240,8 +260,18 @@ class IdentityService {
   Future<void> deleteIdentity() async {
     await _deleteSecure('private_key');
     await _deleteSecure('onion_secret');
+    await _deleteSecure('onion_secret_owner');
     await DatabaseService.instance.clearAllData();
     _currentIdentity = null;
+  }
+
+  Future<void> _deleteOnionSecretBestEffort() async {
+    try {
+      await _deleteSecure('onion_secret');
+      await _deleteSecure('onion_secret_owner');
+    } catch (e) {
+      print('[IdentityService] WARNING: Could not delete old onion secret: $e');
+    }
   }
 
   /// Generate QR code data for sharing identity

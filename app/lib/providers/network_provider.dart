@@ -271,10 +271,11 @@ class ConnectionActions {
       log.error('Chat initialization failed', source: 'Network');
       // Don't fail - chat can be retried
     } else {
-      // Restore peer keys only after ChatProvider has restored the local onion
-      // keypair. cyxwiz_onion_set_keypair() clears derived peer keys.
-      final contactKeySync = _ref.read(contactKeySyncProvider);
-      await contactKeySync.restoreKnownPeerKeys();
+      // Start the listener that persists peer keys learned from native key
+      // exchange. Do not restore contact keys into native state here:
+      // contact public_key may be identity material, while send readiness
+      // depends on the onion peer key produced by key exchange.
+      _ref.read(contactKeySyncProvider);
 
       // Connect ChatService to ChatProvider for message handling
       ChatService.instance.connectProvider(chatProvider);

@@ -110,10 +110,27 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             bool showSpinner = false;
 
             if (progress != null && progress.phase != ConnectionPhase.idle) {
-              // Use granular progress from callback
-              statusText = progress.statusText;
-              statusColor = progress.statusColor;
-              showSpinner = progress.isConnecting;
+              // Route progress alone is not message readiness; encrypted sends
+              // require a native peer key.
+              if (progress.isConnected && !hasKey) {
+                statusText = isRelayed
+                    ? 'Relay route ready - exchanging keys'
+                    : 'Route ready - exchanging keys';
+                statusColor = Colors.orange;
+                showSpinner = true;
+              } else if (progress.phase == ConnectionPhase.connectedRelay) {
+                statusText = 'Secured (via relay)';
+                statusColor = Colors.blue;
+                showSpinner = false;
+              } else if (progress.phase == ConnectionPhase.connectedP2p) {
+                statusText = 'Secured (direct P2P)';
+                statusColor = Colors.green;
+                showSpinner = false;
+              } else {
+                statusText = progress.statusText;
+                statusColor = progress.statusColor;
+                showSpinner = progress.isConnecting;
+              }
             } else if (hasKey && isRelayed) {
               statusText = 'Secured (via relay)';
               statusColor = Colors.blue;

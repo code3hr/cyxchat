@@ -69,9 +69,9 @@ class PeerConnectionProgress {
       case ConnectionPhase.connecting:
         return 'Connecting...';
       case ConnectionPhase.connectedP2p:
-        return 'Secured (direct P2P)';
+        return 'Connected (direct P2P)';
       case ConnectionPhase.connectedRelay:
-        return 'Secured (via relay)';
+        return 'Connected (via relay)';
       case ConnectionPhase.failed:
         return 'Failed: ${failReason ?? "Unknown error"}';
     }

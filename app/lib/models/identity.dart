@@ -25,12 +25,22 @@ class Identity extends Equatable {
 
   /// Create from database row
   factory Identity.fromMap(Map<String, dynamic> map) {
+    final pubkeyData = map['public_key'];
+    Uint8List publicKey;
+    if (pubkeyData is Uint8List) {
+      publicKey = pubkeyData;
+    } else if (pubkeyData is List<int>) {
+      publicKey = Uint8List.fromList(pubkeyData);
+    } else if (pubkeyData is String) {
+      publicKey = Uint8List.fromList(pubkeyData.codeUnits);
+    } else {
+      publicKey = Uint8List(32);
+    }
+
     return Identity(
       nodeId: map['node_id'] as String,
       displayName: map['display_name'] as String?,
-      publicKey: Uint8List.fromList(
-        (map['public_key'] as String).codeUnits,
-      ),
+      publicKey: publicKey,
       createdAt: DateTime.fromMillisecondsSinceEpoch(
         map['created_at'] as int,
       ),
@@ -42,7 +52,7 @@ class Identity extends Equatable {
     return {
       'node_id': nodeId,
       'display_name': displayName,
-      'public_key': String.fromCharCodes(publicKey),
+      'public_key': publicKey,
       'created_at': createdAt.millisecondsSinceEpoch,
     };
   }

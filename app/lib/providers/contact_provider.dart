@@ -5,7 +5,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/contact.dart';
 import '../models/connection_progress.dart';
-import '../ffi/bindings.dart';
 import '../services/database_service.dart';
 import '../utils/node_id_utils.dart';
 import 'conversation_provider.dart';
@@ -292,7 +291,7 @@ final presenceSyncProvider = Provider<PresenceSync>((ref) {
   return sync;
 });
 
-/// Provider for restoring and persisting peer public keys for known contacts.
+/// Provider for persisting peer public keys learned from native key exchange.
 final contactKeySyncProvider = Provider<ContactKeySync>((ref) {
   final sync = ContactKeySync(ref);
   ref.onDispose(() => sync.dispose());
@@ -306,28 +305,6 @@ class ContactKeySync {
   ContactKeySync(this._ref) {
     final connProvider = _ref.read(connectionNotifierProvider);
     _subscription = connProvider.progressStream.listen(_handleProgress);
-  }
-
-  Future<void> restoreKnownPeerKeys({List<Contact>? contacts}) async {
-    final connProvider = _ref.read(connectionNotifierProvider);
-    if (!connProvider.initialized) return;
-
-    final targetContacts =
-        contacts ?? await ContactService.instance.getContacts();
-    var restored = 0;
-    for (final contact in targetContacts) {
-      if (contact.blocked || _isAllZero(contact.publicKey)) continue;
-      final result = connProvider.restorePeerPublicKey(
-        contact.nodeId,
-        contact.publicKey,
-      );
-      if (result == CyxChatError.ok) {
-        restored++;
-      }
-    }
-    if (restored > 0) {
-      debugPrint('ContactKeySync: Restored $restored peer keys');
-    }
   }
 
   Future<void> _handleProgress(PeerConnectionProgress progress) async {
@@ -351,13 +328,6 @@ class ContactKeySync {
       debugPrint(
           'ContactKeySync: Saved peer key for ${progress.peerId.substring(0, 16)}...');
     }
-  }
-
-  bool _isAllZero(List<int> bytes) {
-    for (final byte in bytes) {
-      if (byte != 0) return false;
-    }
-    return true;
   }
 
   void dispose() {
