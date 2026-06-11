@@ -246,11 +246,11 @@ class ConnectionProvider extends ChangeNotifier {
     // Guard against callbacks after provider is disposed
     if (!_initialized) return;
 
-    if (event == CyxChatConnEvent.disconnected &&
+    if (_canIgnoreReadyRouteEvent(event) &&
         hasPeerKey(peerId) &&
-        _nativeRouteIsActive(peerId)) {
+        _promoteActiveNativeRoute(peerId)) {
       LogService.instance.debug(
-        'CONN: Ignoring stale disconnect for ${peerId.substring(0, 16)}...; native route is still active',
+        'CONN: Ignoring stale event $event for ${peerId.substring(0, 16)}...; native route is still active',
         source: 'Connection',
       );
       return;
@@ -287,6 +287,10 @@ class ConnectionProvider extends ChangeNotifier {
     // during widget tree construction. Microtask triggers markNeedsBuild
     // which schedules a new frame (unlike addPostFrameCallback which waits).
     Future.microtask(() => notifyListeners());
+
+    if (progress.isConnected) {
+      _refreshPeerStateFromNative(peerId);
+    }
 
     // Log significant events with detailed path info
     final log = LogService.instance;
@@ -436,7 +440,7 @@ class ConnectionProvider extends ChangeNotifier {
   /// Check if peer is connected (direct or relay)
   bool isConnected(String peerIdHex) {
     final state = _peerStates[_normalizePeerId(peerIdHex)];
-    return state?.isConnected ?? false;
+    return state?.isConnected ?? _nativeRouteIsActive(peerIdHex);
   }
 
   /// Check if connection is via relay
@@ -498,8 +502,29 @@ class ConnectionProvider extends ChangeNotifier {
   }
 
   bool _nativeRouteIsActive(String peerIdHex) {
-    if (!_initialized) return false;
+    return _readNativePeerState(peerIdHex)?.isConnected ?? false;
+  }
 
+  bool _canIgnoreReadyRouteEvent(int event) {
+    switch (event) {
+      case CyxChatConnEvent.lookupStarted:
+      case CyxChatConnEvent.peerFound:
+      case CyxChatConnEvent.announceSent:
+      case CyxChatConnEvent.announceRetry:
+      case CyxChatConnEvent.holePunchStart:
+      case CyxChatConnEvent.relayFallback:
+      case CyxChatConnEvent.disconnected:
+      case CyxChatConnEvent.failed:
+        return true;
+      default:
+        return false;
+    }
+  }
+
+  PeerConnectionState? _readNativePeerState(String peerIdHex) {
+    if (!_initialized) return null;
+
+    final stateKey = _normalizePeerId(peerIdHex);
     final peerId = NodeIdUtils.toBytesAsList(peerIdHex);
     final peerIdPtr = calloc<Uint8>(32);
 
@@ -507,11 +532,65 @@ class ConnectionProvider extends ChangeNotifier {
       for (int i = 0; i < 32 && i < peerId.length; i++) {
         peerIdPtr[i] = peerId[i];
       }
+
       final state = _bindings.connGetState(peerIdPtr);
-      return CyxChatConnState.isActive(state);
+      final isRelayed = _bindings.connIsRelayed(peerIdPtr);
+      final current = _peerStates[stateKey];
+
+      return PeerConnectionState(
+        peerId: stateKey,
+        state: state,
+        isRelayed: isRelayed,
+        connectedAt: CyxChatConnState.isActive(state)
+            ? (current?.connectedAt ?? DateTime.now())
+            : null,
+      );
     } finally {
       calloc.free(peerIdPtr);
     }
+  }
+
+  bool _refreshPeerStateFromNative(String peerIdHex) {
+    final state = _readNativePeerState(peerIdHex);
+    if (state == null) return false;
+
+    final current = _peerStates[state.peerId];
+    final changed = current == null ||
+        current.state != state.state ||
+        current.isRelayed != state.isRelayed ||
+        current.connectedAt != state.connectedAt;
+
+    if (changed) {
+      _peerStates[state.peerId] = state;
+    }
+
+    return state.isConnected;
+  }
+
+  bool _promoteActiveNativeRoute(String peerIdHex) {
+    final state = _readNativePeerState(peerIdHex);
+    if (state == null || !state.isConnected) return false;
+
+    _peerStates[state.peerId] = state;
+
+    final progress = PeerConnectionProgress(
+      peerId: state.peerId,
+      phase: state.isRelayed
+          ? ConnectionPhase.connectedRelay
+          : ConnectionPhase.connectedP2p,
+      retryCount: 0,
+      maxRetries: 0,
+    );
+    _progress[state.peerId] = progress;
+
+    try {
+      _progressStream.add(progress);
+    } on StateError {
+      return true;
+    }
+
+    Future.microtask(() => notifyListeners());
+    return true;
   }
 
   /// Force relay for a peer

@@ -109,7 +109,13 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
             Color statusColor;
             bool showSpinner = false;
 
-            if (progress != null && progress.phase != ConnectionPhase.idle) {
+            if (hasKey && isRelayed) {
+              statusText = 'Secured (via relay)';
+              statusColor = Colors.blue;
+            } else if (hasKey) {
+              statusText = 'Secured (direct P2P)';
+              statusColor = Colors.green;
+            } else if (progress != null && progress.phase != ConnectionPhase.idle) {
               // Route progress alone is not message readiness; encrypted sends
               // require a native peer key.
               if (progress.isConnected && !hasKey) {
@@ -131,12 +137,6 @@ class _ChatScreenState extends ConsumerState<ChatScreen> {
                 statusColor = progress.statusColor;
                 showSpinner = progress.isConnecting;
               }
-            } else if (hasKey && isRelayed) {
-              statusText = 'Secured (via relay)';
-              statusColor = Colors.blue;
-            } else if (hasKey) {
-              statusText = 'Secured (direct P2P)';
-              statusColor = Colors.green;
             } else if (peerId != null && connectionProvider.initialized) {
               final bootstrapConnected =
                   connectionProvider.networkStatus.bootstrapConnected;

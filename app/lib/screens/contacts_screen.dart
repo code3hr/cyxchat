@@ -131,6 +131,9 @@ class _ContactTile extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final connProvider = ref.watch(connectionNotifierProvider);
     final progress = connProvider.getProgress(contact.nodeId);
+    final hasReadyRoute = connProvider.initialized &&
+        connProvider.hasPeerKey(contact.nodeId) &&
+        connProvider.isConnected(contact.nodeId);
 
     return ListTile(
       leading: Stack(
@@ -165,15 +168,19 @@ class _ContactTile extends ConsumerWidget {
             ),
         ],
       ),
-      subtitle: _buildSubtitle(context, progress),
+      subtitle: _buildSubtitle(context, progress, hasReadyRoute),
       onTap: onTap,
       onLongPress: () => _showContactOptions(context, ref),
     );
   }
 
-  Widget _buildSubtitle(BuildContext context, PeerConnectionProgress? progress) {
+  Widget _buildSubtitle(
+    BuildContext context,
+    PeerConnectionProgress? progress,
+    bool hasReadyRoute,
+  ) {
     // Show connection progress if connecting
-    if (progress != null && progress.isConnecting) {
+    if (!hasReadyRoute && progress != null && progress.isConnecting) {
       return Row(
         children: [
           SizedBox(
